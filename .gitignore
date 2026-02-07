@@ -28,6 +28,7 @@ Thumbs.db
 
 # Build
 dist/
+claude-sync
 
 # Local development
 .env
