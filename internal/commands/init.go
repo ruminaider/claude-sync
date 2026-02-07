@@ -10,8 +10,6 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
-
-	yamlv3 "go.yaml.in/yaml/v3"
 )
 
 // Fields from settings.json that should NOT be synced.
@@ -67,7 +65,7 @@ func Init(claudeDir, syncDir string) error {
 
 	cfg := config.Config{
 		Version:  "1.0.0",
-		Plugins:  pluginKeys,
+		Upstream: pluginKeys,
 		Settings: syncedSettings,
 		Hooks:    syncedHooks,
 	}
@@ -76,7 +74,7 @@ func Init(claudeDir, syncDir string) error {
 		return fmt.Errorf("creating sync directory: %w", err)
 	}
 
-	cfgData, err := yamlv3.Marshal(cfg)
+	cfgData, err := config.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}

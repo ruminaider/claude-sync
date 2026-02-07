@@ -55,7 +55,7 @@ func TestPushApply(t *testing.T) {
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
-	assert.Contains(t, cfg.Plugins, "new-plugin@local")
+	assert.Contains(t, cfg.Upstream, "new-plugin@local")
 }
 
 func TestPushScan_NoChanges(t *testing.T) {

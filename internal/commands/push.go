@@ -42,7 +42,7 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		return nil, err
 	}
 
-	diff := csync.ComputePluginDiff(cfg.Plugins, plugins.PluginKeys())
+	diff := csync.ComputePluginDiff(cfg.AllPluginKeys(), plugins.PluginKeys())
 
 	return &PushScanResult{
 		AddedPlugins:   diff.Untracked,
@@ -62,7 +62,7 @@ func PushApply(claudeDir, syncDir string, addPlugins, removePlugins []string, me
 	}
 
 	pluginSet := make(map[string]bool)
-	for _, p := range cfg.Plugins {
+	for _, p := range cfg.Upstream {
 		pluginSet[p] = true
 	}
 	for _, p := range addPlugins {
@@ -72,11 +72,11 @@ func PushApply(claudeDir, syncDir string, addPlugins, removePlugins []string, me
 		delete(pluginSet, p)
 	}
 
-	cfg.Plugins = make([]string, 0, len(pluginSet))
+	cfg.Upstream = make([]string, 0, len(pluginSet))
 	for p := range pluginSet {
-		cfg.Plugins = append(cfg.Plugins, p)
+		cfg.Upstream = append(cfg.Upstream, p)
 	}
-	sort.Strings(cfg.Plugins)
+	sort.Strings(cfg.Upstream)
 
 	newData, err := config.Marshal(cfg)
 	if err != nil {

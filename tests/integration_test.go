@@ -179,12 +179,12 @@ func TestFullWorkflow(t *testing.T) {
 	cfg, err := config.Parse(cfgData)
 	require.NoError(t, err, "should be able to parse config.yaml after push")
 
-	sort.Strings(cfg.Plugins)
-	assert.Contains(t, cfg.Plugins, "new-plugin@local",
+	sort.Strings(cfg.Upstream)
+	assert.Contains(t, cfg.Upstream, "new-plugin@local",
 		"config.yaml should contain new-plugin@local after PushApply")
-	assert.Contains(t, cfg.Plugins, "context7@claude-plugins-official",
+	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official",
 		"config.yaml should still contain context7")
-	assert.Contains(t, cfg.Plugins, "beads@beads-marketplace",
+	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace",
 		"config.yaml should still contain beads")
-	assert.Len(t, cfg.Plugins, 3, "config.yaml should have exactly 3 plugins")
+	assert.Len(t, cfg.Upstream, 3, "config.yaml should have exactly 3 plugins")
 }

@@ -43,7 +43,7 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 	}
 
 	effectiveDesired := csync.ApplyPluginPreferences(
-		cfg.Plugins,
+		cfg.AllPluginKeys(),
 		prefs.Plugins.Unsubscribe,
 		prefs.Plugins.Personal,
 	)
