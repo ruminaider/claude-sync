@@ -188,3 +188,105 @@ func TestFullWorkflow(t *testing.T) {
 		"config.yaml should still contain beads")
 	assert.Len(t, cfg.Upstream, 3, "config.yaml should have exactly 3 plugins")
 }
+
+func TestV2Workflow(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	// ---------------------------------------------------------------
+	// Step 1: Set up mock Claude Code dir with 3 plugins.
+	// ---------------------------------------------------------------
+	setupMockClaude(t, claudeDir, []string{
+		"context7@claude-plugins-official",
+		"beads@beads-marketplace",
+		"my-plugin@my-marketplace",
+	})
+
+	// ---------------------------------------------------------------
+	// Step 2: Init — should create v2 config with all plugins in Upstream.
+	// ---------------------------------------------------------------
+	err := commands.Init(claudeDir, syncDir)
+	require.NoError(t, err, "Init should succeed")
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err, "should be able to read config.yaml after init")
+
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err, "should be able to parse config.yaml after init")
+
+	// ---------------------------------------------------------------
+	// Step 3: Verify v2 format — version 2.0.0, all 3 plugins in Upstream.
+	// ---------------------------------------------------------------
+	assert.Equal(t, "2.0.0", cfg.Version, "config version should be 2.0.0")
+	assert.Len(t, cfg.Upstream, 3, "all 3 plugins should be in upstream")
+	assert.Empty(t, cfg.Pinned, "no plugins should be pinned initially")
+	assert.Empty(t, cfg.Forked, "no plugins should be forked initially")
+
+	// ---------------------------------------------------------------
+	// Step 4: Pin "beads@beads-marketplace" at version "0.44.0".
+	// ---------------------------------------------------------------
+	err = commands.Pin(syncDir, "beads@beads-marketplace", "0.44.0")
+	require.NoError(t, err, "Pin should succeed")
+
+	cfgData, err = os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err, "should be able to read config.yaml after pin")
+
+	cfg, err = config.Parse(cfgData)
+	require.NoError(t, err, "should be able to parse config.yaml after pin")
+
+	// ---------------------------------------------------------------
+	// Step 5: Verify pin — upstream has 2, pinned has beads at 0.44.0.
+	// ---------------------------------------------------------------
+	assert.Len(t, cfg.Upstream, 2, "upstream should have 2 plugins after pin")
+	assert.Equal(t, "0.44.0", cfg.Pinned["beads@beads-marketplace"],
+		"beads should be pinned at version 0.44.0")
+
+	// ---------------------------------------------------------------
+	// Step 6: Status — check categorized fields.
+	// ---------------------------------------------------------------
+	status, err := commands.Status(claudeDir, syncDir)
+	require.NoError(t, err, "Status should succeed")
+
+	assert.Equal(t, "2.0.0", status.ConfigVersion, "status config version should be 2.0.0")
+	assert.NotEmpty(t, status.UpstreamSynced, "should have upstream synced plugins")
+	assert.NotEmpty(t, status.PinnedSynced, "should have pinned synced plugins")
+	assert.Len(t, status.UpstreamSynced, 2, "should have 2 upstream synced plugins")
+	assert.Len(t, status.PinnedSynced, 1, "should have 1 pinned synced plugin")
+	assert.Equal(t, "beads@beads-marketplace", status.PinnedSynced[0].Key,
+		"pinned synced plugin should be beads")
+
+	// ---------------------------------------------------------------
+	// Step 7: JSON output — verify it contains expected keys.
+	// ---------------------------------------------------------------
+	jsonData, err := status.JSON()
+	require.NoError(t, err, "JSON() should succeed")
+
+	var jsonMap map[string]interface{}
+	require.NoError(t, json.Unmarshal(jsonData, &jsonMap), "JSON output should be valid JSON")
+	assert.Contains(t, string(jsonData), "upstream_synced",
+		"JSON output should contain upstream_synced key")
+	assert.Contains(t, string(jsonData), "pinned_synced",
+		"JSON output should contain pinned_synced key")
+	assert.Equal(t, "2.0.0", jsonMap["config_version"],
+		"JSON config_version should be 2.0.0")
+
+	// ---------------------------------------------------------------
+	// Step 8: Unpin "beads@beads-marketplace".
+	// ---------------------------------------------------------------
+	err = commands.Unpin(syncDir, "beads@beads-marketplace")
+	require.NoError(t, err, "Unpin should succeed")
+
+	cfgData, err = os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err, "should be able to read config.yaml after unpin")
+
+	cfg, err = config.Parse(cfgData)
+	require.NoError(t, err, "should be able to parse config.yaml after unpin")
+
+	// ---------------------------------------------------------------
+	// Step 9: Verify unpin — all 3 back in upstream, pinned is empty.
+	// ---------------------------------------------------------------
+	assert.Len(t, cfg.Upstream, 3, "upstream should have 3 plugins after unpin")
+	assert.Empty(t, cfg.Pinned, "pinned should be empty after unpin")
+	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace",
+		"beads should be back in upstream after unpin")
+}
