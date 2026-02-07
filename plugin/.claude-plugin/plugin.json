@@ -1,0 +1,9 @@
+{
+  "name": "claude-sync",
+  "version": "0.1.0",
+  "description": "Sync Claude Code configuration across machines",
+  "author": {
+    "name": "Albert Gwo"
+  },
+  "repository": "https://github.com/ruminaider/claude-sync"
+}
