@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 
+	"github.com/charmbracelet/huh"
+	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -13,7 +16,56 @@ var pushCmd = &cobra.Command{
 	Use:   "push",
 	Short: "Push changes to remote",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("claude-sync push: not yet implemented")
+		claudeDir := paths.ClaudeDir()
+		syncDir := paths.SyncDir()
+
+		fmt.Println("Scanning local state...")
+		scan, err := commands.PushScan(claudeDir, syncDir)
+		if err != nil {
+			return err
+		}
+
+		if !scan.HasChanges() {
+			fmt.Println("Nothing to push. Everything matches config.")
+			return nil
+		}
+
+		var selectedAdd []string
+		var selectedRemove []string
+
+		if pushAll {
+			selectedAdd = scan.AddedPlugins
+			selectedRemove = scan.RemovedPlugins
+		} else {
+			if len(scan.AddedPlugins) > 0 {
+				var options []huh.Option[string]
+				for _, p := range scan.AddedPlugins {
+					options = append(options, huh.NewOption(p, p).Selected(true))
+				}
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewMultiSelect[string]().
+							Title("Plugins to add to config:").
+							Options(options...).
+							Value(&selectedAdd),
+					),
+				).Run()
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if len(selectedAdd) == 0 && len(selectedRemove) == 0 {
+			fmt.Println("No changes selected.")
+			return nil
+		}
+
+		if err := commands.PushApply(claudeDir, syncDir, selectedAdd, selectedRemove, pushMessage); err != nil {
+			return err
+		}
+
+		fmt.Println("Changes pushed successfully.")
 		return nil
 	},
 }

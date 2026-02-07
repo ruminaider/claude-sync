@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +15,42 @@ var pullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Pull latest config and apply locally",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("claude-sync pull: not yet implemented")
+		if !quietFlag {
+			fmt.Println("Pulling latest config...")
+		}
+
+		result, err := commands.Pull(paths.ClaudeDir(), paths.SyncDir(), quietFlag)
+		if err != nil {
+			return err
+		}
+
+		if quietFlag {
+			return nil
+		}
+
+		if len(result.Installed) > 0 {
+			fmt.Printf("\n✓ %d plugin(s) installed\n", len(result.Installed))
+		}
+
+		if len(result.Failed) > 0 {
+			fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) failed:\n", len(result.Failed))
+			for _, p := range result.Failed {
+				fmt.Fprintf(os.Stderr, "  • %s\n", p)
+			}
+		}
+
+		if len(result.Untracked) > 0 {
+			fmt.Printf("\nNote: %d plugin(s) installed locally but not in config:\n", len(result.Untracked))
+			for _, p := range result.Untracked {
+				fmt.Printf("  • %s\n", p)
+			}
+			fmt.Println("Run 'claude-sync push' to add them, or keep as local-only.")
+		}
+
+		if len(result.ToInstall) == 0 && len(result.Failed) == 0 {
+			fmt.Println("Everything up to date.")
+		}
+
 		return nil
 	},
 }
