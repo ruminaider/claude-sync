@@ -35,6 +35,12 @@ func init() {
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(pushCmd)
 	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(pinCmd)
+	rootCmd.AddCommand(unpinCmd)
+	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(forkCmd)
+	rootCmd.AddCommand(unforkCmd)
 }
 
 func main() {

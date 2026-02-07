@@ -61,19 +61,21 @@ func PushApply(claudeDir, syncDir string, addPlugins, removePlugins []string, me
 		return err
 	}
 
-	pluginSet := make(map[string]bool)
+	// Add new plugins to upstream category
+	upstreamSet := make(map[string]bool)
 	for _, p := range cfg.Upstream {
-		pluginSet[p] = true
+		upstreamSet[p] = true
 	}
 	for _, p := range addPlugins {
-		pluginSet[p] = true
+		upstreamSet[p] = true
 	}
 	for _, p := range removePlugins {
-		delete(pluginSet, p)
+		delete(upstreamSet, p)
+		delete(cfg.Pinned, p)
 	}
 
-	cfg.Upstream = make([]string, 0, len(pluginSet))
-	for p := range pluginSet {
+	cfg.Upstream = make([]string, 0, len(upstreamSet))
+	for p := range upstreamSet {
 		cfg.Upstream = append(cfg.Upstream, p)
 	}
 	sort.Strings(cfg.Upstream)
