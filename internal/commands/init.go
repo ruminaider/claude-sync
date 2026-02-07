@@ -64,8 +64,9 @@ func Init(claudeDir, syncDir string) error {
 	}
 
 	cfg := config.Config{
-		Version:  "1.0.0",
+		Version:  "2.0.0",
 		Upstream: pluginKeys,
+		Pinned:   map[string]string{},
 		Settings: syncedSettings,
 		Hooks:    syncedHooks,
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/plugins"
 	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
 
@@ -36,6 +37,22 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		return nil, err
 	}
 
+	// Register local marketplace if forked plugins exist.
+	forks, _ := plugins.ListForkedPlugins(syncDir)
+	if len(forks) > 0 {
+		plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	}
+
+	// Build complete desired list from all categories.
+	var allDesired []string
+	allDesired = append(allDesired, cfg.Upstream...)
+	for k := range cfg.Pinned {
+		allDesired = append(allDesired, k)
+	}
+	for _, name := range cfg.Forked {
+		allDesired = append(allDesired, plugins.ForkedPluginKey(name))
+	}
+
 	prefs := config.DefaultUserPreferences()
 	prefsPath := filepath.Join(syncDir, "user-preferences.yaml")
 	if prefsData, err := os.ReadFile(prefsPath); err == nil {
@@ -43,17 +60,17 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 	}
 
 	effectiveDesired := csync.ApplyPluginPreferences(
-		cfg.AllPluginKeys(),
+		allDesired,
 		prefs.Plugins.Unsubscribe,
 		prefs.Plugins.Personal,
 	)
 
-	plugins, err := claudecode.ReadInstalledPlugins(claudeDir)
+	installedPlugins, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading installed plugins: %w", err)
 	}
 
-	diff := csync.ComputePluginDiff(effectiveDesired, plugins.PluginKeys())
+	diff := csync.ComputePluginDiff(effectiveDesired, installedPlugins.PluginKeys())
 
 	result := &PullResult{
 		ToInstall:        diff.ToInstall,
