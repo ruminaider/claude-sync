@@ -36,7 +36,7 @@ func Status(claudeDir, syncDir string) (*StatusResult, error) {
 		return nil, fmt.Errorf("reading installed plugins: %w", err)
 	}
 
-	diff := csync.ComputePluginDiff(cfg.Plugins, plugins.PluginKeys())
+	diff := csync.ComputePluginDiff(cfg.AllPluginKeys(), plugins.PluginKeys())
 
 	return &StatusResult{
 		Synced:       diff.Synced,

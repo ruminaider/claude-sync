@@ -37,7 +37,7 @@ func TestStatus_NotInstalled(t *testing.T) {
 	cfgPath := filepath.Join(syncDir, "config.yaml")
 	cfgData, _ := os.ReadFile(cfgPath)
 	cfg, _ := config.Parse(cfgData)
-	cfg.Plugins = append(cfg.Plugins, "new-plugin@some-marketplace")
+	cfg.Upstream = append(cfg.Upstream, "new-plugin@some-marketplace")
 	newCfgData, _ := config.Marshal(cfg)
 	os.WriteFile(cfgPath, newCfgData, 0644)
 

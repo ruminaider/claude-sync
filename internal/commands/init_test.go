@@ -53,8 +53,8 @@ func TestInit(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "1.0.0", cfg.Version)
-	assert.Contains(t, cfg.Plugins, "context7@claude-plugins-official")
-	assert.Contains(t, cfg.Plugins, "beads@beads-marketplace")
+	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace")
 }
 
 func TestInit_AlreadyExists(t *testing.T) {
