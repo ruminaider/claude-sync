@@ -3,53 +3,41 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0-dev"
+var version = "0.1.0-dev"
 
-func main() {
-	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(0)
-	}
-
-	command := os.Args[1]
-
-	switch command {
-	case "version", "--version", "-v":
-		fmt.Printf("claude-sync %s\n", version)
-	case "help", "--help", "-h":
-		printUsage()
-	case "status":
-		fmt.Println("claude-sync status: not yet implemented")
-	case "init":
-		fmt.Println("claude-sync init: not yet implemented")
-	case "pull":
-		fmt.Println("claude-sync pull: not yet implemented")
-	case "push":
-		fmt.Println("claude-sync push: not yet implemented")
-	default:
-		fmt.Printf("Unknown command: %s\n", command)
-		printUsage()
-		os.Exit(1)
-	}
+var rootCmd = &cobra.Command{
+	Use:   "claude-sync",
+	Short: "Sync Claude Code configuration across machines",
+	Long:  "claude-sync synchronizes Claude Code plugins, settings, and hooks across multiple machines using a git-backed config repo.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Default behavior: show status
+		return statusCmd.RunE(cmd, args)
+	},
 }
 
-func printUsage() {
-	fmt.Println(`claude-sync - Sync Claude Code configuration across machines
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Show version",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("claude-sync %s\n", version)
+	},
+}
 
-USAGE:
-    claude-sync [command]
+func init() {
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(joinCmd)
+	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(pullCmd)
+	rootCmd.AddCommand(pushCmd)
+}
 
-COMMANDS:
-    init                Create new config from current setup
-    join <url>          Join existing config repo
-    status              Show sync status
-    pull                Pull latest config
-    push                Push changes to remote
-    update              Apply available plugin updates
-    help                Show this help
-    version             Show version
-
-Run 'claude-sync help <command>' for more information on a command.`)
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
