@@ -12,6 +12,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
+	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
 )
 
 // InitResult describes how plugins were categorized during init.
@@ -157,6 +158,13 @@ func Init(claudeDir, syncDir, remoteURL string) (*InitResult, error) {
 	}
 	if err := git.Commit(syncDir, "Initial claude-sync config"); err != nil {
 		return nil, fmt.Errorf("creating initial commit: %w", err)
+	}
+
+	// Register the local marketplace so forked plugins can be installed.
+	if len(forkedNames) > 0 {
+		if err := forkedplugins.RegisterLocalMarketplace(claudeDir, syncDir); err != nil {
+			return nil, fmt.Errorf("registering local marketplace: %w", err)
+		}
 	}
 
 	if remoteURL != "" {

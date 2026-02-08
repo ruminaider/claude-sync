@@ -39,16 +39,18 @@ var pullCmd = &cobra.Command{
 			}
 		}
 
-		if len(result.Untracked) > 0 {
+		if len(result.Failed) > 0 {
+			fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
+		} else if len(result.ToInstall) == 0 {
+			fmt.Println("Everything up to date.")
+		}
+
+		if len(result.Untracked) > 0 && len(result.Failed) == 0 {
 			fmt.Printf("\nNote: %d plugin(s) installed locally but not in config:\n", len(result.Untracked))
 			for _, p := range result.Untracked {
 				fmt.Printf("  • %s\n", p)
 			}
 			fmt.Println("Run 'claude-sync push' to add them, or keep as local-only.")
-		}
-
-		if len(result.ToInstall) == 0 && len(result.Failed) == 0 {
-			fmt.Println("Everything up to date.")
 		}
 
 		return nil
