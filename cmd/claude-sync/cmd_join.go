@@ -33,27 +33,20 @@ var joinCmd = &cobra.Command{
 				fmt.Printf("  • %s\n", p)
 			}
 
-			shouldClean := joinClean
-			if !joinClean {
-				fmt.Println()
-				err := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title("Remove these local-only plugins?").
-							Description("They are not part of the synced config and may cause conflicts.").
-							Affirmative("Yes, remove them").
-							Negative("No, keep them").
-							Value(&shouldClean),
-					),
-				).Run()
+			var toRemove []string
+
+			if joinClean {
+				toRemove = result.LocalOnly
+			} else {
+				toRemove, err = promptLocalPluginCleanup(result.LocalOnly)
 				if err != nil {
-					// User cancelled — keep them.
-					shouldClean = false
+					// User cancelled — keep them all.
+					toRemove = nil
 				}
 			}
 
-			if shouldClean {
-				removed, failed := commands.JoinCleanup(result.LocalOnly)
+			if len(toRemove) > 0 {
+				removed, failed := commands.JoinCleanup(toRemove)
 				for _, p := range removed {
 					fmt.Printf("  ✓ Removed %s\n", p)
 				}
@@ -67,6 +60,54 @@ var joinCmd = &cobra.Command{
 		fmt.Println("Run 'claude-sync pull' to apply the config.")
 		return nil
 	},
+}
+
+// promptLocalPluginCleanup asks the user what to do with local-only plugins.
+func promptLocalPluginCleanup(plugins []string) ([]string, error) {
+	var choice string
+	fmt.Println()
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("What would you like to do with these plugins?").
+				Options(
+					huh.NewOption("Remove all", "all"),
+					huh.NewOption("Choose which to remove", "some"),
+					huh.NewOption("Keep all", "keep"),
+				).
+				Value(&choice),
+		),
+	).Run()
+	if err != nil {
+		return nil, err
+	}
+
+	switch choice {
+	case "all":
+		return plugins, nil
+	case "keep":
+		return nil, nil
+	case "some":
+		var selected []string
+		var options []huh.Option[string]
+		for _, p := range plugins {
+			options = append(options, huh.NewOption(p, p))
+		}
+		err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewMultiSelect[string]().
+					Title("Select plugins to remove:").
+					Options(options...).
+					Value(&selected),
+			),
+		).Run()
+		if err != nil {
+			return nil, err
+		}
+		return selected, nil
+	}
+
+	return nil, nil
 }
 
 func init() {
