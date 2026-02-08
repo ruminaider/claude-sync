@@ -5,12 +5,14 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/spf13/cobra"
 )
 
 var pushMessage string
 var pushAll bool
+var pushRemote string
 
 var pushCmd = &cobra.Command{
 	Use:   "push",
@@ -18,6 +20,11 @@ var pushCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		claudeDir := paths.ClaudeDir()
 		syncDir := paths.SyncDir()
+
+		// Ensure a remote is configured before doing any work.
+		if err := ensureRemote(syncDir); err != nil {
+			return err
+		}
 
 		fmt.Println("Scanning local state...")
 		scan, err := commands.PushScan(claudeDir, syncDir)
@@ -70,7 +77,39 @@ var pushCmd = &cobra.Command{
 	},
 }
 
+// ensureRemote checks if origin is configured; if not, prompts or uses --remote flag.
+func ensureRemote(syncDir string) error {
+	if git.HasRemote(syncDir, "origin") {
+		return nil
+	}
+
+	remoteURL := pushRemote
+	if remoteURL == "" {
+		err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("No remote configured. Enter git remote URL:").
+					Value(&remoteURL),
+			),
+		).Run()
+		if err != nil {
+			return err
+		}
+	}
+
+	if remoteURL == "" {
+		return fmt.Errorf("remote URL is required for push")
+	}
+
+	if err := git.RemoteAdd(syncDir, "origin", remoteURL); err != nil {
+		return fmt.Errorf("adding remote: %w", err)
+	}
+	fmt.Println("✓ Remote added:", remoteURL)
+	return nil
+}
+
 func init() {
 	pushCmd.Flags().StringVarP(&pushMessage, "message", "m", "", "Commit message")
 	pushCmd.Flags().BoolVar(&pushAll, "all", false, "Push all changes without interactive selection")
+	pushCmd.Flags().StringVarP(&pushRemote, "remote", "r", "", "Git remote URL (used if no remote is configured)")
 }

@@ -24,6 +24,14 @@ var knownMarketplaces = map[string]string{
 	"claude-sync-marketplace":  "ruminaider",
 }
 
+// IsPortableMarketplace returns true if the marketplace ID is a well-known,
+// publicly available marketplace that can be installed on any machine.
+// Non-portable marketplaces (local/custom) should be auto-forked during init.
+func IsPortableMarketplace(id string) bool {
+	_, ok := knownMarketplaces[id]
+	return ok
+}
+
 // ParseMarketplaceSource extracts the org and repo from a marketplace identifier.
 //
 // Well-known marketplace IDs are mapped to their canonical org:

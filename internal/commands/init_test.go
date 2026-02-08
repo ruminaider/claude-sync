@@ -43,8 +43,9 @@ func setupTestEnv(t *testing.T) (claudeDir, syncDir string) {
 func TestInit(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	err := commands.Init(claudeDir, syncDir)
+	result, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
+	require.NotNil(t, result)
 
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	require.NoError(t, err)
@@ -61,21 +62,21 @@ func TestInit_AlreadyExists(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 	os.MkdirAll(syncDir, 0755)
 
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
 }
 
 func TestInit_NoClaudeDir(t *testing.T) {
 	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
-	err := commands.Init("/nonexistent", syncDir)
+	_, err := commands.Init("/nonexistent", syncDir, "")
 	assert.Error(t, err)
 }
 
 func TestInit_ExtractsHooks(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -86,7 +87,7 @@ func TestInit_ExtractsHooks(t *testing.T) {
 func TestInit_FiltersSettings(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -99,7 +100,7 @@ func TestInit_FiltersSettings(t *testing.T) {
 func TestInit_CreatesGitRepo(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
 
 	_, err = os.Stat(filepath.Join(syncDir, ".git"))
@@ -109,7 +110,7 @@ func TestInit_CreatesGitRepo(t *testing.T) {
 func TestInit_GitignoresUserPreferences(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
 
 	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
@@ -119,7 +120,7 @@ func TestInit_GitignoresUserPreferences(t *testing.T) {
 
 func TestInit_CreatesV2Config(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
 
 	data, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -128,5 +129,116 @@ func TestInit_CreatesV2Config(t *testing.T) {
 	assert.Equal(t, "2.0.0", cfg.Version)
 	assert.NotEmpty(t, cfg.Upstream)
 	assert.Empty(t, cfg.Pinned)
+	assert.Empty(t, cfg.Forked)
+}
+
+func TestInit_AutoForksNonPortablePlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	// Create a real install path with a plugin.json for the non-portable plugin.
+	customInstallDir := filepath.Join(t.TempDir(), "custom-plugin-files")
+	os.MkdirAll(customInstallDir, 0755)
+	os.WriteFile(filepath.Join(customInstallDir, "plugin.json"), []byte(`{"name":"my-tool","version":"1.0"}`), 0644)
+	os.WriteFile(filepath.Join(customInstallDir, "index.js"), []byte(`console.log("hello")`), 0644)
+
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"my-tool@local-custom-plugins": [{"scope":"user","installPath":"` + customInstallDir + `","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	result, err := commands.Init(claudeDir, syncDir, "")
+	require.NoError(t, err)
+
+	// context7 should be upstream; my-tool should be auto-forked.
+	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, result.AutoForked, "my-tool@local-custom-plugins")
+	assert.Empty(t, result.Skipped)
+
+	// Config should reflect the categorization.
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
+	assert.NotContains(t, cfg.Upstream, "my-tool@local-custom-plugins")
+	assert.Contains(t, cfg.Forked, "my-tool")
+
+	// Plugin files should have been copied.
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "my-tool", "plugin.json"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "my-tool", "index.js"))
+	assert.NoError(t, err)
+}
+
+func TestInit_SkipsLocalScopePlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"project-tool@some-marketplace": [{"scope":"local","installPath":"/p","projectPath":"/my/project","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	result, err := commands.Init(claudeDir, syncDir, "")
+	require.NoError(t, err)
+
+	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, result.Skipped, "project-tool@some-marketplace")
+	assert.Empty(t, result.AutoForked)
+
+	// Config should only have the upstream plugin.
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
+	assert.NotContains(t, cfg.Upstream, "project-tool@some-marketplace")
+}
+
+func TestInit_AllPortableStaysUpstream(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"beads@beads-marketplace": [{"scope":"user","installPath":"/p","version":"0.44","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"superpowers@superpowers-marketplace": [{"scope":"user","installPath":"/p","version":"2.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	result, err := commands.Init(claudeDir, syncDir, "")
+	require.NoError(t, err)
+
+	assert.Len(t, result.Upstream, 3)
+	assert.Empty(t, result.AutoForked)
+	assert.Empty(t, result.Skipped)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Len(t, cfg.Upstream, 3)
 	assert.Empty(t, cfg.Forked)
 }

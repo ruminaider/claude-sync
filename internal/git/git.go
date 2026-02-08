@@ -81,6 +81,12 @@ func Push(dir string) error {
 	return err
 }
 
+// PushWithUpstream pushes and sets the upstream tracking branch.
+func PushWithUpstream(dir, remote, branch string) error {
+	_, err := Run(dir, "push", "-u", remote, branch)
+	return err
+}
+
 // Fetch runs git fetch --quiet.
 func Fetch(dir string) error {
 	_, err := Run(dir, "fetch", "--quiet")
@@ -91,6 +97,11 @@ func Fetch(dir string) error {
 func RemoteAdd(dir, name, url string) error {
 	_, err := Run(dir, "remote", "add", name, url)
 	return err
+}
+
+// CurrentBranch returns the name of the current branch.
+func CurrentBranch(dir string) (string, error) {
+	return Run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
 // HasRemote returns true if the named remote exists.
