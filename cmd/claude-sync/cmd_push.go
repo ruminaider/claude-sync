@@ -53,6 +53,7 @@ var pushCmd = &cobra.Command{
 					huh.NewGroup(
 						huh.NewMultiSelect[string]().
 							Title("Plugins to add to config:").
+							Description("Space to toggle, Enter to confirm").
 							Options(options...).
 							Value(&selectedAdd),
 					),
