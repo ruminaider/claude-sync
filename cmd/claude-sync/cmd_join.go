@@ -30,17 +30,16 @@ var joinCmd = &cobra.Command{
 		if len(result.LocalOnly) > 0 && !joinKeepLocal {
 			fmt.Printf("\nFound %d locally installed plugin(s) not in the remote config:\n", len(result.LocalOnly))
 			for _, p := range result.LocalOnly {
-				fmt.Printf("  • %s\n", p)
+				fmt.Printf("  • %s (%s)\n", p.Key, p.Scope)
 			}
 
-			var toRemove []string
+			var toRemove []commands.LocalPlugin
 
 			if joinClean {
 				toRemove = result.LocalOnly
 			} else {
 				toRemove, err = promptLocalPluginCleanup(result.LocalOnly)
 				if err != nil {
-					// User cancelled — keep them all.
 					toRemove = nil
 				}
 			}
@@ -64,7 +63,7 @@ var joinCmd = &cobra.Command{
 }
 
 // promptLocalPluginCleanup asks the user what to do with local-only plugins.
-func promptLocalPluginCleanup(plugins []string) ([]string, error) {
+func promptLocalPluginCleanup(plugins []commands.LocalPlugin) ([]commands.LocalPlugin, error) {
 	var choice string
 	fmt.Println()
 	err := huh.NewForm(
@@ -89,11 +88,24 @@ func promptLocalPluginCleanup(plugins []string) ([]string, error) {
 	case "keep":
 		return nil, nil
 	case "some":
-		selected, err := runPicker("Select plugins to remove:", plugins)
+		// Build key list for the picker, then map selections back.
+		keys := make([]string, len(plugins))
+		byKey := make(map[string]commands.LocalPlugin)
+		for i, p := range plugins {
+			keys[i] = p.Key
+			byKey[p.Key] = p
+		}
+
+		selected, err := runPicker("Select plugins to remove:", keys)
 		if err != nil {
 			return nil, err
 		}
-		return selected, nil
+
+		var result []commands.LocalPlugin
+		for _, k := range selected {
+			result = append(result, byKey[k])
+		}
+		return result, nil
 	}
 
 	return nil, nil

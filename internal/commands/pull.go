@@ -149,8 +149,8 @@ func installPlugin(pluginKey string) error {
 	return nil
 }
 
-func uninstallPlugin(pluginKey string) error {
-	cmd := exec.Command("claude", "plugin", "uninstall", pluginKey)
+func uninstallPlugin(pluginKey, scope string) error {
+	cmd := exec.Command("claude", "plugin", "uninstall", "--scope", scope, pluginKey)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, string(out))
