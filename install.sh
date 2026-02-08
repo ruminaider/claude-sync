@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+# Install claude-sync — https://github.com/ruminaider/claude-sync
+# Usage: curl -fsSL https://raw.githubusercontent.com/ruminaider/claude-sync/main/install.sh | sh
+
 REPO="ruminaider/claude-sync"
 BINARY="claude-sync"
 INSTALL_DIR="${CLAUDE_SYNC_INSTALL_DIR:-$HOME/.local/bin}"
