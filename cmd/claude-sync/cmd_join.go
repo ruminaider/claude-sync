@@ -97,6 +97,7 @@ func promptLocalPluginCleanup(plugins []string) ([]string, error) {
 			huh.NewGroup(
 				huh.NewMultiSelect[string]().
 					Title("Select plugins to remove:").
+					Description("Space to toggle, Enter to confirm").
 					Options(options...).
 					Value(&selected),
 			),
