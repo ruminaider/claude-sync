@@ -15,7 +15,7 @@ import (
 func setupStatusEnv(t *testing.T) (claudeDir, syncDir string) {
 	t.Helper()
 	claudeDir, syncDir = setupTestEnv(t)
-	err := commands.Init(claudeDir, syncDir)
+	_, err := commands.Init(claudeDir, syncDir, "")
 	require.NoError(t, err)
 	return claudeDir, syncDir
 }

@@ -60,6 +60,32 @@ func addPlugin(t *testing.T, repoPath, pluginName, version string) {
 	run("commit", "-m", "add "+pluginName+" v"+version)
 }
 
+// ─── IsPortableMarketplace ─────────────────────────────────────────────────
+
+func TestIsPortableMarketplace(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"claude-plugins-official", true},
+		{"superpowers-marketplace", true},
+		{"beads-marketplace", true},
+		{"claude-sync-marketplace", true},
+		{"local-custom-plugins", false},
+		{"figma-minimal-marketplace", false},
+		{"context-anchor", false},
+		{"myorg/my-marketplace", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got := marketplace.IsPortableMarketplace(tt.id)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // ─── ParseMarketplaceSource ────────────────────────────────────────────────
 
 func TestParseMarketplaceSource(t *testing.T) {
