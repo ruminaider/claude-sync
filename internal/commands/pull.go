@@ -40,7 +40,9 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 	// Register local marketplace if forked plugins exist.
 	forks, _ := plugins.ListForkedPlugins(syncDir)
 	if len(forks) > 0 {
-		plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+		if err := plugins.RegisterLocalMarketplace(claudeDir, syncDir); err != nil {
+			return nil, fmt.Errorf("registering local marketplace: %w", err)
+		}
 	}
 
 	// Build complete desired list from all categories.
