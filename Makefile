@@ -14,7 +14,25 @@ test-integration:
 	go test ./tests/ -tags=integration -v
 
 install: build
-	cp $(BINARY) $(GOPATH)/bin/$(BINARY) 2>/dev/null || cp $(BINARY) /usr/local/bin/$(BINARY)
+	@INSTALL_DIR=""; \
+	if [ -n "$(GOPATH)" ] && echo "$$PATH" | tr ':' '\n' | grep -q "$(GOPATH)/bin"; then \
+		INSTALL_DIR="$(GOPATH)/bin"; \
+	elif echo "$$PATH" | tr ':' '\n' | grep -q "$$HOME/.local/bin"; then \
+		INSTALL_DIR="$$HOME/.local/bin"; \
+	elif [ -w /usr/local/bin ]; then \
+		INSTALL_DIR="/usr/local/bin"; \
+	else \
+		INSTALL_DIR="$$HOME/.local/bin"; \
+	fi; \
+	mkdir -p "$$INSTALL_DIR"; \
+	cp $(BINARY) "$$INSTALL_DIR/$(BINARY)"; \
+	echo "Installed $(BINARY) to $$INSTALL_DIR/$(BINARY)"; \
+	if ! command -v $(BINARY) >/dev/null 2>&1; then \
+		echo ""; \
+		echo "NOTE: $$INSTALL_DIR is not in your PATH."; \
+		echo "Add this to your shell config:"; \
+		echo "  export PATH=\"$$INSTALL_DIR:\$$PATH\""; \
+	fi
 
 cross-compile:
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-darwin-arm64 ./cmd/claude-sync
