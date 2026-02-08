@@ -27,11 +27,14 @@ func setupMigrateSyncDir(t *testing.T, cfgContent string) string {
 	gitInit.Dir = syncDir
 	require.NoError(t, gitInit.Run())
 
+	exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run()
+
 	gitAdd := exec.Command("git", "add", ".")
 	gitAdd.Dir = syncDir
 	require.NoError(t, gitAdd.Run())
 
-	gitCommit := exec.Command("git", "-c", "user.name=test", "-c", "user.email=test@test.com", "commit", "-m", "initial")
+	gitCommit := exec.Command("git", "commit", "-m", "initial")
 	gitCommit.Dir = syncDir
 	require.NoError(t, gitCommit.Run())
 
