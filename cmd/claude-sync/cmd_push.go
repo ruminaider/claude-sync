@@ -45,22 +45,11 @@ var pushCmd = &cobra.Command{
 			selectedRemove = scan.RemovedPlugins
 		} else {
 			if len(scan.AddedPlugins) > 0 {
-				var options []huh.Option[string]
-				for _, p := range scan.AddedPlugins {
-					options = append(options, huh.NewOption(p, p).Selected(true))
-				}
-				err := huh.NewForm(
-					huh.NewGroup(
-						huh.NewMultiSelect[string]().
-							Title("Plugins to add to config:").
-							Description("Space to toggle, Enter to confirm").
-							Options(options...).
-							Value(&selectedAdd),
-					),
-				).Run()
+				selected, err := runPicker("Plugins to add to config:", scan.AddedPlugins)
 				if err != nil {
 					return err
 				}
+				selectedAdd = selected
 			}
 		}
 

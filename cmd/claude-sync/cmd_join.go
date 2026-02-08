@@ -88,20 +88,7 @@ func promptLocalPluginCleanup(plugins []string) ([]string, error) {
 	case "keep":
 		return nil, nil
 	case "some":
-		var selected []string
-		var options []huh.Option[string]
-		for _, p := range plugins {
-			options = append(options, huh.NewOption(p, p))
-		}
-		err := huh.NewForm(
-			huh.NewGroup(
-				huh.NewMultiSelect[string]().
-					Title("Select plugins to remove:").
-					Description("Space to toggle, Enter to confirm").
-					Options(options...).
-					Value(&selected),
-			),
-		).Run()
+		selected, err := runPicker("Select plugins to remove:", plugins)
 		if err != nil {
 			return nil, err
 		}
