@@ -46,12 +46,13 @@ var joinCmd = &cobra.Command{
 			}
 
 			if len(toRemove) > 0 {
-				removed, failed := commands.JoinCleanup(toRemove)
-				for _, p := range removed {
-					fmt.Printf("  ✓ Removed %s\n", p)
-				}
-				for _, p := range failed {
-					fmt.Printf("  ✗ Failed to remove %s\n", p)
+				results := commands.JoinCleanup(toRemove)
+				for _, r := range results {
+					if r.Err == nil {
+						fmt.Printf("  ✓ Removed %s\n", r.Plugin)
+					} else {
+						fmt.Printf("  ✗ Failed to remove %s: %v\n", r.Plugin, r.Err)
+					}
 				}
 			}
 		}

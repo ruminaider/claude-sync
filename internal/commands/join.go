@@ -63,14 +63,18 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	return result, nil
 }
 
-// JoinCleanup uninstalls the specified plugins and returns which succeeded and failed.
-func JoinCleanup(plugins []string) (removed, failed []string) {
+// CleanupResult holds the outcome of a plugin removal attempt.
+type CleanupResult struct {
+	Plugin string
+	Err    error
+}
+
+// JoinCleanup uninstalls the specified plugins and returns results for each.
+func JoinCleanup(plugins []string) []CleanupResult {
+	var results []CleanupResult
 	for _, p := range plugins {
-		if err := uninstallPlugin(p); err != nil {
-			failed = append(failed, p)
-		} else {
-			removed = append(removed, p)
-		}
+		err := uninstallPlugin(p)
+		results = append(results, CleanupResult{Plugin: p, Err: err})
 	}
-	return removed, failed
+	return results
 }
