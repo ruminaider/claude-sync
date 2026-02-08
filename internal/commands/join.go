@@ -10,9 +10,15 @@ import (
 	"github.com/ruminaider/claude-sync/internal/git"
 )
 
+// LocalPlugin describes a locally installed plugin not in the remote config.
+type LocalPlugin struct {
+	Key   string // e.g. "figma@claude-plugins-official"
+	Scope string // e.g. "user" or "project"
+}
+
 // JoinResult describes local-only plugins detected after joining.
 type JoinResult struct {
-	LocalOnly []string // plugins installed locally but not in the remote config
+	LocalOnly []LocalPlugin
 }
 
 func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
@@ -35,7 +41,6 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err != nil {
-		// Config unreadable — skip detection, not a fatal error.
 		return result, nil
 	}
 
@@ -56,7 +61,11 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	for _, k := range installed.PluginKeys() {
 		if !configKeys[k] {
-			result.LocalOnly = append(result.LocalOnly, k)
+			scope := "user"
+			if installations, ok := installed.Plugins[k]; ok && len(installations) > 0 {
+				scope = installations[0].Scope
+			}
+			result.LocalOnly = append(result.LocalOnly, LocalPlugin{Key: k, Scope: scope})
 		}
 	}
 
@@ -70,11 +79,11 @@ type CleanupResult struct {
 }
 
 // JoinCleanup uninstalls the specified plugins and returns results for each.
-func JoinCleanup(plugins []string) []CleanupResult {
+func JoinCleanup(plugins []LocalPlugin) []CleanupResult {
 	var results []CleanupResult
 	for _, p := range plugins {
-		err := uninstallPlugin(p)
-		results = append(results, CleanupResult{Plugin: p, Err: err})
+		err := uninstallPlugin(p.Key, p.Scope)
+		results = append(results, CleanupResult{Plugin: p.Key, Err: err})
 	}
 	return results
 }

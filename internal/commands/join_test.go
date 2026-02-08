@@ -137,7 +137,7 @@ func TestJoin_DetectsLocalOnlyPlugins(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Len(t, result.LocalOnly, 1)
-	assert.Contains(t, result.LocalOnly, "local-tool@local-custom-plugins")
+	assert.Equal(t, "local-tool@local-custom-plugins", result.LocalOnly[0].Key)
 }
 
 func TestJoin_NoLocalOnlyPlugins(t *testing.T) {
