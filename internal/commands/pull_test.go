@@ -109,6 +109,8 @@ plugins:
 
 	// Initialize a git repo in syncDir
 	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
 	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
 	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
 

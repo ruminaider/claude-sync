@@ -36,9 +36,16 @@ func RevParse(dir, ref string) (string, error) {
 	return Run(dir, "rev-parse", ref)
 }
 
-// Init initializes a new git repo in dir.
+// Init initializes a new git repo in dir with local user config
+// so commits work regardless of global git configuration.
 func Init(dir string) error {
-	_, err := Run(dir, "init")
+	if _, err := Run(dir, "init"); err != nil {
+		return err
+	}
+	if _, err := Run(dir, "config", "user.name", "claude-sync"); err != nil {
+		return err
+	}
+	_, err := Run(dir, "config", "user.email", "claude-sync@localhost")
 	return err
 }
 
