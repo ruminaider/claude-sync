@@ -314,12 +314,26 @@ func isV2(version string) bool {
 	return strings.HasPrefix(version, "2.")
 }
 
+// SyncCategory identifies a category of config data that can be synced.
+type SyncCategory string
+
+const (
+	CategorySettings SyncCategory = "settings"
+	CategoryHooks    SyncCategory = "hooks"
+)
+
+// SyncPrefs holds per-machine sync opt-out preferences.
+type SyncPrefs struct {
+	Skip []string `yaml:"skip,omitempty"`
+}
+
 // UserPreferences represents ~/.claude-sync/user-preferences.yaml.
 type UserPreferences struct {
 	SyncMode string            `yaml:"sync_mode"`
 	Settings map[string]any    `yaml:"settings,omitempty"`
 	Plugins  UserPluginPrefs   `yaml:"plugins,omitempty"`
 	Pins     map[string]string `yaml:"pins,omitempty"`
+	Sync     SyncPrefs         `yaml:"sync,omitempty"`
 }
 
 // UserPluginPrefs holds plugin override preferences.
@@ -340,10 +354,25 @@ func ParseUserPreferences(data []byte) (UserPreferences, error) {
 	return prefs, nil
 }
 
+// ShouldSkip returns true if the given category is in the skip list.
+func (p *UserPreferences) ShouldSkip(cat SyncCategory) bool {
+	for _, s := range p.Sync.Skip {
+		if s == string(cat) {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultUserPreferences returns preferences with default values.
 func DefaultUserPreferences() UserPreferences {
 	return UserPreferences{
 		SyncMode: "union",
 		Pins:     map[string]string{},
 	}
+}
+
+// MarshalUserPreferences serializes UserPreferences to YAML bytes.
+func MarshalUserPreferences(prefs UserPreferences) ([]byte, error) {
+	return yaml.Marshal(prefs)
 }

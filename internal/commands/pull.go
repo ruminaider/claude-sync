@@ -16,15 +16,16 @@ import (
 )
 
 type PullResult struct {
-	ToInstall        []string
-	ToRemove         []string
-	Synced           []string
-	Untracked        []string
-	EffectiveDesired []string
-	Installed        []string
-	Failed           []string
-	SettingsApplied  []string
-	HooksApplied     []string
+	ToInstall         []string
+	ToRemove          []string
+	Synced            []string
+	Untracked         []string
+	EffectiveDesired  []string
+	Installed         []string
+	Failed            []string
+	SettingsApplied   []string
+	HooksApplied      []string
+	SkippedCategories []string
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -143,11 +144,27 @@ func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
 		result.Failed = stillFailed
 	}
 
-	// Apply settings and hooks from config.
+	// Read user preferences for category skip logic.
+	prefs := config.DefaultUserPreferences()
+	prefsPath := filepath.Join(syncDir, "user-preferences.yaml")
+	if prefsData, err := os.ReadFile(prefsPath); err == nil {
+		prefs, _ = config.ParseUserPreferences(prefsData)
+	}
+
+	// Apply settings and hooks from config, respecting skip preferences.
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err == nil {
 		cfg, err := config.Parse(cfgData)
 		if err == nil {
+			if prefs.ShouldSkip(config.CategorySettings) {
+				cfg.Settings = nil
+				result.SkippedCategories = append(result.SkippedCategories, string(config.CategorySettings))
+			}
+			if prefs.ShouldSkip(config.CategoryHooks) {
+				cfg.Hooks = nil
+				result.SkippedCategories = append(result.SkippedCategories, string(config.CategoryHooks))
+			}
+
 			applied, hookNames, applyErr := ApplySettings(claudeDir, cfg)
 			if applyErr != nil {
 				if !quiet {

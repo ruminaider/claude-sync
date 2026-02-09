@@ -115,7 +115,12 @@ func TestFullWorkflow(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 2: Machine 1 — Init.
 	// ---------------------------------------------------------------
-	_, err := commands.Init(machine1Claude, machine1Sync, "")
+	_, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       machine1Claude,
+		SyncDir:         machine1Sync,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+	})
 	require.NoError(t, err, "Init should succeed on machine 1")
 
 	// ---------------------------------------------------------------
@@ -205,7 +210,12 @@ func TestV2Workflow(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 2: Init — should create v2 config with all plugins in Upstream.
 	// ---------------------------------------------------------------
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+	})
 	require.NoError(t, err, "Init should succeed")
 
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
