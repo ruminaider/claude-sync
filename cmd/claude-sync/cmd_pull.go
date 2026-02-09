@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/paths"
@@ -32,6 +33,13 @@ var pullCmd = &cobra.Command{
 			fmt.Printf("\n✓ %d plugin(s) installed\n", len(result.Installed))
 		}
 
+		if len(result.SettingsApplied) > 0 {
+			fmt.Printf("✓ Settings applied: %s\n", strings.Join(result.SettingsApplied, ", "))
+		}
+		if len(result.HooksApplied) > 0 {
+			fmt.Printf("✓ Hooks applied: %s\n", strings.Join(result.HooksApplied, ", "))
+		}
+
 		if len(result.Failed) > 0 {
 			fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) failed:\n", len(result.Failed))
 			for _, p := range result.Failed {
@@ -39,9 +47,10 @@ var pullCmd = &cobra.Command{
 			}
 		}
 
+		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0
 		if len(result.Failed) > 0 {
 			fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
-		} else if len(result.ToInstall) == 0 {
+		} else if nothingChanged {
 			fmt.Println("Everything up to date.")
 		}
 

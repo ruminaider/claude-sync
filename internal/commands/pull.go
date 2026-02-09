@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -21,6 +23,8 @@ type PullResult struct {
 	EffectiveDesired []string
 	Installed        []string
 	Failed           []string
+	SettingsApplied  []string
+	HooksApplied     []string
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -139,6 +143,23 @@ func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
 		result.Failed = stillFailed
 	}
 
+	// Apply settings and hooks from config.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	if err == nil {
+		cfg, err := config.Parse(cfgData)
+		if err == nil {
+			applied, hookNames, applyErr := ApplySettings(claudeDir, cfg)
+			if applyErr != nil {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
+				}
+			} else {
+				result.SettingsApplied = applied
+				result.HooksApplied = hookNames
+			}
+		}
+	}
+
 	return result, nil
 }
 
@@ -158,4 +179,77 @@ func uninstallPlugin(pluginKey, scope string) error {
 		return fmt.Errorf("%s: %s", err, string(out))
 	}
 	return nil
+}
+
+// ApplySettings merges synced settings and hooks from config into settings.json.
+// It preserves existing local settings and excluded fields.
+func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, error) {
+	if len(cfg.Settings) == 0 && len(cfg.Hooks) == 0 {
+		return nil, nil, nil
+	}
+
+	settings, err := claudecode.ReadSettings(claudeDir)
+	if err != nil {
+		settings = make(map[string]json.RawMessage)
+	}
+
+	var settingsApplied []string
+	for key, val := range cfg.Settings {
+		if excludedSettingsFields[key] {
+			continue
+		}
+		data, err := json.Marshal(val)
+		if err != nil {
+			continue
+		}
+		settings[key] = json.RawMessage(data)
+		settingsApplied = append(settingsApplied, key)
+	}
+
+	var hooksApplied []string
+	if len(cfg.Hooks) > 0 {
+		var existingHooks map[string]json.RawMessage
+		if hooksRaw, ok := settings["hooks"]; ok {
+			json.Unmarshal(hooksRaw, &existingHooks)
+		}
+		if existingHooks == nil {
+			existingHooks = make(map[string]json.RawMessage)
+		}
+
+		for hookName, command := range cfg.Hooks {
+			existingHooks[hookName] = expandHook(command)
+			hooksApplied = append(hooksApplied, hookName)
+		}
+
+		hooksData, err := json.Marshal(existingHooks)
+		if err != nil {
+			return settingsApplied, nil, fmt.Errorf("marshaling hooks: %w", err)
+		}
+		settings["hooks"] = json.RawMessage(hooksData)
+	}
+
+	if err := claudecode.WriteSettings(claudeDir, settings); err != nil {
+		return nil, nil, fmt.Errorf("writing settings: %w", err)
+	}
+
+	sort.Strings(settingsApplied)
+	sort.Strings(hooksApplied)
+	return settingsApplied, hooksApplied, nil
+}
+
+// expandHook converts a simplified hook command string to the full settings.json format.
+func expandHook(command string) json.RawMessage {
+	hook := []map[string]any{
+		{
+			"matcher": "",
+			"hooks": []map[string]string{
+				{
+					"type":    "command",
+					"command": command,
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(hook)
+	return json.RawMessage(data)
 }
