@@ -134,11 +134,18 @@ func Unfork(syncDir, pluginName, marketplace string) error {
 	return nil
 }
 
-// copyDir recursively copies a directory tree from src to dst.
+// copyDir recursively copies a directory tree from src to dst,
+// skipping .git directories to avoid creating accidental gitlinks.
 func copyDir(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+
+		// Skip .git directories — copying them causes the parent git repo
+		// to treat the copied directory as a submodule (gitlink).
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
 		}
 
 		// Compute the relative path and the corresponding destination path.
