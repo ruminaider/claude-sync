@@ -112,7 +112,7 @@ hooks:
 
 	// Settings and hooks should be preserved.
 	assert.Equal(t, "opus", cfg.Settings["model"])
-	assert.Equal(t, "bd prime", cfg.Hooks["PreCompact"])
+	assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
 
 	// Verify git committed the change.
 	gitLog := exec.Command("git", "log", "--oneline", "-1")

@@ -233,8 +233,8 @@ func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, err
 			existingHooks = make(map[string]json.RawMessage)
 		}
 
-		for hookName, command := range cfg.Hooks {
-			existingHooks[hookName] = expandHook(command)
+		for hookName, hookData := range cfg.Hooks {
+			existingHooks[hookName] = hookData
 			hooksApplied = append(hooksApplied, hookName)
 		}
 
@@ -254,19 +254,3 @@ func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, err
 	return settingsApplied, hooksApplied, nil
 }
 
-// expandHook converts a simplified hook command string to the full settings.json format.
-func expandHook(command string) json.RawMessage {
-	hook := []map[string]any{
-		{
-			"matcher": "",
-			"hooks": []map[string]string{
-				{
-					"type":    "command",
-					"command": command,
-				},
-			},
-		},
-	}
-	data, _ := json.Marshal(hook)
-	return json.RawMessage(data)
-}

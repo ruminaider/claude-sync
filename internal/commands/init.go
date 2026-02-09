@@ -21,8 +21,8 @@ type InitScanResult struct {
 	Upstream   []string          // portable marketplace plugins
 	AutoForked []string          // non-portable plugins that would be forked
 	Skipped    []string          // local-scope plugins
-	Settings   map[string]any    // syncable settings found
-	Hooks      map[string]string // hooks found (hookName -> command)
+	Settings   map[string]any                // syncable settings found
+	Hooks      map[string]json.RawMessage // hooks found (hookName -> raw JSON)
 }
 
 // InitResult describes how plugins were categorized during init.
@@ -41,7 +41,7 @@ type InitOptions struct {
 	SyncDir         string
 	RemoteURL       string
 	IncludeSettings bool              // whether to write settings to config
-	IncludeHooks    map[string]string // specific hooks to include (nil = all, empty = none)
+	IncludeHooks    map[string]json.RawMessage // specific hooks to include (nil = all, empty = none)
 }
 
 // Fields from settings.json that should NOT be synced.
@@ -68,7 +68,7 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 
 	result := &InitScanResult{
 		Settings: make(map[string]any),
-		Hooks:    make(map[string]string),
+		Hooks:    make(map[string]json.RawMessage),
 	}
 
 	for _, key := range pluginKeys {
@@ -113,10 +113,7 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 			var hooks map[string]json.RawMessage
 			if json.Unmarshal(hooksRaw, &hooks) == nil {
 				for hookName, hookData := range hooks {
-					cmd := extractHookCommand(hookData)
-					if cmd != "" {
-						result.Hooks[hookName] = cmd
-					}
+					result.Hooks[hookName] = hookData
 				}
 			}
 		}
@@ -195,7 +192,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 
 	// Scan settings and hooks from Claude Code.
 	syncedSettings := make(map[string]any)
-	syncedHooks := make(map[string]string)
+	syncedHooks := make(map[string]json.RawMessage)
 
 	settingsRaw, err := claudecode.ReadSettings(claudeDir)
 	if err == nil {
@@ -211,10 +208,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 			var hooks map[string]json.RawMessage
 			if json.Unmarshal(hooksRaw, &hooks) == nil {
 				for hookName, hookData := range hooks {
-					cmd := extractHookCommand(hookData)
-					if cmd != "" {
-						syncedHooks[hookName] = cmd
-					}
+					syncedHooks[hookName] = hookData
 				}
 			}
 		}
@@ -231,7 +225,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 	}
 
 	// Apply hooks filter.
-	var cfgHooks map[string]string
+	var cfgHooks map[string]json.RawMessage
 	if opts.IncludeHooks == nil {
 		// nil = include all hooks (backward compat).
 		cfgHooks = syncedHooks
@@ -240,7 +234,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		}
 	} else {
 		// Non-nil = include only specified hooks.
-		cfgHooks = make(map[string]string)
+		cfgHooks = make(map[string]json.RawMessage)
 		for k, v := range opts.IncludeHooks {
 			cfgHooks[k] = v
 			result.IncludedHooks = append(result.IncludedHooks, k)
@@ -249,7 +243,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 	sort.Strings(result.IncludedHooks)
 
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "2.1.0",
 		Upstream: upstream,
 		Pinned:   map[string]string{},
 		Forked:   forkedNames,
@@ -324,7 +318,8 @@ func findInstallPath(installations []claudecode.PluginInstallation) string {
 	return ""
 }
 
-func extractHookCommand(data json.RawMessage) string {
+// ExtractHookCommand extracts the first command string from a hook's raw JSON data.
+func ExtractHookCommand(data json.RawMessage) string {
 	var hookEntries []struct {
 		Hooks []struct {
 			Command string `json:"command"`

@@ -171,7 +171,7 @@ func TestJoin_ExposesConfigCategories(t *testing.T) {
 		Upstream: []string{"context7@claude-plugins-official"},
 		Pinned:   map[string]string{},
 		Settings: map[string]any{"model": "opus"},
-		Hooks:    map[string]string{"PreCompact": "bd prime", "SessionStart": "pull"},
+		Hooks:    map[string]json.RawMessage{"PreCompact": config.ExpandHookCommand("bd prime"), "SessionStart": config.ExpandHookCommand("pull")},
 	}
 	cfgData, err := config.Marshal(cfg)
 	require.NoError(t, err)

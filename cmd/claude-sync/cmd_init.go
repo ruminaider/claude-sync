@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,6 +17,15 @@ var (
 	initRemote       string
 	initSkipSettings bool
 	initSkipHooks    bool
+)
+
+type initStep int
+
+const (
+	stepSettings     initStep = iota
+	stepHookStrategy initStep = iota
+	stepHookPicker   initStep = iota
+	stepDone         initStep = iota
 )
 
 var initCmd = &cobra.Command{
@@ -43,88 +54,170 @@ var initCmd = &cobra.Command{
 			fmt.Printf("Found settings: %s\n", strings.Join(keys, ", "))
 		}
 		if len(scan.Hooks) > 0 {
-			names := make([]string, 0, len(scan.Hooks))
-			for k := range scan.Hooks {
-				names = append(names, k)
+			// Build display strings: "PreCompact: bd prime"
+			hookDisplays := make([]string, 0, len(scan.Hooks))
+			for k, v := range scan.Hooks {
+				cmd := commands.ExtractHookCommand(v)
+				if cmd != "" {
+					hookDisplays = append(hookDisplays, fmt.Sprintf("%s (%s)", k, cmd))
+				} else {
+					hookDisplays = append(hookDisplays, k)
+				}
 			}
-			sort.Strings(names)
-			fmt.Printf("Found hooks: %s\n", strings.Join(names, ", "))
+			sort.Strings(hookDisplays)
+			fmt.Printf("Found hooks: %s\n", strings.Join(hookDisplays, ", "))
 		}
 
-		// Phase 2: Prompt for selections.
+		// Phase 2: Interactive prompts with go-back navigation.
 		includeSettings := true
-		var includeHooks map[string]string // nil = all
+		var includeHooks map[string]json.RawMessage // nil = all
 
-		// Settings prompt.
-		if len(scan.Settings) > 0 && !initSkipSettings {
-			keys := make([]string, 0, len(scan.Settings))
-			for k := range scan.Settings {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
+		// Determine the starting step based on flags and data availability.
+		hasSettings := len(scan.Settings) > 0 && !initSkipSettings
+		hasHooks := len(scan.Hooks) > 0 && !initSkipHooks
 
-			var confirm bool
-			fmt.Println()
-			err := huh.NewForm(
-				huh.NewGroup(
-					huh.NewConfirm().
-						Title(fmt.Sprintf("Include settings in sync? (%s)", strings.Join(keys, ", "))).
-						Affirmative("Yes").
-						Negative("No").
-						Value(&confirm),
-				),
-			).Run()
-			if err != nil {
-				return err
-			}
-			includeSettings = confirm
-		} else if initSkipSettings {
+		if initSkipSettings {
 			includeSettings = false
 		}
+		if initSkipHooks {
+			includeHooks = map[string]json.RawMessage{} // empty = none
+		}
 
-		// Hooks prompt.
-		if len(scan.Hooks) > 0 && !initSkipHooks {
-			names := make([]string, 0, len(scan.Hooks))
-			for k := range scan.Hooks {
-				names = append(names, k)
-			}
-			sort.Strings(names)
+		step := stepDone
+		if hasHooks {
+			step = stepHookStrategy
+		}
+		if hasSettings {
+			step = stepSettings
+		}
+		firstStep := step
 
-			var choice string
-			fmt.Println()
-			err := huh.NewForm(
-				huh.NewGroup(
-					huh.NewSelect[string]().
-						Title(fmt.Sprintf("Sync hooks? (Found: %s)", strings.Join(names, ", "))).
-						Options(
-							huh.NewOption("Share all", "all"),
-							huh.NewOption("Choose which to share", "some"),
-							huh.NewOption("Don't share hooks", "none"),
-						).
-						Value(&choice),
-				),
-			).Run()
-			if err != nil {
-				return err
-			}
+		for step != stepDone {
+			switch step {
+			case stepSettings:
+				keys := make([]string, 0, len(scan.Settings))
+				for k := range scan.Settings {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
 
-			switch choice {
-			case "all":
-				includeHooks = nil // nil = all
-			case "none":
-				includeHooks = map[string]string{} // empty = none
-			case "some":
-				selected, err := runPicker("Select hooks to share:", names)
+				var confirm bool
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewConfirm().
+							Title(fmt.Sprintf("Include settings in sync? (%s)", strings.Join(keys, ", "))).
+							Affirmative("Yes").
+							Negative("No").
+							Value(&confirm),
+					),
+				).Run()
 				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) && step == firstStep {
+						return err
+					}
+					if errors.Is(err, huh.ErrUserAborted) {
+						// Can't go back further from settings, abort.
+						return err
+					}
 					return err
 				}
-				includeHooks = make(map[string]string)
-				for _, name := range selected {
+				includeSettings = confirm
+				if hasHooks {
+					step = stepHookStrategy
+				} else {
+					step = stepDone
+				}
+
+			case stepHookStrategy:
+				// Build sorted hook names with commands for display.
+				hookNames := make([]string, 0, len(scan.Hooks))
+				for k := range scan.Hooks {
+					hookNames = append(hookNames, k)
+				}
+				sort.Strings(hookNames)
+
+				hookSummary := make([]string, 0, len(hookNames))
+				for _, name := range hookNames {
+					cmd := commands.ExtractHookCommand(scan.Hooks[name])
+					if cmd != "" {
+						hookSummary = append(hookSummary, fmt.Sprintf("%s (%s)", name, cmd))
+					} else {
+						hookSummary = append(hookSummary, name)
+					}
+				}
+
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(fmt.Sprintf("Sync hooks? (Found: %s)", strings.Join(hookSummary, ", "))).
+							Options(
+								huh.NewOption("Share all", "all"),
+								huh.NewOption("Choose which to share", "some"),
+								huh.NewOption("Don't share hooks", "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						if step == firstStep {
+							return err
+						}
+						step = stepSettings
+						continue
+					}
+					return err
+				}
+
+				switch choice {
+				case "all":
+					includeHooks = nil // nil = all
+					step = stepDone
+				case "none":
+					includeHooks = map[string]json.RawMessage{} // empty = none
+					step = stepDone
+				case "some":
+					step = stepHookPicker
+				}
+
+			case stepHookPicker:
+				// Build display strings with commands for the picker.
+				hookNames := make([]string, 0, len(scan.Hooks))
+				for k := range scan.Hooks {
+					hookNames = append(hookNames, k)
+				}
+				sort.Strings(hookNames)
+
+				displayItems := make([]string, 0, len(hookNames))
+				displayToName := make(map[string]string)
+				for _, name := range hookNames {
+					cmd := commands.ExtractHookCommand(scan.Hooks[name])
+					display := name
+					if cmd != "" {
+						display = fmt.Sprintf("%s: %s", name, cmd)
+					}
+					displayItems = append(displayItems, display)
+					displayToName[display] = name
+				}
+
+				selected, err := runPicker("Select hooks to share:", displayItems)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepHookStrategy
+						continue
+					}
+					return err
+				}
+				includeHooks = make(map[string]json.RawMessage)
+				for _, display := range selected {
+					name := displayToName[display]
 					includeHooks[name] = scan.Hooks[name]
 				}
+				step = stepDone
 			}
-		} else if initSkipHooks {
-			includeHooks = map[string]string{} // empty = none
 		}
 
 		// Phase 3: Run init with selections.

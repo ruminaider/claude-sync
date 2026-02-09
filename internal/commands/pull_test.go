@@ -187,9 +187,9 @@ func TestApplySettings_HooksExpanded(t *testing.T) {
 	claudeDir := setupApplySettingsEnv(t)
 
 	cfg := config.Config{
-		Hooks: map[string]string{
-			"PreCompact":   "bd prime",
-			"SessionStart": "bd prime",
+		Hooks: map[string]json.RawMessage{
+			"PreCompact":   config.ExpandHookCommand("bd prime"),
+			"SessionStart": config.ExpandHookCommand("bd prime"),
 		},
 	}
 
@@ -273,7 +273,7 @@ func TestApplySettings_PreservesLocalSettings(t *testing.T) {
 
 	cfg := config.Config{
 		Settings: map[string]any{"model": "claude-sonnet-4-5-20250929"},
-		Hooks:    map[string]string{"PreCompact": "bd prime"},
+		Hooks:    map[string]json.RawMessage{"PreCompact": config.ExpandHookCommand("bd prime")},
 	}
 
 	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
@@ -314,7 +314,7 @@ func TestApplySettings_CreatesSettingsIfMissing(t *testing.T) {
 
 	cfg := config.Config{
 		Settings: map[string]any{"model": "claude-sonnet-4-5-20250929"},
-		Hooks:    map[string]string{"SessionStart": "bd prime"},
+		Hooks:    map[string]json.RawMessage{"SessionStart": config.ExpandHookCommand("bd prime")},
 	}
 
 	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
@@ -419,7 +419,7 @@ func TestApplySettings_SyncedHookOverridesLocal(t *testing.T) {
 	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
 
 	cfg := config.Config{
-		Hooks: map[string]string{"PreCompact": "new-command"},
+		Hooks: map[string]json.RawMessage{"PreCompact": config.ExpandHookCommand("new-command")},
 	}
 
 	_, hooks, err := commands.ApplySettings(claudeDir, cfg)

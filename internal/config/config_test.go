@@ -1,12 +1,33 @@
 package config_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// assertHookHasCommand checks that a json.RawMessage hook entry contains
+// the expected command string in its first hook entry.
+func assertHookHasCommand(t *testing.T, hookData json.RawMessage, expectedCmd string) {
+	t.Helper()
+	var entries []struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	require.NoError(t, json.Unmarshal(hookData, &entries))
+	require.NotEmpty(t, entries)
+	require.NotEmpty(t, entries[0].Hooks)
+	assert.Equal(t, expectedCmd, entries[0].Hooks[0].Command)
+}
+
+// makeHookJSON builds a json.RawMessage for a single-command hook.
+func makeHookJSON(command string) json.RawMessage {
+	return config.ExpandHookCommand(command)
+}
 
 func TestParseConfig(t *testing.T) {
 	t.Run("phase 1 simple format", func(t *testing.T) {
@@ -27,7 +48,7 @@ hooks:
 		assert.Len(t, cfg.Upstream, 3)
 		assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
 		assert.Equal(t, "opus", cfg.Settings["model"])
-		assert.Equal(t, "bd prime", cfg.Hooks["PreCompact"])
+		assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
 	})
 
 	t.Run("empty config", func(t *testing.T) {
@@ -52,8 +73,8 @@ func TestMarshalConfig(t *testing.T) {
 		Settings: map[string]any{
 			"model": "opus",
 		},
-		Hooks: map[string]string{
-			"SessionStart": "claude-sync pull --quiet",
+		Hooks: map[string]json.RawMessage{
+			"SessionStart": makeHookJSON("claude-sync pull --quiet"),
 		},
 	}
 
@@ -64,6 +85,7 @@ func TestMarshalConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, cfg.Version, parsed.Version)
 	assert.Equal(t, cfg.Upstream, parsed.Upstream)
+	assertHookHasCommand(t, parsed.Hooks["SessionStart"], "claude-sync pull --quiet")
 }
 
 func TestParseConfigV2(t *testing.T) {
@@ -262,6 +284,49 @@ func TestMarshalUserPreferences(t *testing.T) {
 	assert.Equal(t, "union", parsed.SyncMode)
 	assert.True(t, parsed.ShouldSkip(config.CategoryHooks))
 	assert.False(t, parsed.ShouldSkip(config.CategorySettings))
+}
+
+func TestParseConfig_BackwardCompatHooks(t *testing.T) {
+	t.Run("old format plain string is expanded", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins: []
+hooks:
+  PreCompact: "bd prime"
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
+	})
+
+	t.Run("new format JSON string is preserved", func(t *testing.T) {
+		input := []byte(`version: "2.0.0"
+plugins:
+  upstream: []
+hooks:
+  PreCompact: '[{"matcher":"","hooks":[{"type":"command","command":"bd prime"}]}]'
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
+	})
+
+	t.Run("round-trip preserves raw JSON", func(t *testing.T) {
+		rawJSON := `[{"matcher":"proj/.*","hooks":[{"type":"command","command":"lint"},{"type":"command","command":"test"}]}]`
+		cfg := config.Config{
+			Version:  "2.0.0",
+			Upstream: []string{"a@b"},
+			Pinned:   map[string]string{},
+			Hooks: map[string]json.RawMessage{
+				"PreCompact": json.RawMessage(rawJSON),
+			},
+		}
+		data, err := config.Marshal(cfg)
+		require.NoError(t, err)
+
+		parsed, err := config.Parse(data)
+		require.NoError(t, err)
+		assert.JSONEq(t, rawJSON, string(parsed.Hooks["PreCompact"]))
+	})
 }
 
 func TestParseUserPreferences_WithSync(t *testing.T) {
