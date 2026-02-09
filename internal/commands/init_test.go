@@ -453,3 +453,60 @@ func TestInit_IncludedSettingsAndHooksReported(t *testing.T) {
 	sort.Strings(result.IncludedSettings)
 	sort.Strings(result.IncludedHooks)
 }
+
+// --- Plugin filtering tests ---
+
+func TestInit_IncludesAllPluginsByDefault(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	// nil IncludePlugins = include all (backward compat).
+	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, result.Upstream, "beads@beads-marketplace")
+	assert.Empty(t, result.ExcludedPlugins)
+}
+
+func TestInit_FiltersPlugins(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		IncludePlugins:  []string{"context7@claude-plugins-official"},
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
+	assert.NotContains(t, result.Upstream, "beads@beads-marketplace")
+	assert.Contains(t, result.ExcludedPlugins, "beads@beads-marketplace")
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
+	assert.NotContains(t, cfg.Upstream, "beads@beads-marketplace")
+}
+
+func TestInit_EmptyPluginList(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		IncludePlugins:  []string{}, // empty = no plugins
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Upstream)
+	assert.Empty(t, result.AutoForked)
+	assert.Len(t, result.ExcludedPlugins, 2) // both plugins excluded
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Empty(t, cfg.Upstream)
+}
