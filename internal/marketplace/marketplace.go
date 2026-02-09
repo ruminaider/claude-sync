@@ -27,9 +27,52 @@ var knownMarketplaces = map[string]string{
 // IsPortableMarketplace returns true if the marketplace ID is a well-known,
 // publicly available marketplace that can be installed on any machine.
 // Non-portable marketplaces (local/custom) should be auto-forked during init.
+//
+// Prefer IsPortable(), which checks known_marketplaces.json first and falls
+// back to this hardcoded list.
 func IsPortableMarketplace(id string) bool {
 	_, ok := knownMarketplaces[id]
 	return ok
+}
+
+// knownMarketplacesEntry represents a single entry in known_marketplaces.json.
+type knownMarketplacesEntry struct {
+	Source struct {
+		Source string `json:"source"` // "github", "git", or "directory"
+	} `json:"source"`
+}
+
+// IsPortableFromKnownMarketplaces checks known_marketplaces.json for a marketplace.
+// Returns (isPortable, found). If found is false, the caller should fall back
+// to the hardcoded list.
+func IsPortableFromKnownMarketplaces(claudeDir, id string) (isPortable bool, found bool) {
+	path := filepath.Join(claudeDir, "plugins", "known_marketplaces.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, false
+	}
+
+	var entries map[string]knownMarketplacesEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return false, false
+	}
+
+	entry, ok := entries[id]
+	if !ok {
+		return false, false
+	}
+
+	src := entry.Source.Source
+	return src == "github" || src == "git", true
+}
+
+// IsPortable checks whether a marketplace is portable (publicly installable).
+// It reads known_marketplaces.json first, then falls back to the hardcoded list.
+func IsPortable(claudeDir, id string) bool {
+	if portable, found := IsPortableFromKnownMarketplaces(claudeDir, id); found {
+		return portable
+	}
+	return IsPortableMarketplace(id)
 }
 
 // ParseMarketplaceSource extracts the org and repo from a marketplace identifier.
