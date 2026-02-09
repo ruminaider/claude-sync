@@ -30,6 +30,7 @@ type InitResult struct {
 	Upstream         []string // portable marketplace plugins
 	AutoForked       []string // non-portable plugins copied into sync repo
 	Skipped          []string // local-scope plugins excluded entirely
+	ExcludedPlugins  []string // plugins excluded by user selection
 	RemotePushed     bool     // whether the initial commit was pushed to a remote
 	IncludedSettings []string // settings keys written to config
 	IncludedHooks    []string // hook names written to config
@@ -40,8 +41,9 @@ type InitOptions struct {
 	ClaudeDir       string
 	SyncDir         string
 	RemoteURL       string
-	IncludeSettings bool              // whether to write settings to config
+	IncludeSettings bool                       // whether to write settings to config
 	IncludeHooks    map[string]json.RawMessage // specific hooks to include (nil = all, empty = none)
+	IncludePlugins  []string                   // specific plugin keys to include (nil = all, empty = none)
 }
 
 // Fields from settings.json that should NOT be synced.
@@ -154,6 +156,15 @@ func Init(opts InitOptions) (*InitResult, error) {
 	var upstream []string
 	var forkedNames []string
 
+	// Build plugin include set for filtering.
+	var includeSet map[string]bool
+	if opts.IncludePlugins != nil {
+		includeSet = make(map[string]bool, len(opts.IncludePlugins))
+		for _, k := range opts.IncludePlugins {
+			includeSet[k] = true
+		}
+	}
+
 	if err := os.MkdirAll(syncDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating sync directory: %w", err)
 	}
@@ -167,6 +178,11 @@ func Init(opts InitOptions) (*InitResult, error) {
 
 		parts := strings.SplitN(key, "@", 2)
 		if len(parts) != 2 {
+			// Check plugin filter before including.
+			if includeSet != nil && !includeSet[key] {
+				result.ExcludedPlugins = append(result.ExcludedPlugins, key)
+				continue
+			}
 			upstream = append(upstream, key)
 			result.Upstream = append(result.Upstream, key)
 			continue
@@ -176,6 +192,12 @@ func Init(opts InitOptions) (*InitResult, error) {
 		// Skip plugins from our own managed marketplace — these are
 		// artifacts of a previous init and shouldn't be re-scanned.
 		if mkt == forkedplugins.MarketplaceName {
+			continue
+		}
+
+		// Check plugin filter before including.
+		if includeSet != nil && !includeSet[key] {
+			result.ExcludedPlugins = append(result.ExcludedPlugins, key)
 			continue
 		}
 

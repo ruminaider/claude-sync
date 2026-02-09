@@ -17,15 +17,18 @@ var (
 	initRemote       string
 	initSkipSettings bool
 	initSkipHooks    bool
+	initSkipPlugins  bool
 )
 
 type initStep int
 
 const (
-	stepSettings     initStep = iota
-	stepHookStrategy initStep = iota
-	stepHookPicker   initStep = iota
-	stepDone         initStep = iota
+	stepPluginStrategy initStep = iota
+	stepPluginPicker   initStep = iota
+	stepSettings       initStep = iota
+	stepHookStrategy   initStep = iota
+	stepHookPicker     initStep = iota
+	stepDone           initStep = iota
 )
 
 var initCmd = &cobra.Command{
@@ -69,10 +72,12 @@ var initCmd = &cobra.Command{
 		}
 
 		// Phase 2: Interactive prompts with go-back navigation.
+		var includePlugins []string                 // nil = all
 		includeSettings := true
 		var includeHooks map[string]json.RawMessage // nil = all
 
 		// Determine the starting step based on flags and data availability.
+		hasPlugins := len(scan.PluginKeys) > 0 && !initSkipPlugins
 		hasSettings := len(scan.Settings) > 0 && !initSkipSettings
 		hasHooks := len(scan.Hooks) > 0 && !initSkipHooks
 
@@ -90,10 +95,95 @@ var initCmd = &cobra.Command{
 		if hasSettings {
 			step = stepSettings
 		}
+		if hasPlugins {
+			step = stepPluginStrategy
+		}
 		firstStep := step
 
 		for step != stepDone {
 			switch step {
+			case stepPluginStrategy:
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(fmt.Sprintf("Include all %d plugins in sync?", len(scan.PluginKeys))).
+							Options(
+								huh.NewOption("Share all (Recommended)", "all"),
+								huh.NewOption("Choose which to share", "some"),
+								huh.NewOption("Don't share any plugins", "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						if step == firstStep {
+							return err
+						}
+						// Can't go back further from first step.
+						return err
+					}
+					return err
+				}
+
+				switch choice {
+				case "all":
+					includePlugins = nil // nil = all
+					if hasSettings {
+						step = stepSettings
+					} else if hasHooks {
+						step = stepHookStrategy
+					} else {
+						step = stepDone
+					}
+				case "none":
+					includePlugins = []string{} // empty = none
+					if hasSettings {
+						step = stepSettings
+					} else if hasHooks {
+						step = stepHookStrategy
+					} else {
+						step = stepDone
+					}
+				case "some":
+					step = stepPluginPicker
+				}
+
+			case stepPluginPicker:
+				// Build sections from upstream and auto-forked.
+				var sections []pickerSection
+				if len(scan.Upstream) > 0 {
+					sections = append(sections, pickerSection{
+						Header: fmt.Sprintf("Upstream (%d)", len(scan.Upstream)),
+						Items:  scan.Upstream,
+					})
+				}
+				if len(scan.AutoForked) > 0 {
+					sections = append(sections, pickerSection{
+						Header: fmt.Sprintf("Auto-forked (%d)", len(scan.AutoForked)),
+						Items:  scan.AutoForked,
+					})
+				}
+
+				selected, err := runPickerWithSections("Select plugins to share:", sections)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepPluginStrategy
+						continue
+					}
+					return err
+				}
+				includePlugins = selected
+				if hasSettings {
+					step = stepSettings
+				} else if hasHooks {
+					step = stepHookStrategy
+				} else {
+					step = stepDone
+				}
+
 			case stepSettings:
 				keys := make([]string, 0, len(scan.Settings))
 				for k := range scan.Settings {
@@ -113,11 +203,14 @@ var initCmd = &cobra.Command{
 					),
 				).Run()
 				if err != nil {
-					if errors.Is(err, huh.ErrUserAborted) && step == firstStep {
-						return err
-					}
 					if errors.Is(err, huh.ErrUserAborted) {
-						// Can't go back further from settings, abort.
+						if step == firstStep {
+							return err
+						}
+						if hasPlugins {
+							step = stepPluginStrategy
+							continue
+						}
 						return err
 					}
 					return err
@@ -166,7 +259,13 @@ var initCmd = &cobra.Command{
 						if step == firstStep {
 							return err
 						}
-						step = stepSettings
+						if hasSettings {
+							step = stepSettings
+						} else if hasPlugins {
+							step = stepPluginStrategy
+						} else {
+							return err
+						}
 						continue
 					}
 					return err
@@ -228,6 +327,7 @@ var initCmd = &cobra.Command{
 			RemoteURL:       initRemote,
 			IncludeSettings: includeSettings,
 			IncludeHooks:    includeHooks,
+			IncludePlugins:  includePlugins,
 		})
 		if err != nil {
 			return err
@@ -251,6 +351,9 @@ var initCmd = &cobra.Command{
 			for _, p := range result.Skipped {
 				fmt.Printf("    → %s\n", p)
 			}
+		}
+		if len(result.ExcludedPlugins) > 0 {
+			fmt.Printf("  Excluded:    %d plugin(s) (not selected)\n", len(result.ExcludedPlugins))
 		}
 		if len(result.IncludedSettings) > 0 {
 			fmt.Printf("  Settings:    %s\n", strings.Join(result.IncludedSettings, ", "))
@@ -277,6 +380,7 @@ var initCmd = &cobra.Command{
 
 func init() {
 	initCmd.Flags().StringVarP(&initRemote, "remote", "r", "", "Git remote URL to add as origin and push to")
+	initCmd.Flags().BoolVar(&initSkipPlugins, "skip-plugins", false, "Skip plugin selection prompt (include all)")
 	initCmd.Flags().BoolVar(&initSkipSettings, "skip-settings", false, "Don't include settings in sync config")
 	initCmd.Flags().BoolVar(&initSkipHooks, "skip-hooks", false, "Don't include hooks in sync config")
 }
