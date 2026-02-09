@@ -86,6 +86,12 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 		}
 		_, mkt := parts[0], parts[1]
 
+		// Skip plugins from our own managed marketplace — these are
+		// artifacts of a previous init and shouldn't be re-scanned.
+		if mkt == forkedplugins.MarketplaceName {
+			continue
+		}
+
 		if marketplace.IsPortable(claudeDir, mkt) {
 			result.Upstream = append(result.Upstream, key)
 		} else {
@@ -166,6 +172,12 @@ func Init(opts InitOptions) (*InitResult, error) {
 			continue
 		}
 		name, mkt := parts[0], parts[1]
+
+		// Skip plugins from our own managed marketplace — these are
+		// artifacts of a previous init and shouldn't be re-scanned.
+		if mkt == forkedplugins.MarketplaceName {
+			continue
+		}
 
 		if marketplace.IsPortable(claudeDir, mkt) {
 			upstream = append(upstream, key)

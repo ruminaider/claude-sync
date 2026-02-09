@@ -204,6 +204,60 @@ func TestInit_AutoForksNonPortablePlugins(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestInit_SkipsClaudeSyncForksEntries(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	// Simulate stale @claude-sync-forks entries from a previous init,
+	// alongside the real upstream entries.
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"context-anchor@context-anchor": [{"scope":"user","installPath":"/p","version":"1.2","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"context-anchor@claude-sync-forks": [{"scope":"user","installPath":"/old/path","version":"1.2","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"my-tool@claude-sync-forks": [{"scope":"user","installPath":"/old/path","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+
+	// Mark context-anchor marketplace as github (portable).
+	km := `{"context-anchor": {"source": {"source": "github", "repo": "ruminaider/context-anchor"}}}`
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	// Test InitScan.
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, scan.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, scan.Upstream, "context-anchor@context-anchor")
+	// @claude-sync-forks entries should be completely absent.
+	for _, key := range scan.PluginKeys {
+		assert.NotContains(t, key, "claude-sync-forks")
+	}
+	for _, key := range scan.Upstream {
+		assert.NotContains(t, key, "claude-sync-forks")
+	}
+	assert.Empty(t, scan.AutoForked)
+
+	// Test Init.
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, result.Upstream, "context-anchor@context-anchor")
+	assert.Empty(t, result.AutoForked)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Len(t, cfg.Upstream, 2)
+	assert.Empty(t, cfg.Forked)
+}
+
 func TestInit_SkipsLocalScopePlugins(t *testing.T) {
 	claudeDir := t.TempDir()
 	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
