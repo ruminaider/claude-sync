@@ -225,9 +225,9 @@ func TestV2Workflow(t *testing.T) {
 	require.NoError(t, err, "should be able to parse config.yaml after init")
 
 	// ---------------------------------------------------------------
-	// Step 3: Verify v2 format — version 2.0.0, all 3 plugins in Upstream.
+	// Step 3: Verify v2 format — version 2.1.0, all 3 plugins in Upstream.
 	// ---------------------------------------------------------------
-	assert.Equal(t, "2.0.0", cfg.Version, "config version should be 2.0.0")
+	assert.Equal(t, "2.1.0", cfg.Version, "config version should be 2.1.0")
 	assert.Len(t, cfg.Upstream, 3, "all 3 plugins should be in upstream")
 	assert.Empty(t, cfg.Pinned, "no plugins should be pinned initially")
 	assert.Empty(t, cfg.Forked, "no plugins should be forked initially")

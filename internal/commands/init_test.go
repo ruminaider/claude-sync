@@ -1,6 +1,7 @@
 package commands_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// makeHookJSON builds a json.RawMessage for a single-command hook.
+func makeHookJSON(command string) json.RawMessage {
+	return config.ExpandHookCommand(command)
+}
+
+// assertHookHasCommand checks that a json.RawMessage hook entry contains the expected command.
+func assertHookHasCommand(t *testing.T, hookData json.RawMessage, expectedCmd string) {
+	t.Helper()
+	cmd := commands.ExtractHookCommand(hookData)
+	assert.Equal(t, expectedCmd, cmd)
+}
 
 func setupTestEnv(t *testing.T) (claudeDir, syncDir string) {
 	t.Helper()
@@ -65,7 +78,7 @@ func TestInit(t *testing.T) {
 	cfg, err := config.Parse(cfgData)
 	require.NoError(t, err)
 
-	assert.Equal(t, "2.0.0", cfg.Version)
+	assert.Equal(t, "2.1.0", cfg.Version)
 	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
 	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace")
 }
@@ -93,7 +106,7 @@ func TestInit_ExtractsHooks(t *testing.T) {
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
-	assert.Equal(t, "bd prime", cfg.Hooks["PreCompact"])
+	assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
 }
 
 func TestInit_FiltersSettings(t *testing.T) {
@@ -138,7 +151,7 @@ func TestInit_CreatesV2Config(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, err := config.Parse(data)
 	require.NoError(t, err)
-	assert.Equal(t, "2.0.0", cfg.Version)
+	assert.Equal(t, "2.1.0", cfg.Version)
 	assert.NotEmpty(t, cfg.Upstream)
 	assert.Empty(t, cfg.Pinned)
 	assert.Empty(t, cfg.Forked)
@@ -265,7 +278,7 @@ func TestInitScan(t *testing.T) {
 
 	assert.Contains(t, scan.Upstream, "context7@claude-plugins-official")
 	assert.Contains(t, scan.Upstream, "beads@beads-marketplace")
-	assert.Equal(t, "bd prime", scan.Hooks["PreCompact"])
+	assertHookHasCommand(t, scan.Hooks["PreCompact"], "bd prime")
 	assert.Empty(t, scan.Settings) // no model in test settings
 }
 
@@ -285,7 +298,7 @@ func TestInitScan_WithModel(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "claude-sonnet-4-5-20250929", scan.Settings["model"])
-	assert.Equal(t, "bd prime", scan.Hooks["SessionStart"])
+	assertHookHasCommand(t, scan.Hooks["SessionStart"], "bd prime")
 }
 
 func TestInit_ExcludesSettings(t *testing.T) {
@@ -320,7 +333,7 @@ func TestInit_ExcludesHooks(t *testing.T) {
 		ClaudeDir:       claudeDir,
 		SyncDir:         syncDir,
 		IncludeSettings: true,
-		IncludeHooks:    map[string]string{}, // empty = no hooks
+		IncludeHooks:    map[string]json.RawMessage{}, // empty = no hooks
 	})
 	require.NoError(t, err)
 	assert.Empty(t, result.IncludedHooks)
@@ -347,7 +360,7 @@ func TestInit_PartialHooks(t *testing.T) {
 		ClaudeDir:       claudeDir,
 		SyncDir:         syncDir,
 		IncludeSettings: true,
-		IncludeHooks:    map[string]string{"PreCompact": "bd prime"}, // only PreCompact
+		IncludeHooks:    map[string]json.RawMessage{"PreCompact": makeHookJSON("bd prime")}, // only PreCompact
 	})
 	require.NoError(t, err)
 
@@ -355,7 +368,7 @@ func TestInit_PartialHooks(t *testing.T) {
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
-	assert.Equal(t, "bd prime", cfg.Hooks["PreCompact"])
+	assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
 	_, hasSessionStart := cfg.Hooks["SessionStart"]
 	assert.False(t, hasSessionStart)
 }

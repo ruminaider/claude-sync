@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,8 +17,8 @@ type ConfigV2 struct {
 	Upstream []string          `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
 	Pinned   map[string]string `yaml:"-"` // parsed from plugins.pinned (key -> version)
 	Forked   []string          `yaml:"-"` // parsed from plugins.forked
-	Settings map[string]any    `yaml:"settings,omitempty"`
-	Hooks    map[string]string `yaml:"hooks,omitempty"`
+	Settings map[string]any                `yaml:"settings,omitempty"`
+	Hooks    map[string]json.RawMessage `yaml:"-"`
 }
 
 // Config is a type alias for ConfigV2 to maintain backward compatibility.
@@ -97,7 +98,14 @@ func Parse(data []byte) (Config, error) {
 			if err := valNode.Decode(&hooks); err != nil {
 				return Config{}, fmt.Errorf("parsing config hooks: %w", err)
 			}
-			cfg.Hooks = hooks
+			cfg.Hooks = make(map[string]json.RawMessage, len(hooks))
+			for k, v := range hooks {
+				if strings.HasPrefix(v, "[") && json.Valid([]byte(v)) {
+					cfg.Hooks[k] = json.RawMessage(v)
+				} else {
+					cfg.Hooks[k] = ExpandHookCommand(v)
+				}
+			}
 		}
 	}
 
@@ -268,10 +276,14 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		)
 	}
 
-	// hooks
+	// hooks — store each value as its JSON string representation
 	if len(cfg.Hooks) > 0 {
+		hooksStrMap := make(map[string]string, len(cfg.Hooks))
+		for k, v := range cfg.Hooks {
+			hooksStrMap[k] = string(v)
+		}
 		var hooksNode yaml.Node
-		if err := hooksNode.Encode(cfg.Hooks); err != nil {
+		if err := hooksNode.Encode(hooksStrMap); err != nil {
 			return nil, fmt.Errorf("encoding hooks: %w", err)
 		}
 		root.Content = append(root.Content,
@@ -285,7 +297,10 @@ func MarshalV2(cfg Config) ([]byte, error) {
 
 // marshalV1 serializes a Config to V1 YAML format with flat plugin list.
 func marshalV1(cfg Config) ([]byte, error) {
-	// Build a v1 compatible structure for marshaling.
+	hooksStrMap := make(map[string]string, len(cfg.Hooks))
+	for k, v := range cfg.Hooks {
+		hooksStrMap[k] = string(v)
+	}
 	v1 := struct {
 		Version  string            `yaml:"version"`
 		Plugins  []string          `yaml:"plugins"`
@@ -295,7 +310,7 @@ func marshalV1(cfg Config) ([]byte, error) {
 		Version:  cfg.Version,
 		Plugins:  cfg.Upstream,
 		Settings: cfg.Settings,
-		Hooks:    cfg.Hooks,
+		Hooks:    hooksStrMap,
 	}
 	return yaml.Marshal(v1)
 }
@@ -312,6 +327,23 @@ func Marshal(cfg Config) ([]byte, error) {
 // isV2 returns true if the version string indicates a v2 config.
 func isV2(version string) bool {
 	return strings.HasPrefix(version, "2.")
+}
+
+// ExpandHookCommand converts a simple command string to the full hook JSON format.
+func ExpandHookCommand(command string) json.RawMessage {
+	hook := []map[string]any{
+		{
+			"matcher": "",
+			"hooks": []map[string]string{
+				{
+					"type":    "command",
+					"command": command,
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(hook)
+	return json.RawMessage(data)
 }
 
 // SyncCategory identifies a category of config data that can be synced.
