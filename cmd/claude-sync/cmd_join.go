@@ -71,9 +71,9 @@ func promptLocalPluginCleanup(plugins []commands.LocalPlugin) ([]commands.LocalP
 			huh.NewSelect[string]().
 				Title("What would you like to do with these plugins?").
 				Options(
-					huh.NewOption("Remove all", "all"),
-					huh.NewOption("Choose which to remove", "some"),
 					huh.NewOption("Keep all", "keep"),
+					huh.NewOption("Choose which to remove", "some"),
+					huh.NewOption("Remove all", "all"),
 				).
 				Value(&choice),
 		),
@@ -84,6 +84,20 @@ func promptLocalPluginCleanup(plugins []commands.LocalPlugin) ([]commands.LocalP
 
 	switch choice {
 	case "all":
+		// Confirm before bulk removal.
+		var confirm bool
+		err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title(fmt.Sprintf("Remove all %d local plugin(s)?", len(plugins))).
+					Affirmative("Yes, remove all").
+					Negative("Cancel").
+					Value(&confirm),
+			),
+		).Run()
+		if err != nil || !confirm {
+			return nil, nil
+		}
 		return plugins, nil
 	case "keep":
 		return nil, nil
