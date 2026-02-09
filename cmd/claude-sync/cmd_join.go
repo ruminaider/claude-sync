@@ -58,18 +58,20 @@ var joinCmd = &cobra.Command{
 		hasPromptableCategories := (result.HasSettings && !joinSkipSettings) || (result.HasHooks && !joinSkipHooks)
 		if hasPromptableCategories && !joinSkipSettings && !joinSkipHooks {
 			selected, err := promptCategorySelection(result)
-			if err == nil {
-				// Determine what was deselected.
-				selectedSet := make(map[string]bool)
-				for _, s := range selected {
-					selectedSet[s] = true
-				}
-				if result.HasSettings && !selectedSet[string(config.CategorySettings)] {
-					skipCategories = append(skipCategories, string(config.CategorySettings))
-				}
-				if result.HasHooks && !selectedSet[string(config.CategoryHooks)] {
-					skipCategories = append(skipCategories, string(config.CategoryHooks))
-				}
+			if err != nil {
+				os.RemoveAll(syncDir)
+				return fmt.Errorf("cancelled")
+			}
+			// Determine what was deselected.
+			selectedSet := make(map[string]bool)
+			for _, s := range selected {
+				selectedSet[s] = true
+			}
+			if result.HasSettings && !selectedSet[string(config.CategorySettings)] {
+				skipCategories = append(skipCategories, string(config.CategorySettings))
+			}
+			if result.HasHooks && !selectedSet[string(config.CategoryHooks)] {
+				skipCategories = append(skipCategories, string(config.CategoryHooks))
 			}
 		}
 
@@ -110,7 +112,8 @@ var joinCmd = &cobra.Command{
 			} else {
 				toRemove, err = promptLocalPluginCleanup(result.LocalOnly)
 				if err != nil {
-					toRemove = nil
+					os.RemoveAll(syncDir)
+					return fmt.Errorf("cancelled")
 				}
 			}
 

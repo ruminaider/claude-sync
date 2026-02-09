@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 )
 
 // picker is a multi-select TUI where Enter toggles items and confirms at the bottom.
@@ -100,7 +101,7 @@ func (p picker) Selected() []string {
 	if p.selected == nil {
 		return nil
 	}
-	var result []string
+	result := []string{}
 	for i, item := range p.items {
 		if p.selected[i] {
 			result = append(result, item)
@@ -116,5 +117,9 @@ func runPicker(title string, items []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return model.(picker).Selected(), nil
+	selected := model.(picker).Selected()
+	if selected == nil {
+		return nil, huh.ErrUserAborted
+	}
+	return selected, nil
 }
