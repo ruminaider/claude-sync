@@ -40,6 +40,10 @@ var pullCmd = &cobra.Command{
 			fmt.Printf("✓ Hooks applied: %s\n", strings.Join(result.HooksApplied, ", "))
 		}
 
+		if len(result.SkippedCategories) > 0 {
+			fmt.Printf("  Skipped: %s (per user-preferences.yaml)\n", strings.Join(result.SkippedCategories, ", "))
+		}
+
 		if len(result.Failed) > 0 {
 			fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) failed:\n", len(result.Failed))
 			for _, p := range result.Failed {
@@ -47,7 +51,7 @@ var pullCmd = &cobra.Command{
 			}
 		}
 
-		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0
+		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 && len(result.SkippedCategories) == 0
 		if len(result.Failed) > 0 {
 			fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
 		} else if nothingChanged {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -18,7 +19,11 @@ type LocalPlugin struct {
 
 // JoinResult describes local-only plugins detected after joining.
 type JoinResult struct {
-	LocalOnly []LocalPlugin
+	LocalOnly    []LocalPlugin
+	HasSettings  bool
+	HasHooks     bool
+	SettingsKeys []string // e.g. ["model"]
+	HookNames    []string // e.g. ["PreCompact", "SessionStart"]
 }
 
 func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
@@ -47,6 +52,22 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	cfg, err := config.Parse(cfgData)
 	if err != nil {
 		return result, nil
+	}
+
+	// Expose config categories so the CLI can prompt about them.
+	if len(cfg.Settings) > 0 {
+		result.HasSettings = true
+		for k := range cfg.Settings {
+			result.SettingsKeys = append(result.SettingsKeys, k)
+		}
+		sort.Strings(result.SettingsKeys)
+	}
+	if len(cfg.Hooks) > 0 {
+		result.HasHooks = true
+		for k := range cfg.Hooks {
+			result.HookNames = append(result.HookNames, k)
+		}
+		sort.Strings(result.HookNames)
 	}
 
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)

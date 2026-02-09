@@ -330,6 +330,85 @@ func TestApplySettings_CreatesSettingsIfMissing(t *testing.T) {
 	assert.Contains(t, settings, "hooks")
 }
 
+// setupPullEnvWithSettingsAndHooks creates a sync dir with settings and hooks in config.yaml,
+// plus a claudeDir with matching installed plugins.
+func setupPullEnvWithSettingsAndHooks(t *testing.T) (claudeDir, syncDir string) {
+	t.Helper()
+
+	claudeDir = t.TempDir()
+	err := claudecode.Bootstrap(claudeDir)
+	require.NoError(t, err)
+
+	syncDir = filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "2.0.0"
+plugins:
+  upstream:
+    - context7@claude-plugins-official
+settings:
+  model: opus
+hooks:
+  PreCompact: "bd prime"
+  SessionStart: "pull --quiet"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	return claudeDir, syncDir
+}
+
+func TestPull_SkipsHooksWhenPrefsSet(t *testing.T) {
+	claudeDir, syncDir := setupPullEnvWithSettingsAndHooks(t)
+
+	// Write user-preferences with hooks skipped.
+	prefs := "sync_mode: union\nsync:\n  skip:\n    - hooks\n"
+	os.WriteFile(filepath.Join(syncDir, "user-preferences.yaml"), []byte(prefs), 0644)
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	assert.Contains(t, result.SkippedCategories, "hooks")
+	assert.Empty(t, result.HooksApplied)
+	// Settings should still be applied.
+	assert.Contains(t, result.SettingsApplied, "model")
+}
+
+func TestPull_SkipsSettingsWhenPrefsSet(t *testing.T) {
+	claudeDir, syncDir := setupPullEnvWithSettingsAndHooks(t)
+
+	// Write user-preferences with settings skipped.
+	prefs := "sync_mode: union\nsync:\n  skip:\n    - settings\n"
+	os.WriteFile(filepath.Join(syncDir, "user-preferences.yaml"), []byte(prefs), 0644)
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	assert.Contains(t, result.SkippedCategories, "settings")
+	assert.Empty(t, result.SettingsApplied)
+	// Hooks should still be applied.
+	assert.NotEmpty(t, result.HooksApplied)
+}
+
+func TestPull_SkipsBothWhenPrefsSet(t *testing.T) {
+	claudeDir, syncDir := setupPullEnvWithSettingsAndHooks(t)
+
+	prefs := "sync_mode: union\nsync:\n  skip:\n    - settings\n    - hooks\n"
+	os.WriteFile(filepath.Join(syncDir, "user-preferences.yaml"), []byte(prefs), 0644)
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	assert.Len(t, result.SkippedCategories, 2)
+	assert.Empty(t, result.SettingsApplied)
+	assert.Empty(t, result.HooksApplied)
+}
+
 func TestApplySettings_SyncedHookOverridesLocal(t *testing.T) {
 	claudeDir := setupApplySettingsEnv(t)
 

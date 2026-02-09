@@ -159,6 +159,52 @@ func TestJoin_NoLocalOnlyPlugins(t *testing.T) {
 	assert.Empty(t, result.LocalOnly)
 }
 
+func TestJoin_ExposesConfigCategories(t *testing.T) {
+	// Create a remote repo with settings and hooks in config.yaml.
+	remote := t.TempDir()
+	exec.Command("git", "init", remote).Run()
+	exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
+
+	cfg := config.Config{
+		Version:  "2.0.0",
+		Upstream: []string{"context7@claude-plugins-official"},
+		Pinned:   map[string]string{},
+		Settings: map[string]any{"model": "opus"},
+		Hooks:    map[string]string{"PreCompact": "bd prime", "SessionStart": "pull"},
+	}
+	cfgData, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	os.WriteFile(filepath.Join(remote, "config.yaml"), cfgData, 0644)
+	exec.Command("git", "-C", remote, "add", ".").Run()
+	exec.Command("git", "-C", remote, "commit", "-m", "init").Run()
+
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	result, err := commands.Join(remote, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.True(t, result.HasSettings)
+	assert.True(t, result.HasHooks)
+	assert.Equal(t, []string{"model"}, result.SettingsKeys)
+	assert.Equal(t, []string{"PreCompact", "SessionStart"}, result.HookNames)
+}
+
+func TestJoin_NoSettingsOrHooks(t *testing.T) {
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	result, err := commands.Join(remote, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.False(t, result.HasSettings)
+	assert.False(t, result.HasHooks)
+	assert.Empty(t, result.SettingsKeys)
+	assert.Empty(t, result.HookNames)
+}
+
 func TestJoin_EmptyLocalInstallation(t *testing.T) {
 	remote := setupRemoteRepo(t, []string{
 		"context7@claude-plugins-official",

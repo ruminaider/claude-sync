@@ -2,15 +2,23 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/spf13/cobra"
 )
 
-var joinClean bool
-var joinKeepLocal bool
+var (
+	joinClean        bool
+	joinKeepLocal    bool
+	joinSkipSettings bool
+	joinSkipHooks    bool
+)
 
 var joinCmd = &cobra.Command{
 	Use:   "join <url>",
@@ -18,15 +26,77 @@ var joinCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoURL := args[0]
+		syncDir := paths.SyncDir()
 		fmt.Printf("Cloning config from %s...\n", repoURL)
 
-		result, err := commands.Join(repoURL, paths.ClaudeDir(), paths.SyncDir())
+		result, err := commands.Join(repoURL, paths.ClaudeDir(), syncDir)
 		if err != nil {
 			return err
 		}
 
 		fmt.Println("✓ Cloned config repo to ~/.claude-sync/")
 
+		// Show what the config contains.
+		if result.HasSettings {
+			fmt.Printf("  Config includes settings: %s\n", strings.Join(result.SettingsKeys, ", "))
+		}
+		if result.HasHooks {
+			fmt.Printf("  Config includes hooks: %s\n", strings.Join(result.HookNames, ", "))
+		}
+
+		// Category selection: prompt user about which categories to apply on this machine.
+		var skipCategories []string
+
+		if joinSkipSettings && result.HasSettings {
+			skipCategories = append(skipCategories, string(config.CategorySettings))
+		}
+		if joinSkipHooks && result.HasHooks {
+			skipCategories = append(skipCategories, string(config.CategoryHooks))
+		}
+
+		// Only prompt if there are categories to choose from and no skip flags cover them all.
+		hasPromptableCategories := (result.HasSettings && !joinSkipSettings) || (result.HasHooks && !joinSkipHooks)
+		if hasPromptableCategories && !joinSkipSettings && !joinSkipHooks {
+			selected, err := promptCategorySelection(result)
+			if err == nil {
+				// Determine what was deselected.
+				selectedSet := make(map[string]bool)
+				for _, s := range selected {
+					selectedSet[s] = true
+				}
+				if result.HasSettings && !selectedSet[string(config.CategorySettings)] {
+					skipCategories = append(skipCategories, string(config.CategorySettings))
+				}
+				if result.HasHooks && !selectedSet[string(config.CategoryHooks)] {
+					skipCategories = append(skipCategories, string(config.CategoryHooks))
+				}
+			}
+		}
+
+		// Write skip preferences if any categories were deselected.
+		if len(skipCategories) > 0 {
+			prefs := config.DefaultUserPreferences()
+
+			// Try to read existing prefs first.
+			prefsPath := filepath.Join(syncDir, "user-preferences.yaml")
+			if prefsData, err := os.ReadFile(prefsPath); err == nil {
+				if parsed, err := config.ParseUserPreferences(prefsData); err == nil {
+					prefs = parsed
+				}
+			}
+
+			prefs.Sync.Skip = skipCategories
+			data, err := config.MarshalUserPreferences(prefs)
+			if err != nil {
+				return fmt.Errorf("writing user preferences: %w", err)
+			}
+			if err := os.WriteFile(prefsPath, data, 0644); err != nil {
+				return fmt.Errorf("writing user preferences: %w", err)
+			}
+			fmt.Printf("  Skipping: %s (saved to user-preferences.yaml)\n", strings.Join(skipCategories, ", "))
+		}
+
+		// Local plugin cleanup.
 		if len(result.LocalOnly) > 0 && !joinKeepLocal {
 			fmt.Printf("\nFound %d locally installed plugin(s) not in the remote config:\n", len(result.LocalOnly))
 			for _, p := range result.LocalOnly {
@@ -60,6 +130,43 @@ var joinCmd = &cobra.Command{
 		fmt.Println("Run 'claude-sync pull' to apply the config.")
 		return nil
 	},
+}
+
+// promptCategorySelection asks the user which sync categories to apply.
+func promptCategorySelection(result *commands.JoinResult) ([]string, error) {
+	var options []huh.Option[string]
+	var defaults []string
+
+	if result.HasSettings {
+		label := fmt.Sprintf("Settings (%s)", strings.Join(result.SettingsKeys, ", "))
+		options = append(options, huh.NewOption(label, string(config.CategorySettings)))
+		defaults = append(defaults, string(config.CategorySettings))
+	}
+	if result.HasHooks {
+		label := fmt.Sprintf("Hooks (%s)", strings.Join(result.HookNames, ", "))
+		options = append(options, huh.NewOption(label, string(config.CategoryHooks)))
+		defaults = append(defaults, string(config.CategoryHooks))
+	}
+
+	if len(options) == 0 {
+		return nil, nil
+	}
+
+	selected := defaults
+	fmt.Println()
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title("Sync these categories on this machine:").
+				Options(options...).
+				Value(&selected),
+		),
+	).Run()
+	if err != nil {
+		return nil, err
+	}
+
+	return selected, nil
 }
 
 // promptLocalPluginCleanup asks the user what to do with local-only plugins.
@@ -128,4 +235,6 @@ func promptLocalPluginCleanup(plugins []commands.LocalPlugin) ([]commands.LocalP
 func init() {
 	joinCmd.Flags().BoolVar(&joinClean, "clean", false, "Automatically remove local-only plugins not in the remote config")
 	joinCmd.Flags().BoolVar(&joinKeepLocal, "keep-local", false, "Keep all locally installed plugins without prompting")
+	joinCmd.Flags().BoolVar(&joinSkipSettings, "skip-settings", false, "Don't apply settings from the remote config")
+	joinCmd.Flags().BoolVar(&joinSkipHooks, "skip-hooks", false, "Don't apply hooks from the remote config")
 }

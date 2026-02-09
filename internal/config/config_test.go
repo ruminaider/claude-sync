@@ -234,3 +234,45 @@ func TestDefaultUserPreferences(t *testing.T) {
 	assert.Equal(t, "union", prefs.SyncMode)
 	assert.Empty(t, prefs.Plugins.Unsubscribe)
 }
+
+func TestShouldSkip(t *testing.T) {
+	prefs := config.UserPreferences{
+		Sync: config.SyncPrefs{Skip: []string{"hooks"}},
+	}
+	assert.True(t, prefs.ShouldSkip(config.CategoryHooks))
+	assert.False(t, prefs.ShouldSkip(config.CategorySettings))
+}
+
+func TestShouldSkip_Empty(t *testing.T) {
+	prefs := config.DefaultUserPreferences()
+	assert.False(t, prefs.ShouldSkip(config.CategoryHooks))
+	assert.False(t, prefs.ShouldSkip(config.CategorySettings))
+}
+
+func TestMarshalUserPreferences(t *testing.T) {
+	prefs := config.UserPreferences{
+		SyncMode: "union",
+		Sync:     config.SyncPrefs{Skip: []string{"hooks"}},
+	}
+	data, err := config.MarshalUserPreferences(prefs)
+	require.NoError(t, err)
+
+	parsed, err := config.ParseUserPreferences(data)
+	require.NoError(t, err)
+	assert.Equal(t, "union", parsed.SyncMode)
+	assert.True(t, parsed.ShouldSkip(config.CategoryHooks))
+	assert.False(t, parsed.ShouldSkip(config.CategorySettings))
+}
+
+func TestParseUserPreferences_WithSync(t *testing.T) {
+	input := []byte(`sync_mode: union
+sync:
+  skip:
+    - settings
+    - hooks
+`)
+	prefs, err := config.ParseUserPreferences(input)
+	require.NoError(t, err)
+	assert.True(t, prefs.ShouldSkip(config.CategorySettings))
+	assert.True(t, prefs.ShouldSkip(config.CategoryHooks))
+}

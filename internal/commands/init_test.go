@@ -3,6 +3,7 @@ package commands_test
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/ruminaider/claude-sync/internal/commands"
@@ -40,10 +41,21 @@ func setupTestEnv(t *testing.T) (claudeDir, syncDir string) {
 	return claudeDir, syncDir
 }
 
+// defaultInitOpts builds InitOptions with backward-compatible defaults (include all).
+func defaultInitOpts(claudeDir, syncDir, remoteURL string) commands.InitOptions {
+	return commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		RemoteURL:       remoteURL,
+		IncludeSettings: true,
+		IncludeHooks:    nil, // nil = include all hooks
+	}
+}
+
 func TestInit(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	result, err := commands.Init(claudeDir, syncDir, "")
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -62,21 +74,21 @@ func TestInit_AlreadyExists(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 	os.MkdirAll(syncDir, 0755)
 
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
 }
 
 func TestInit_NoClaudeDir(t *testing.T) {
 	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
-	_, err := commands.Init("/nonexistent", syncDir, "")
+	_, err := commands.Init(defaultInitOpts("/nonexistent", syncDir, ""))
 	assert.Error(t, err)
 }
 
 func TestInit_ExtractsHooks(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -87,7 +99,7 @@ func TestInit_ExtractsHooks(t *testing.T) {
 func TestInit_FiltersSettings(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -100,7 +112,7 @@ func TestInit_FiltersSettings(t *testing.T) {
 func TestInit_CreatesGitRepo(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	_, err = os.Stat(filepath.Join(syncDir, ".git"))
@@ -110,7 +122,7 @@ func TestInit_CreatesGitRepo(t *testing.T) {
 func TestInit_GitignoresUserPreferences(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
 
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
@@ -120,7 +132,7 @@ func TestInit_GitignoresUserPreferences(t *testing.T) {
 
 func TestInit_CreatesV2Config(t *testing.T) {
 	claudeDir, syncDir := setupTestEnv(t)
-	_, err := commands.Init(claudeDir, syncDir, "")
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	data, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -156,7 +168,7 @@ func TestInit_AutoForksNonPortablePlugins(t *testing.T) {
 	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
 	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
 
-	result, err := commands.Init(claudeDir, syncDir, "")
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	// context7 should be upstream; my-tool should be auto-forked.
@@ -197,7 +209,7 @@ func TestInit_SkipsLocalScopePlugins(t *testing.T) {
 	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
 	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
 
-	result, err := commands.Init(claudeDir, syncDir, "")
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
@@ -230,7 +242,7 @@ func TestInit_AllPortableStaysUpstream(t *testing.T) {
 	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
 	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
 
-	result, err := commands.Init(claudeDir, syncDir, "")
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
 	assert.Len(t, result.Upstream, 3)
@@ -241,4 +253,136 @@ func TestInit_AllPortableStaysUpstream(t *testing.T) {
 	cfg, _ := config.Parse(cfgData)
 	assert.Len(t, cfg.Upstream, 3)
 	assert.Empty(t, cfg.Forked)
+}
+
+// --- New tests for InitScan and granular Init ---
+
+func TestInitScan(t *testing.T) {
+	claudeDir, _ := setupTestEnv(t)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, scan.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, scan.Upstream, "beads@beads-marketplace")
+	assert.Equal(t, "bd prime", scan.Hooks["PreCompact"])
+	assert.Empty(t, scan.Settings) // no model in test settings
+}
+
+func TestInitScan_WithModel(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+
+	settings := `{"model": "claude-sonnet-4-5-20250929", "hooks": {"SessionStart": [{"matcher":"","hooks":[{"type":"command","command":"bd prime"}]}]}}`
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, "claude-sonnet-4-5-20250929", scan.Settings["model"])
+	assert.Equal(t, "bd prime", scan.Hooks["SessionStart"])
+}
+
+func TestInit_ExcludesSettings(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"model": "opus"}`), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: false,
+		IncludeHooks:    nil,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, result.IncludedSettings)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Empty(t, cfg.Settings)
+}
+
+func TestInit_ExcludesHooks(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    map[string]string{}, // empty = no hooks
+	})
+	require.NoError(t, err)
+	assert.Empty(t, result.IncludedHooks)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Empty(t, cfg.Hooks)
+}
+
+func TestInit_PartialHooks(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+
+	settings := `{"hooks": {"PreCompact": [{"matcher":"","hooks":[{"type":"command","command":"bd prime"}]}], "SessionStart": [{"matcher":"","hooks":[{"type":"command","command":"pull"}]}]}}`
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    map[string]string{"PreCompact": "bd prime"}, // only PreCompact
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"PreCompact"}, result.IncludedHooks)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, _ := config.Parse(cfgData)
+	assert.Equal(t, "bd prime", cfg.Hooks["PreCompact"])
+	_, hasSessionStart := cfg.Hooks["SessionStart"]
+	assert.False(t, hasSessionStart)
+}
+
+func TestInit_IncludedSettingsAndHooksReported(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"model": "opus", "hooks": {"PreCompact": [{"matcher":"","hooks":[{"type":"command","command":"bd prime"}]}]}}`), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil, // all hooks
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"model"}, result.IncludedSettings)
+	assert.Equal(t, []string{"PreCompact"}, result.IncludedHooks)
+
+	// Verify sorted
+	sort.Strings(result.IncludedSettings)
+	sort.Strings(result.IncludedHooks)
 }
