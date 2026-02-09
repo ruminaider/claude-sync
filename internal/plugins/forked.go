@@ -27,7 +27,8 @@ type marketplaceSource struct {
 	Path   string `json:"path"`
 }
 
-// RegisterLocalMarketplace adds a claude-sync-forks entry to known_marketplaces.json.
+// RegisterLocalMarketplace adds a claude-sync-forks entry to known_marketplaces.json
+// and generates a marketplace.json manifest listing all forked plugins.
 // It preserves existing marketplace entries. If the marketplaces file does not exist,
 // it bootstraps the Claude directory first.
 func RegisterLocalMarketplace(claudeDir, syncDir string) error {
@@ -47,12 +48,14 @@ func RegisterLocalMarketplace(claudeDir, syncDir string) error {
 		}
 	}
 
+	pluginsDir := filepath.Join(syncDir, "plugins")
+
 	entry := marketplaceEntry{
 		Source: marketplaceSource{
 			Source: "directory",
-			Path:   filepath.Join(syncDir, "plugins"),
+			Path:   pluginsDir,
 		},
-		InstallLocation: filepath.Join(claudeDir, "plugins", "marketplaces", MarketplaceName),
+		InstallLocation: pluginsDir,
 		LastUpdated:     time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -65,7 +68,94 @@ func RegisterLocalMarketplace(claudeDir, syncDir string) error {
 	if err := claudecode.WriteMarketplaces(claudeDir, mkts); err != nil {
 		return fmt.Errorf("writing marketplaces: %w", err)
 	}
+
+	// Generate the marketplace manifest so Claude can discover the plugins.
+	if err := generateMarketplaceManifest(pluginsDir); err != nil {
+		return fmt.Errorf("generating marketplace manifest: %w", err)
+	}
+
 	return nil
+}
+
+// marketplaceManifest represents the .claude-plugin/marketplace.json file.
+type marketplaceManifest struct {
+	Schema  string                   `json:"$schema"`
+	Name    string                   `json:"name"`
+	Owner   marketplaceOwner         `json:"owner"`
+	Plugins []marketplacePluginEntry `json:"plugins"`
+}
+
+// marketplaceOwner satisfies the required "owner" field in the marketplace schema.
+type marketplaceOwner struct {
+	Name string `json:"name"`
+}
+
+// marketplacePluginEntry represents a single plugin in the marketplace manifest.
+type marketplacePluginEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Source      string `json:"source"`
+}
+
+// pluginManifest represents the minimal fields read from a plugin's plugin.json.
+type pluginManifest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+}
+
+// generateMarketplaceManifest scans the plugins directory and writes a
+// .claude-plugin/marketplace.json listing all valid plugins.
+func generateMarketplaceManifest(pluginsDir string) error {
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading plugins directory: %w", err)
+	}
+
+	var plugins []marketplacePluginEntry
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(pluginsDir, entry.Name(), ".claude-plugin", "plugin.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue // skip directories without a valid plugin.json
+		}
+		var pm pluginManifest
+		if json.Unmarshal(data, &pm) != nil {
+			continue
+		}
+		plugins = append(plugins, marketplacePluginEntry{
+			Name:        entry.Name(),
+			Description: pm.Description,
+			Version:     pm.Version,
+			Source:      "./" + entry.Name(),
+		})
+	}
+
+	manifest := marketplaceManifest{
+		Schema:  "https://anthropic.com/claude-code/marketplace.schema.json",
+		Name:    MarketplaceName,
+		Owner:   marketplaceOwner{Name: "claude-sync"},
+		Plugins: plugins,
+	}
+
+	manifestDir := filepath.Join(pluginsDir, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0755); err != nil {
+		return fmt.Errorf("creating manifest directory: %w", err)
+	}
+
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling manifest: %w", err)
+	}
+
+	return os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), append(data, '\n'), 0644)
 }
 
 // ListForkedPlugins scans <syncDir>/plugins/ for directories containing a valid

@@ -144,7 +144,7 @@ func Init(claudeDir, syncDir, remoteURL string) (*InitResult, error) {
 		return nil, fmt.Errorf("writing config: %w", err)
 	}
 
-	gitignore := "user-preferences.yaml\n.last_fetch\n"
+	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\n"
 	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return nil, fmt.Errorf("writing .gitignore: %w", err)
 	}

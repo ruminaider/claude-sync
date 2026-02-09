@@ -64,7 +64,7 @@ func TestRegisterLocalMarketplace(t *testing.T) {
 
 	assert.Equal(t, "directory", entry.Source.Source)
 	assert.Equal(t, filepath.Join(syncDir, "plugins"), entry.Source.Path)
-	assert.Equal(t, filepath.Join(claudeDir, "plugins", "marketplaces", "claude-sync-forks"), entry.InstallLocation)
+	assert.Equal(t, filepath.Join(syncDir, "plugins"), entry.InstallLocation)
 	assert.NotEmpty(t, entry.LastUpdated)
 }
 
@@ -139,4 +139,48 @@ func TestForkedPluginKey(t *testing.T) {
 
 func TestMarketplaceName(t *testing.T) {
 	assert.Equal(t, "claude-sync-forks", plugins.MarketplaceName)
+}
+
+func TestRegisterLocalMarketplace_GeneratesManifest(t *testing.T) {
+	claudeDir := setupClaudeDir(t)
+	syncDir := setupSyncDir(t)
+
+	// Create two forked plugins.
+	createForkedPlugin(t, syncDir, "plugin-a")
+	createForkedPlugin(t, syncDir, "plugin-b")
+
+	err := plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Verify marketplace.json was generated.
+	manifestPath := filepath.Join(syncDir, "plugins", ".claude-plugin", "marketplace.json")
+	data, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+
+	var manifest struct {
+		Schema string `json:"$schema"`
+		Name   string `json:"name"`
+		Owner  struct {
+			Name string `json:"name"`
+		} `json:"owner"`
+		Plugins []struct {
+			Name    string `json:"name"`
+			Source  string `json:"source"`
+			Version string `json:"version"`
+		} `json:"plugins"`
+	}
+	err = json.Unmarshal(data, &manifest)
+	require.NoError(t, err)
+
+	assert.Equal(t, "claude-sync-forks", manifest.Name)
+	assert.Equal(t, "claude-sync", manifest.Owner.Name)
+	assert.Len(t, manifest.Plugins, 2)
+
+	// Verify plugin entries have correct source paths.
+	names := make(map[string]string)
+	for _, p := range manifest.Plugins {
+		names[p.Name] = p.Source
+	}
+	assert.Equal(t, "./plugin-a", names["plugin-a"])
+	assert.Equal(t, "./plugin-b", names["plugin-b"])
 }
