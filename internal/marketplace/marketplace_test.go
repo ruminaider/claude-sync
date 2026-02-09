@@ -86,6 +86,95 @@ func TestIsPortableMarketplace(t *testing.T) {
 	}
 }
 
+// ─── IsPortableFromKnownMarketplaces ───────────────────────────────────────
+
+func TestIsPortableFromKnownMarketplaces(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	km := `{
+		"context-anchor": {"source": {"source": "github", "repo": "ruminaider/context-anchor"}},
+		"every-marketplace": {"source": {"source": "git", "url": "https://github.com/EveryInc/compound.git"}},
+		"claude-sync-forks": {"source": {"source": "directory", "path": "/home/user/.claude-sync/plugins"}}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+	tests := []struct {
+		id         string
+		wantPortable bool
+		wantFound    bool
+	}{
+		{"context-anchor", true, true},
+		{"every-marketplace", true, true},
+		{"claude-sync-forks", false, true},
+		{"not-in-file", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			portable, found := marketplace.IsPortableFromKnownMarketplaces(claudeDir, tt.id)
+			assert.Equal(t, tt.wantFound, found, "found")
+			assert.Equal(t, tt.wantPortable, portable, "portable")
+		})
+	}
+
+	t.Run("missing file returns not found", func(t *testing.T) {
+		portable, found := marketplace.IsPortableFromKnownMarketplaces("/nonexistent", "anything")
+		assert.False(t, found)
+		assert.False(t, portable)
+	})
+
+	t.Run("invalid JSON returns not found", func(t *testing.T) {
+		badDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(badDir, "plugins"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(badDir, "plugins", "known_marketplaces.json"), []byte("{bad json"), 0644))
+		portable, found := marketplace.IsPortableFromKnownMarketplaces(badDir, "anything")
+		assert.False(t, found)
+		assert.False(t, portable)
+	})
+}
+
+// ─── IsPortable (combined check) ──────────────────────────────────────────
+
+func TestIsPortable(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	km := `{
+		"context-anchor": {"source": {"source": "github", "repo": "ruminaider/context-anchor"}},
+		"figma-minimal-marketplace": {"source": {"source": "directory", "path": "/some/path"}}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+	t.Run("found in JSON as github → portable", func(t *testing.T) {
+		assert.True(t, marketplace.IsPortable(claudeDir, "context-anchor"))
+	})
+
+	t.Run("found in JSON as directory → not portable", func(t *testing.T) {
+		assert.False(t, marketplace.IsPortable(claudeDir, "figma-minimal-marketplace"))
+	})
+
+	t.Run("not in JSON, falls back to hardcoded → portable", func(t *testing.T) {
+		assert.True(t, marketplace.IsPortable(claudeDir, "claude-plugins-official"))
+	})
+
+	t.Run("not in JSON, not in hardcoded → not portable", func(t *testing.T) {
+		assert.False(t, marketplace.IsPortable(claudeDir, "unknown-custom"))
+	})
+
+	t.Run("JSON overrides hardcoded if present", func(t *testing.T) {
+		// Write a known_marketplaces.json that marks a hardcoded marketplace as directory
+		overrideDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(overrideDir, "plugins"), 0755))
+		km := `{"beads-marketplace": {"source": {"source": "directory", "path": "/local"}}}`
+		require.NoError(t, os.WriteFile(filepath.Join(overrideDir, "plugins", "known_marketplaces.json"), []byte(km), 0644))
+		// beads-marketplace is hardcoded as portable, but JSON says directory → not portable
+		assert.False(t, marketplace.IsPortable(overrideDir, "beads-marketplace"))
+	})
+}
+
 // ─── ParseMarketplaceSource ────────────────────────────────────────────────
 
 func TestParseMarketplaceSource(t *testing.T) {

@@ -86,7 +86,7 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 		}
 		_, mkt := parts[0], parts[1]
 
-		if marketplace.IsPortableMarketplace(mkt) {
+		if marketplace.IsPortable(claudeDir, mkt) {
 			result.Upstream = append(result.Upstream, key)
 		} else {
 			installPath := findInstallPath(installations)
@@ -167,7 +167,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		}
 		name, mkt := parts[0], parts[1]
 
-		if marketplace.IsPortableMarketplace(mkt) {
+		if marketplace.IsPortable(claudeDir, mkt) {
 			upstream = append(upstream, key)
 			result.Upstream = append(result.Upstream, key)
 		} else {
