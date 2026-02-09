@@ -184,3 +184,25 @@ func TestRegisterLocalMarketplace_GeneratesManifest(t *testing.T) {
 	assert.Equal(t, "./plugin-a", names["plugin-a"])
 	assert.Equal(t, "./plugin-b", names["plugin-b"])
 }
+
+func TestRegisterLocalMarketplace_RemovesNestedMarketplaceJSON(t *testing.T) {
+	claudeDir := setupClaudeDir(t)
+	syncDir := setupSyncDir(t)
+
+	// Create a forked plugin with a stale nested marketplace.json.
+	createForkedPlugin(t, syncDir, "my-plugin")
+	staleMkt := filepath.Join(syncDir, "plugins", "my-plugin", ".claude-plugin", "marketplace.json")
+	require.NoError(t, os.WriteFile(staleMkt, []byte(`{"name":"old-marketplace"}`), 0644))
+
+	err := plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// The nested marketplace.json should have been removed.
+	_, err = os.Stat(staleMkt)
+	assert.True(t, os.IsNotExist(err), "nested marketplace.json should be removed")
+
+	// The root marketplace.json should still exist.
+	rootMkt := filepath.Join(syncDir, "plugins", ".claude-plugin", "marketplace.json")
+	_, err = os.Stat(rootMkt)
+	assert.NoError(t, err, "root marketplace.json should exist")
+}

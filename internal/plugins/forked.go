@@ -130,6 +130,13 @@ func generateMarketplaceManifest(pluginsDir string) error {
 		if json.Unmarshal(data, &pm) != nil {
 			continue
 		}
+
+		// Remove any nested marketplace.json copied from the original installation.
+		// These interfere with Claude's plugin discovery by making it treat the
+		// plugin directory as a marketplace instead of a plain plugin.
+		nestedMkt := filepath.Join(pluginsDir, entry.Name(), ".claude-plugin", "marketplace.json")
+		os.Remove(nestedMkt) // best-effort, ignore errors
+
 		plugins = append(plugins, marketplacePluginEntry{
 			Name:        entry.Name(),
 			Description: pm.Description,
