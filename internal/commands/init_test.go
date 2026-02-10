@@ -9,6 +9,7 @@ import (
 
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -509,4 +510,94 @@ func TestInit_EmptyPluginList(t *testing.T) {
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
 	assert.Empty(t, cfg.Upstream)
+}
+
+// --- Profile tests ---
+
+func TestInit_CreatesProfiles(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	workProfile := profiles.Profile{
+		Settings: map[string]any{"model": "opus"},
+		Plugins: profiles.ProfilePlugins{
+			Add: []string{"extra-tool@some-marketplace"},
+		},
+	}
+	personalProfile := profiles.Profile{
+		Settings: map[string]any{"model": "sonnet"},
+	}
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		Profiles: map[string]profiles.Profile{
+			"work":     workProfile,
+			"personal": personalProfile,
+		},
+	})
+	require.NoError(t, err)
+
+	// ProfileNames should be sorted.
+	assert.Equal(t, []string{"personal", "work"}, result.ProfileNames)
+
+	// Verify profile files exist and are parseable.
+	workData, err := os.ReadFile(filepath.Join(syncDir, "profiles", "work.yaml"))
+	require.NoError(t, err)
+	parsedWork, err := profiles.ParseProfile(workData)
+	require.NoError(t, err)
+	assert.Equal(t, "opus", parsedWork.Settings["model"])
+	assert.Contains(t, parsedWork.Plugins.Add, "extra-tool@some-marketplace")
+
+	personalData, err := os.ReadFile(filepath.Join(syncDir, "profiles", "personal.yaml"))
+	require.NoError(t, err)
+	parsedPersonal, err := profiles.ParseProfile(personalData)
+	require.NoError(t, err)
+	assert.Equal(t, "sonnet", parsedPersonal.Settings["model"])
+}
+
+func TestInit_ProfilesNil_NoProfileDir(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	// profiles/ directory should NOT exist when Profiles is nil.
+	_, err = os.Stat(filepath.Join(syncDir, "profiles"))
+	assert.True(t, os.IsNotExist(err), "profiles/ directory should not exist when Profiles is nil")
+}
+
+func TestInit_ActiveProfileWritten(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		Profiles: map[string]profiles.Profile{
+			"work": {Settings: map[string]any{"model": "opus"}},
+		},
+		ActiveProfile: "work",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "work", result.ActiveProfile)
+
+	// Verify active-profile file contains the right name.
+	active, err := profiles.ReadActiveProfile(syncDir)
+	require.NoError(t, err)
+	assert.Equal(t, "work", active)
+}
+
+func TestInit_GitignoreIncludesActiveProfile(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gitignore), "active-profile")
 }

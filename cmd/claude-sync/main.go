@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(forkCmd)
 	rootCmd.AddCommand(unforkCmd)
+	rootCmd.AddCommand(profileCmd)
 }
 
 func main() {

@@ -13,6 +13,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 )
 
 // InitScanResult holds what was found during scanning without writing anything.
@@ -34,6 +35,8 @@ type InitResult struct {
 	RemotePushed     bool     // whether the initial commit was pushed to a remote
 	IncludedSettings []string // settings keys written to config
 	IncludedHooks    []string // hook names written to config
+	ProfileNames     []string // profiles created
+	ActiveProfile    string   // profile activated on this machine
 }
 
 // InitOptions configures what Init includes in the sync config.
@@ -44,6 +47,8 @@ type InitOptions struct {
 	IncludeSettings bool                       // whether to write settings to config
 	IncludeHooks    map[string]json.RawMessage // specific hooks to include (nil = all, empty = none)
 	IncludePlugins  []string                   // specific plugin keys to include (nil = all, empty = none)
+	Profiles        map[string]profiles.Profile // nil = no profiles, non-nil = write profile files
+	ActiveProfile   string                      // profile to activate on this machine (empty = none)
 }
 
 // Fields from settings.json that should NOT be synced.
@@ -293,10 +298,43 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, fmt.Errorf("writing config: %w", err)
 	}
 
-	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\n"
+	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\n"
 	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return nil, fmt.Errorf("writing .gitignore: %w", err)
 	}
+
+	// Write profile files if provided.
+	if len(opts.Profiles) > 0 {
+		profilesDir := filepath.Join(syncDir, "profiles")
+		if err := os.MkdirAll(profilesDir, 0755); err != nil {
+			return nil, fmt.Errorf("creating profiles directory: %w", err)
+		}
+
+		var profileNames []string
+		for name := range opts.Profiles {
+			profileNames = append(profileNames, name)
+		}
+		sort.Strings(profileNames)
+
+		for _, name := range profileNames {
+			data, err := profiles.MarshalProfile(opts.Profiles[name])
+			if err != nil {
+				return nil, fmt.Errorf("marshaling profile %q: %w", name, err)
+			}
+			if err := os.WriteFile(filepath.Join(profilesDir, name+".yaml"), data, 0644); err != nil {
+				return nil, fmt.Errorf("writing profile %q: %w", name, err)
+			}
+		}
+		result.ProfileNames = profileNames
+	}
+
+	// Write active profile if specified.
+	if opts.ActiveProfile != "" {
+		if err := profiles.WriteActiveProfile(syncDir, opts.ActiveProfile); err != nil {
+			return nil, fmt.Errorf("writing active profile: %w", err)
+		}
+	}
+	result.ActiveProfile = opts.ActiveProfile
 
 	if err := git.Init(syncDir); err != nil {
 		return nil, fmt.Errorf("initializing git repo: %w", err)
