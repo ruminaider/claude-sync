@@ -185,6 +185,73 @@ func TestRegisterLocalMarketplace_GeneratesManifest(t *testing.T) {
 	assert.Equal(t, "./plugin-b", names["plugin-b"])
 }
 
+func TestUnregisterLocalMarketplace(t *testing.T) {
+	claudeDir := setupClaudeDir(t)
+	syncDir := setupSyncDir(t)
+
+	// Register first, then unregister.
+	err := plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	require.NoError(t, err)
+	assert.Contains(t, mkts, plugins.MarketplaceName)
+
+	// Unregister.
+	err = plugins.UnregisterLocalMarketplace(claudeDir)
+	require.NoError(t, err)
+
+	mkts, err = claudecode.ReadMarketplaces(claudeDir)
+	require.NoError(t, err)
+	assert.NotContains(t, mkts, plugins.MarketplaceName)
+}
+
+func TestUnregisterLocalMarketplace_NoEntry(t *testing.T) {
+	claudeDir := setupClaudeDir(t)
+
+	// Unregister when the entry was never added — should be a no-op.
+	err := plugins.UnregisterLocalMarketplace(claudeDir)
+	require.NoError(t, err)
+
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	require.NoError(t, err)
+	assert.NotContains(t, mkts, plugins.MarketplaceName)
+}
+
+func TestUnregisterLocalMarketplace_NoFile(t *testing.T) {
+	// Unregister against a nonexistent directory — should be a no-op.
+	err := plugins.UnregisterLocalMarketplace("/nonexistent/path")
+	require.NoError(t, err)
+}
+
+func TestUnregisterLocalMarketplace_PreservesOtherEntries(t *testing.T) {
+	claudeDir := setupClaudeDir(t)
+	syncDir := setupSyncDir(t)
+
+	// Write an existing marketplace entry.
+	existingEntry := json.RawMessage(`{"source":{"source":"github","repo":"anthropics/claude-plugins-official"}}`)
+	mkts := map[string]json.RawMessage{
+		"claude-plugins-official": existingEntry,
+	}
+	err := claudecode.WriteMarketplaces(claudeDir, mkts)
+	require.NoError(t, err)
+
+	// Register the local marketplace.
+	err = plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Unregister the local marketplace.
+	err = plugins.UnregisterLocalMarketplace(claudeDir)
+	require.NoError(t, err)
+
+	// Verify other entry survives.
+	mkts, err = claudecode.ReadMarketplaces(claudeDir)
+	require.NoError(t, err)
+	assert.Contains(t, mkts, "claude-plugins-official", "other marketplace entries should be preserved")
+	assert.NotContains(t, mkts, plugins.MarketplaceName, "claude-sync-forks should be removed")
+	assert.Len(t, mkts, 1)
+}
+
 func TestRegisterLocalMarketplace_RemovesNestedMarketplaceJSON(t *testing.T) {
 	claudeDir := setupClaudeDir(t)
 	syncDir := setupSyncDir(t)

@@ -32,7 +32,7 @@ var unforkCmd = &cobra.Command{
 			return fmt.Errorf("marketplace is required: use --marketplace flag or provide name@marketplace")
 		}
 
-		if err := commands.Unfork(paths.SyncDir(), pluginName, marketplace); err != nil {
+		if err := commands.Unfork(paths.ClaudeDir(), paths.SyncDir(), pluginName, marketplace); err != nil {
 			return err
 		}
 		fmt.Printf("Unforked %s — returning to upstream (%s)\n", pluginName, marketplace)
