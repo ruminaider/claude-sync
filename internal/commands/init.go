@@ -18,10 +18,9 @@ import (
 
 // InitScanResult holds what was found during scanning without writing anything.
 type InitScanResult struct {
-	PluginKeys []string          // all non-local plugin keys
+	PluginKeys []string          // all plugin keys
 	Upstream   []string          // portable marketplace plugins
 	AutoForked []string          // non-portable plugins that would be forked
-	Skipped    []string          // local-scope plugins
 	Settings   map[string]any                // syncable settings found
 	Hooks      map[string]json.RawMessage // hooks found (hookName -> raw JSON)
 }
@@ -30,7 +29,6 @@ type InitScanResult struct {
 type InitResult struct {
 	Upstream         []string // portable marketplace plugins
 	AutoForked       []string // non-portable plugins copied into sync repo
-	Skipped          []string // local-scope plugins excluded entirely
 	ExcludedPlugins  []string // plugins excluded by user selection
 	RemotePushed     bool     // whether the initial commit was pushed to a remote
 	IncludedSettings []string // settings keys written to config
@@ -80,10 +78,6 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 
 	for _, key := range pluginKeys {
 		installations := plugins.Plugins[key]
-		if isLocalScope(installations) {
-			result.Skipped = append(result.Skipped, key)
-			continue
-		}
 
 		parts := strings.SplitN(key, "@", 2)
 		if len(parts) != 2 {
@@ -176,10 +170,6 @@ func Init(opts InitOptions) (*InitResult, error) {
 
 	for _, key := range pluginKeys {
 		installations := plugins.Plugins[key]
-		if isLocalScope(installations) {
-			result.Skipped = append(result.Skipped, key)
-			continue
-		}
 
 		parts := strings.SplitN(key, "@", 2)
 		if len(parts) != 2 {
@@ -369,16 +359,6 @@ func Init(opts InitOptions) (*InitResult, error) {
 	}
 
 	return result, nil
-}
-
-// isLocalScope returns true if any installation has scope "local".
-func isLocalScope(installations []claudecode.PluginInstallation) bool {
-	for _, inst := range installations {
-		if inst.Scope == "local" {
-			return true
-		}
-	}
-	return false
 }
 
 // findInstallPath returns the first non-empty InstallPath from the installations.

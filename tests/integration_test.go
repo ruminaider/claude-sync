@@ -168,11 +168,12 @@ func TestFullWorkflow(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 9: Machine 1 — PushApply to add the new plugin.
 	// ---------------------------------------------------------------
-	err = commands.PushApply(
-		machine1Claude, machine1Sync,
-		[]string{"new-plugin@local"}, nil,
-		"Add new plugin",
-	)
+	err = commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:  machine1Claude,
+		SyncDir:    machine1Sync,
+		AddPlugins: []string{"new-plugin@local"},
+		Message:    "Add new plugin",
+	})
 	require.NoError(t, err, "PushApply should succeed on machine 1")
 
 	// ---------------------------------------------------------------

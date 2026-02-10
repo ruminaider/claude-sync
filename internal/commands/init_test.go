@@ -188,7 +188,6 @@ func TestInit_AutoForksNonPortablePlugins(t *testing.T) {
 	// context7 should be upstream; my-tool should be auto-forked.
 	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
 	assert.Contains(t, result.AutoForked, "my-tool@local-custom-plugins")
-	assert.Empty(t, result.Skipped)
 
 	// Config should reflect the categorization.
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -259,7 +258,7 @@ func TestInit_SkipsClaudeSyncForksEntries(t *testing.T) {
 	assert.Empty(t, cfg.Forked)
 }
 
-func TestInit_SkipsLocalScopePlugins(t *testing.T) {
+func TestInit_IncludesLocalScopePlugins(t *testing.T) {
 	claudeDir := t.TempDir()
 	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
 
@@ -270,7 +269,7 @@ func TestInit_SkipsLocalScopePlugins(t *testing.T) {
 		"version": 2,
 		"plugins": {
 			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
-			"project-tool@some-marketplace": [{"scope":"local","installPath":"/p","projectPath":"/my/project","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+			"project-tool@some-marketplace": [{"scope":"local","installPath":"","projectPath":"/my/project","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
 		}
 	}`
 	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
@@ -280,15 +279,16 @@ func TestInit_SkipsLocalScopePlugins(t *testing.T) {
 	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
 	require.NoError(t, err)
 
+	// Local-scope plugins are no longer skipped — they flow through normal classification.
+	// project-tool has no installPath, so it falls through to upstream.
 	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
-	assert.Contains(t, result.Skipped, "project-tool@some-marketplace")
+	assert.Contains(t, result.Upstream, "project-tool@some-marketplace")
 	assert.Empty(t, result.AutoForked)
 
-	// Config should only have the upstream plugin.
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
 	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
-	assert.NotContains(t, cfg.Upstream, "project-tool@some-marketplace")
+	assert.Contains(t, cfg.Upstream, "project-tool@some-marketplace")
 }
 
 func TestInit_AllPortableStaysUpstream(t *testing.T) {
@@ -315,7 +315,6 @@ func TestInit_AllPortableStaysUpstream(t *testing.T) {
 
 	assert.Len(t, result.Upstream, 3)
 	assert.Empty(t, result.AutoForked)
-	assert.Empty(t, result.Skipped)
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)

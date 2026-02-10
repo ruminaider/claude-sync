@@ -8,6 +8,7 @@ import (
 
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,12 @@ func TestPushApply(t *testing.T) {
 	}`
 	os.WriteFile(pluginsPath, []byte(data), 0644)
 
-	err := commands.PushApply(claudeDir, syncDir, []string{"new-plugin@local"}, nil, "Add new plugin")
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		AddPlugins: []string{"new-plugin@local"},
+		Message:    "Add new plugin",
+	})
 	require.NoError(t, err)
 
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
@@ -136,7 +142,12 @@ func TestPushApply_V2(t *testing.T) {
 	// Use a separate claudeDir (not strictly needed, but PushApply requires it).
 	claudeDir := filepath.Dir(syncDir)
 
-	err := commands.PushApply(claudeDir, syncDir, []string{"extra-plugin@local"}, nil, "Add extra plugin")
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		AddPlugins: []string{"extra-plugin@local"},
+		Message:    "Add extra plugin",
+	})
 	require.NoError(t, err)
 
 	// Re-read the config and verify.
@@ -175,7 +186,12 @@ func TestPushApply_V2_RemoveFromPinned(t *testing.T) {
 	exec.Command("git", "-C", syncDir, "commit", "-m", "Add pinned plugin").Run()
 
 	// Now remove the pinned plugin via PushApply.
-	err = commands.PushApply(claudeDir, syncDir, nil, []string{"pinned-plugin@marketplace"}, "Remove pinned plugin")
+	err = commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:     claudeDir,
+		SyncDir:       syncDir,
+		RemovePlugins: []string{"pinned-plugin@marketplace"},
+		Message:       "Remove pinned plugin",
+	})
 	require.NoError(t, err)
 
 	// Re-read and verify the pinned plugin was removed.
@@ -187,4 +203,63 @@ func TestPushApply_V2_RemoveFromPinned(t *testing.T) {
 	_, isPinned := cfg.Pinned["pinned-plugin@marketplace"]
 	assert.False(t, isPinned, "pinned plugin should be removed from Pinned")
 	assert.NotContains(t, cfg.Upstream, "pinned-plugin@marketplace", "pinned plugin should not be in Upstream")
+}
+
+func TestPushApply_ToProfile(t *testing.T) {
+	_, syncDir := setupV2PushEnv(t)
+	claudeDir := filepath.Dir(syncDir)
+
+	// Create a profile file.
+	profilesDir := filepath.Join(syncDir, "profiles")
+	require.NoError(t, os.MkdirAll(profilesDir, 0755))
+	profileData := []byte("plugins:\n  add:\n    - existing-tool@marketplace\n")
+	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, "work.yaml"), profileData, 0644))
+
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add work profile").Run()
+
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:     claudeDir,
+		SyncDir:       syncDir,
+		AddPlugins:    []string{"extra-plugin@local"},
+		ProfileTarget: "work",
+		Message:       "Add extra to work profile",
+	})
+	require.NoError(t, err)
+
+	// Plugin should NOT be in base upstream.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.NotContains(t, cfg.Upstream, "extra-plugin@local")
+
+	// Plugin should be in profile's Plugins.Add.
+	profile, err := profiles.ReadProfile(syncDir, "work")
+	require.NoError(t, err)
+	assert.Contains(t, profile.Plugins.Add, "extra-plugin@local")
+	assert.Contains(t, profile.Plugins.Add, "existing-tool@marketplace", "existing plugins preserved")
+}
+
+func TestPushApply_ExcludesPlugins(t *testing.T) {
+	_, syncDir := setupV2PushEnv(t)
+	claudeDir := filepath.Dir(syncDir)
+
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:      claudeDir,
+		SyncDir:        syncDir,
+		AddPlugins:     []string{"extra-plugin@local"},
+		ExcludePlugins: []string{"unwanted-a@mkt", "unwanted-b@mkt"},
+		Message:        "Add extra, exclude others",
+	})
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+
+	assert.Contains(t, cfg.Upstream, "extra-plugin@local")
+	assert.Contains(t, cfg.Excluded, "unwanted-a@mkt")
+	assert.Contains(t, cfg.Excluded, "unwanted-b@mkt")
 }
