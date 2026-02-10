@@ -214,3 +214,56 @@ func runPickerWithSections(title string, sections []pickerSection) ([]string, er
 	}
 	return selected, nil
 }
+
+// newPickerWithPreSelected creates a picker with section headers where specific items are pre-selected.
+// Unlike newPickerWithSections which pre-selects all items, this uses the preSelected map to determine
+// which items start selected.
+func newPickerWithPreSelected(title string, sections []pickerSection, preSelected map[string]bool) picker {
+	var items []string
+	headers := make(map[int]bool)
+	selected := make(map[int]bool)
+
+	for _, sec := range sections {
+		if len(sec.Items) == 0 {
+			continue
+		}
+		idx := len(items)
+		items = append(items, sec.Header)
+		headers[idx] = true
+		for _, item := range sec.Items {
+			itemIdx := len(items)
+			items = append(items, item)
+			if preSelected[item] {
+				selected[itemIdx] = true
+			}
+		}
+	}
+
+	// Start cursor on first non-header item.
+	cursor := 0
+	for cursor < len(items) && headers[cursor] {
+		cursor++
+	}
+
+	return picker{
+		title:    title,
+		items:    items,
+		headers:  headers,
+		selected: selected,
+		cursor:   cursor,
+	}
+}
+
+// runPickerWithPreSelected runs a multi-select picker with section headers and pre-selected items.
+func runPickerWithPreSelected(title string, sections []pickerSection, preSelected map[string]bool) ([]string, error) {
+	p := newPickerWithPreSelected(title, sections, preSelected)
+	model, err := tea.NewProgram(p).Run()
+	if err != nil {
+		return nil, err
+	}
+	selected := model.(picker).Selected()
+	if selected == nil {
+		return nil, huh.ErrUserAborted
+	}
+	return selected, nil
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -437,4 +438,124 @@ func TestApplySettings_SyncedHookOverridesLocal(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(hooksMap["PreCompact"], &entries))
 	assert.Equal(t, "new-command", entries[0].Hooks[0].Command)
+}
+
+// setupPullEnvWithProfile creates a sync dir with a config.yaml listing upstream plugins,
+// a profiles/ directory with a named profile YAML, and optionally sets the active-profile file.
+// Returns (claudeDir, syncDir).
+func setupPullEnvWithProfile(t *testing.T, configYAML string, profileName string, profile profiles.Profile, setActive bool) (string, string) {
+	t.Helper()
+
+	claudeDir := t.TempDir()
+	err := claudecode.Bootstrap(claudeDir)
+	require.NoError(t, err)
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	// Write config.yaml.
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+
+	// Write profile YAML.
+	profilesDir := filepath.Join(syncDir, "profiles")
+	require.NoError(t, os.MkdirAll(profilesDir, 0755))
+	profileData, err := profiles.MarshalProfile(profile)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, profileName+".yaml"), profileData, 0644))
+
+	// Set active profile if requested.
+	if setActive {
+		require.NoError(t, profiles.WriteActiveProfile(syncDir, profileName))
+	}
+
+	// Init a git repo.
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	return claudeDir, syncDir
+}
+
+func TestPull_AppliesProfilePluginAdds(t *testing.T) {
+	configYAML := `version: "2.0.0"
+plugins:
+  upstream:
+    - context7@claude-plugins-official
+`
+	profile := profiles.Profile{
+		Plugins: profiles.ProfilePlugins{
+			Add: []string{"extra-tool@some-marketplace"},
+		},
+	}
+
+	claudeDir, syncDir := setupPullEnvWithProfile(t, configYAML, "work", profile, true)
+
+	result, err := commands.PullDryRun(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, result.EffectiveDesired, "context7@claude-plugins-official")
+	assert.Contains(t, result.EffectiveDesired, "extra-tool@some-marketplace")
+	assert.Equal(t, "work", result.ActiveProfile)
+}
+
+func TestPull_AppliesProfilePluginRemoves(t *testing.T) {
+	configYAML := `version: "2.0.0"
+plugins:
+  upstream:
+    - context7@claude-plugins-official
+    - beads@beads-marketplace
+`
+	profile := profiles.Profile{
+		Plugins: profiles.ProfilePlugins{
+			Remove: []string{"beads@beads-marketplace"},
+		},
+	}
+
+	claudeDir, syncDir := setupPullEnvWithProfile(t, configYAML, "work", profile, true)
+
+	// Install both plugins so they show as synced rather than ToInstall.
+	pluginsPath := filepath.Join(claudeDir, "plugins", "installed_plugins.json")
+	data := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"beads@beads-marketplace": [{"scope":"user","installPath":"/p","version":"0.44","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	require.NoError(t, os.WriteFile(pluginsPath, []byte(data), 0644))
+
+	result, err := commands.PullDryRun(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, result.EffectiveDesired, "context7@claude-plugins-official")
+	assert.NotContains(t, result.EffectiveDesired, "beads@beads-marketplace")
+	assert.Equal(t, "work", result.ActiveProfile)
+}
+
+func TestPull_NoActiveProfile_BaseOnly(t *testing.T) {
+	configYAML := `version: "2.0.0"
+plugins:
+  upstream:
+    - context7@claude-plugins-official
+    - beads@beads-marketplace
+`
+	profile := profiles.Profile{
+		Plugins: profiles.ProfilePlugins{
+			Add: []string{"extra-tool@some-marketplace"},
+		},
+	}
+
+	// Profile exists but is NOT set as active.
+	claudeDir, syncDir := setupPullEnvWithProfile(t, configYAML, "work", profile, false)
+
+	result, err := commands.PullDryRun(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Should only have the base plugins, not the profile's additions.
+	assert.Contains(t, result.EffectiveDesired, "context7@claude-plugins-official")
+	assert.Contains(t, result.EffectiveDesired, "beads@beads-marketplace")
+	assert.NotContains(t, result.EffectiveDesired, "extra-tool@some-marketplace")
+	assert.Equal(t, "", result.ActiveProfile)
 }

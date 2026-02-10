@@ -12,6 +12,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
 
@@ -26,6 +27,7 @@ type PullResult struct {
 	SettingsApplied   []string
 	HooksApplied      []string
 	SkippedCategories []string
+	ActiveProfile     string // active profile applied (empty = base only)
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -60,6 +62,15 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		allDesired = append(allDesired, plugins.ForkedPluginKey(name))
 	}
 
+	// Apply active profile to desired plugins.
+	activeName, _ := profiles.ReadActiveProfile(syncDir)
+	if activeName != "" {
+		p, err := profiles.ReadProfile(syncDir, activeName)
+		if err == nil {
+			allDesired = profiles.MergePlugins(allDesired, p)
+		}
+	}
+
 	prefs := config.DefaultUserPreferences()
 	prefsPath := filepath.Join(syncDir, "user-preferences.yaml")
 	if prefsData, err := os.ReadFile(prefsPath); err == nil {
@@ -84,6 +95,7 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		Synced:           diff.Synced,
 		Untracked:        diff.Untracked,
 		EffectiveDesired: effectiveDesired,
+		ActiveProfile:    activeName,
 	}
 
 	if prefs.SyncMode == "exact" {
@@ -156,6 +168,16 @@ func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
 	if err == nil {
 		cfg, err := config.Parse(cfgData)
 		if err == nil {
+			// Merge active profile settings/hooks into config before applying.
+			activeName, _ := profiles.ReadActiveProfile(syncDir)
+			if activeName != "" {
+				p, err := profiles.ReadProfile(syncDir, activeName)
+				if err == nil {
+					cfg.Settings = profiles.MergeSettings(cfg.Settings, p)
+					cfg.Hooks = profiles.MergeHooks(cfg.Hooks, p)
+				}
+			}
+
 			if prefs.ShouldSkip(config.CategorySettings) {
 				cfg.Settings = nil
 				result.SkippedCategories = append(result.SkippedCategories, string(config.CategorySettings))

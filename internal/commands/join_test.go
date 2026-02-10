@@ -205,6 +205,53 @@ func TestJoin_NoSettingsOrHooks(t *testing.T) {
 	assert.Empty(t, result.HookNames)
 }
 
+func TestJoin_DetectsProfiles(t *testing.T) {
+	// Create a remote repo with config.yaml AND a profiles/ directory.
+	remote := t.TempDir()
+	exec.Command("git", "init", remote).Run()
+	exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
+
+	cfg := config.Config{
+		Version:  "2.0.0",
+		Upstream: []string{"context7@claude-plugins-official"},
+		Pinned:   map[string]string{},
+	}
+	cfgData, err := config.MarshalV2(cfg)
+	require.NoError(t, err)
+	os.WriteFile(filepath.Join(remote, "config.yaml"), cfgData, 0644)
+
+	// Create profiles/ directory with a work.yaml profile.
+	profilesDir := filepath.Join(remote, "profiles")
+	os.MkdirAll(profilesDir, 0755)
+	os.WriteFile(filepath.Join(profilesDir, "work.yaml"), []byte("plugins:\n  add:\n    - extra@marketplace\n"), 0644)
+
+	exec.Command("git", "-C", remote, "add", ".").Run()
+	exec.Command("git", "-C", remote, "commit", "-m", "init with profiles").Run()
+
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	result, err := commands.Join(remote, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.True(t, result.HasProfiles)
+	assert.Contains(t, result.ProfileNames, "work")
+}
+
+func TestJoin_NoProfiles(t *testing.T) {
+	// setupRemoteRepo creates no profiles dir.
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	result, err := commands.Join(remote, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.False(t, result.HasProfiles)
+	assert.Empty(t, result.ProfileNames)
+}
+
 func TestJoin_EmptyLocalInstallation(t *testing.T) {
 	remote := setupRemoteRepo(t, []string{
 		"context7@claude-plugins-official",

@@ -10,6 +10,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/paths"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
@@ -96,6 +97,41 @@ var joinCmd = &cobra.Command{
 				return fmt.Errorf("writing user preferences: %w", err)
 			}
 			fmt.Printf("  Skipping: %s (saved to user-preferences.yaml)\n", strings.Join(skipCategories, ", "))
+		}
+
+		// Profile activation.
+		if result.HasProfiles {
+			fmt.Println()
+			fmt.Printf("Found %d profile(s) available:\n", len(result.ProfileNames))
+			for _, name := range result.ProfileNames {
+				p, err := profiles.ReadProfile(syncDir, name)
+				if err == nil {
+					fmt.Printf("  %s: %s\n", capitalize(name), profiles.ProfileSummary(p))
+				}
+			}
+
+			options := make([]huh.Option[string], 0, len(result.ProfileNames)+1)
+			for _, name := range result.ProfileNames {
+				options = append(options, huh.NewOption(capitalize(name), name))
+			}
+			options = append(options, huh.NewOption("No — keep base only", ""))
+
+			var profileChoice string
+			fmt.Println()
+			err := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Activate a profile on this machine?").
+						Options(options...).
+						Value(&profileChoice),
+				),
+			).Run()
+			if err == nil && profileChoice != "" {
+				if err := profiles.WriteActiveProfile(syncDir, profileChoice); err != nil {
+					return fmt.Errorf("writing active profile: %w", err)
+				}
+				fmt.Printf("  Activated profile: %s\n", profileChoice)
+			}
 		}
 
 		// Local plugin cleanup.

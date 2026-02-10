@@ -9,6 +9,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 )
 
 // LocalPlugin describes a locally installed plugin not in the remote config.
@@ -24,6 +25,8 @@ type JoinResult struct {
 	HasHooks     bool
 	SettingsKeys []string // e.g. ["model"]
 	HookNames    []string // e.g. ["PreCompact", "SessionStart"]
+	HasProfiles  bool
+	ProfileNames []string
 }
 
 func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
@@ -68,6 +71,12 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 			result.HookNames = append(result.HookNames, k)
 		}
 		sort.Strings(result.HookNames)
+	}
+
+	profileNames, _ := profiles.ListProfiles(syncDir)
+	if len(profileNames) > 0 {
+		result.HasProfiles = true
+		result.ProfileNames = profileNames
 	}
 
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
