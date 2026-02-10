@@ -44,10 +44,11 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 
 	diff := csync.ComputePluginDiff(cfg.AllPluginKeys(), plugins.PluginKeys())
 
-	// Filter out untracked plugins that are covered by forked entries.
-	// Forked plugins are stored as simple names (e.g. "figma-minimal") but
-	// Claude Code sees full keys (e.g. "figma-minimal@claude-sync-forks"
-	// and "figma-minimal@figma-minimal-marketplace").
+	// Build filter sets.
+	excludedSet := make(map[string]bool, len(cfg.Excluded))
+	for _, e := range cfg.Excluded {
+		excludedSet[e] = true
+	}
 	forkedSet := make(map[string]bool, len(cfg.Forked))
 	for _, f := range cfg.Forked {
 		forkedSet[f] = true
@@ -55,13 +56,30 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 
 	var filtered []string
 	for _, p := range diff.Untracked {
+		// 1. Exact match against excluded list.
+		if excludedSet[p] {
+			continue
+		}
+
 		name := p
+		mkt := ""
 		if idx := strings.Index(p, "@"); idx > 0 {
 			name = p[:idx]
+			mkt = p[idx+1:]
 		}
-		if !forkedSet[name] {
-			filtered = append(filtered, p)
+
+		// 2. @claude-sync-forks entries are always init artifacts.
+		if mkt == "claude-sync-forks" {
+			continue
 		}
+
+		// 3. Forked name match (e.g. "figma-minimal" in cfg.Forked
+		//    covers "figma-minimal@figma-minimal-marketplace").
+		if forkedSet[name] {
+			continue
+		}
+
+		filtered = append(filtered, p)
 	}
 
 	return &PushScanResult{
@@ -92,6 +110,21 @@ func PushApply(claudeDir, syncDir string, addPlugins, removePlugins []string, me
 	for _, p := range removePlugins {
 		delete(upstreamSet, p)
 		delete(cfg.Pinned, p)
+	}
+
+	// Remove newly-added plugins from the excluded list.
+	if len(cfg.Excluded) > 0 && len(addPlugins) > 0 {
+		addSet := make(map[string]bool, len(addPlugins))
+		for _, p := range addPlugins {
+			addSet[p] = true
+		}
+		var remaining []string
+		for _, e := range cfg.Excluded {
+			if !addSet[e] {
+				remaining = append(remaining, e)
+			}
+		}
+		cfg.Excluded = remaining
 	}
 
 	cfg.Upstream = make([]string, 0, len(upstreamSet))

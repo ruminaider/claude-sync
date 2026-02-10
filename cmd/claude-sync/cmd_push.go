@@ -45,7 +45,7 @@ var pushCmd = &cobra.Command{
 			selectedRemove = scan.RemovedPlugins
 		} else {
 			if len(scan.AddedPlugins) > 0 {
-				selected, err := runPicker("Plugins to add to config:", scan.AddedPlugins)
+				selected, err := runPicker("New plugins installed since last sync:", scan.AddedPlugins)
 				if err != nil {
 					return err
 				}

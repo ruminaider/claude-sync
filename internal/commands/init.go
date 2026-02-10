@@ -286,6 +286,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		Upstream: upstream,
 		Pinned:   map[string]string{},
 		Forked:   forkedNames,
+		Excluded: result.ExcludedPlugins,
 		Settings: cfgSettings,
 		Hooks:    cfgHooks,
 	}
