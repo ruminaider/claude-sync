@@ -119,12 +119,16 @@ func UpdateApply(claudeDir, syncDir string, pluginKeys []string, quiet bool) (in
 		}
 	}
 
-	// Register local marketplace if there are forked plugins in the config.
+	// Register or unregister local marketplace based on forked plugins in config.
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err == nil {
 		cfg, err := config.Parse(cfgData)
-		if err == nil && len(cfg.Forked) > 0 {
-			_ = plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+		if err == nil {
+			if len(cfg.Forked) > 0 {
+				_ = plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+			} else {
+				_ = plugins.UnregisterLocalMarketplace(claudeDir)
+			}
 		}
 	}
 

@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -133,7 +135,7 @@ func TestUnfork(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now unfork it.
-	err = commands.Unfork(syncDir, "test-plugin", "test-marketplace")
+	err = commands.Unfork(claudeDir, syncDir, "test-plugin", "test-marketplace")
 	require.NoError(t, err)
 
 	// Verify plugin directory was removed.
@@ -154,4 +156,30 @@ func TestUnfork(t *testing.T) {
 	out, err := git.Run(syncDir, "log", "--oneline", "-1")
 	require.NoError(t, err)
 	assert.Contains(t, out, "Unfork test-plugin")
+}
+
+func TestUnfork_CleansUpMarketplaceWhenLastFork(t *testing.T) {
+	claudeDir, syncDir := setupForkTestEnv(t)
+
+	// Fork the plugin.
+	err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
+	require.NoError(t, err)
+
+	// Register the local marketplace (simulating what pull/init would do).
+	err = plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Verify the marketplace entry exists.
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	require.NoError(t, err)
+	assert.Contains(t, mkts, plugins.MarketplaceName)
+
+	// Unfork — this was the only forked plugin.
+	err = commands.Unfork(claudeDir, syncDir, "test-plugin", "test-marketplace")
+	require.NoError(t, err)
+
+	// Verify the marketplace entry was cleaned up.
+	mkts, err = claudecode.ReadMarketplaces(claudeDir)
+	require.NoError(t, err)
+	assert.NotContains(t, mkts, plugins.MarketplaceName, "marketplace entry should be removed when last fork is unforked")
 }

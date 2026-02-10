@@ -10,6 +10,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
 )
 
 // Fork copies a plugin from the Claude Code cache into the sync repo's plugins/
@@ -87,7 +88,8 @@ func Fork(claudeDir, syncDir, pluginKey string) error {
 }
 
 // Unfork removes a forked plugin directory and moves it back to upstream.
-func Unfork(syncDir, pluginName, marketplace string) error {
+// If this was the last forked plugin, the local marketplace entry is cleaned up.
+func Unfork(claudeDir, syncDir, pluginName, marketplace string) error {
 	// Remove <syncDir>/plugins/<pluginName>/ directory.
 	pluginDir := filepath.Join(syncDir, "plugins", pluginName)
 	if err := os.RemoveAll(pluginDir); err != nil {
@@ -107,6 +109,11 @@ func Unfork(syncDir, pluginName, marketplace string) error {
 
 	// Remove from forked.
 	cfg.Forked = removeFromSlice(cfg.Forked, pluginName)
+
+	// Clean up marketplace entry if no forks remain.
+	if len(cfg.Forked) == 0 {
+		_ = forkedplugins.UnregisterLocalMarketplace(claudeDir)
+	}
 
 	// Add <name>@<marketplace> back to upstream.
 	upstreamKey := pluginName + "@" + marketplace

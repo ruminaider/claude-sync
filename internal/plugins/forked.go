@@ -29,8 +29,16 @@ type marketplaceSource struct {
 
 // RegisterLocalMarketplace adds a claude-sync-forks entry to known_marketplaces.json
 // and generates a marketplace.json manifest listing all forked plugins.
-// It preserves existing marketplace entries. If the marketplaces file does not exist,
-// it bootstraps the Claude directory first.
+//
+// Claude Code only discovers plugins through registered marketplaces, so forked
+// plugins (which live in ~/.claude-sync/plugins/) need a local directory-based
+// marketplace entry to be visible. This function is called during init, pull, and
+// update whenever forked plugins exist. When all forks are removed, callers should
+// use UnregisterLocalMarketplace to clean up the entry.
+//
+// It preserves existing marketplace entries and is idempotent — safe to call
+// repeatedly. If the marketplaces file does not exist, it bootstraps the Claude
+// directory first.
 func RegisterLocalMarketplace(claudeDir, syncDir string) error {
 	mkts, err := claudecode.ReadMarketplaces(claudeDir)
 	if err != nil {
@@ -163,6 +171,32 @@ func generateMarketplaceManifest(pluginsDir string) error {
 	}
 
 	return os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), append(data, '\n'), 0644)
+}
+
+// UnregisterLocalMarketplace removes the claude-sync-forks entry from
+// known_marketplaces.json. This is the inverse of RegisterLocalMarketplace and
+// should be called when no forked plugins remain (e.g., after unforking the last
+// plugin or switching to a profile with no forks).
+//
+// It is a no-op if the entry doesn't exist or the file can't be read.
+// Returns an error only on write failures.
+func UnregisterLocalMarketplace(claudeDir string) error {
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	if err != nil {
+		return nil // file missing or unreadable — nothing to clean up
+	}
+
+	if _, ok := mkts[MarketplaceName]; !ok {
+		return nil // entry doesn't exist, nothing to do
+	}
+
+	delete(mkts, MarketplaceName)
+
+	if err := claudecode.WriteMarketplaces(claudeDir, mkts); err != nil {
+		return fmt.Errorf("writing marketplaces: %w", err)
+	}
+
+	return nil
 }
 
 // ListForkedPlugins scans <syncDir>/plugins/ for directories containing a valid

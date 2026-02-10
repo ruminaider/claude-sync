@@ -74,6 +74,27 @@ The bundled plugin gives you:
 - **Auto-sync on startup** - A `SessionStart` hook fetches remote changes and notifies you when updates are pending
 - **`/sync` command** - Run `/sync status`, `/sync pull`, or `/sync apply` directly in Claude Code
 
+## Plugin Forking
+
+When you initialize or join a shared config, claude-sync detects **non-portable plugins** — plugins installed from a local path or marketplace that isn't available on other machines. These are automatically forked:
+
+1. The plugin directory is copied to `~/.claude-sync/plugins/<name>/`
+2. The config records it in the `forked:` category instead of `upstream:`
+3. A **local marketplace** (`claude-sync-forks`) is registered in `~/.claude/plugins/known_marketplaces.json` so Claude Code can discover the forked plugins
+
+You can also manually fork and unfork plugins:
+
+```bash
+claude-sync fork <name>@<marketplace>    # Fork a plugin for local customization
+claude-sync unfork <name>@<marketplace>  # Return to upstream tracking
+```
+
+### Cleanup
+
+The local marketplace entry is automatically removed when no forked plugins remain — for example, after unforking the last plugin, switching to a profile with no forks, or running `pull` against a config with no forks.
+
+If you see a **"Failed to load marketplace 'claude-sync-forks'"** warning from Claude Code, run `claude-sync pull` to clean up the stale entry, or manually remove the `claude-sync-forks` key from `~/.claude/plugins/known_marketplaces.json`.
+
 ## Supported Platforms
 
 | OS    | Architecture |
