@@ -25,12 +25,12 @@ var (
 type initStep int
 
 const (
-	stepPluginStrategy  initStep = iota
+	stepConfigStyle     initStep = iota // ask simple vs profiles
+	stepPluginStrategy
 	stepPluginPicker
 	stepSettings
 	stepHookStrategy
 	stepHookPicker
-	stepProfilePrompt
 	stepProfileName
 	stepProfilePlugins
 	stepProfileSettings
@@ -94,6 +94,7 @@ var initCmd = &cobra.Command{
 		var includeHooks map[string]json.RawMessage // nil = all
 
 		// Profile-related variables.
+		var useProfiles bool
 		var createdProfiles map[string]profiles.Profile // name -> profile
 		var activeProfile string
 		var currentProfileName string
@@ -124,31 +125,68 @@ var initCmd = &cobra.Command{
 		if hasPlugins {
 			step = stepPluginStrategy
 		}
+		if !initSkipProfiles && hasPlugins {
+			step = stepConfigStyle
+		}
 		firstStep := step
 
 		for step != stepDone {
 			switch step {
-			case stepPluginStrategy:
+			case stepConfigStyle:
 				var choice string
 				fmt.Println()
 				err := huh.NewForm(
 					huh.NewGroup(
 						huh.NewSelect[string]().
-							Title(fmt.Sprintf("Include all %d plugins in sync?", len(scan.PluginKeys))).
+							Title("Configuration style:").
 							Options(
-								huh.NewOption("Share all (Recommended)", "all"),
-								huh.NewOption("Choose which to share", "some"),
-								huh.NewOption("Don't share any plugins", "none"),
+								huh.NewOption("Simple (single config)", "simple"),
+								huh.NewOption("With profiles (e.g., work, personal)", "profiles"),
 							).
 							Value(&choice),
 					),
 				).Run()
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
-						if step == firstStep {
-							return err
+						return err
+					}
+					return err
+				}
+				useProfiles = (choice == "profiles")
+				step = stepPluginStrategy
+
+			case stepPluginStrategy:
+				title := fmt.Sprintf("Include all %d plugins in sync?", len(scan.PluginKeys))
+				optAll := "Share all (Recommended)"
+				optSome := "Choose which to share"
+				optNone := "Don't share any plugins"
+				if useProfiles {
+					title = fmt.Sprintf("Base plugins (shared by all profiles) — %d found:", len(scan.PluginKeys))
+					optAll = "Include all (Recommended)"
+					optSome = "Choose which to include"
+					optNone = "Don't include any plugins"
+				}
+
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(title).
+							Options(
+								huh.NewOption(optAll, "all"),
+								huh.NewOption(optSome, "some"),
+								huh.NewOption(optNone, "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
+							continue
 						}
-						// Can't go back further from first step.
 						return err
 					}
 					return err
@@ -193,7 +231,12 @@ var initCmd = &cobra.Command{
 					})
 				}
 
-				selected, err := runPickerWithSections("Select plugins to share:", sections)
+				pickerTitle := "Select plugins to share:"
+				if useProfiles {
+					pickerTitle = "Select base plugins:"
+				}
+
+				selected, err := runPickerWithSections(pickerTitle, sections)
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
 						step = stepPluginStrategy
@@ -217,12 +260,17 @@ var initCmd = &cobra.Command{
 				}
 				sort.Strings(keys)
 
+				settingsTitle := fmt.Sprintf("Include settings in sync? (%s)", strings.Join(keys, ", "))
+				if useProfiles {
+					settingsTitle = fmt.Sprintf("Include settings in base config? (%s)", strings.Join(keys, ", "))
+				}
+
 				var confirm bool
 				fmt.Println()
 				err := huh.NewForm(
 					huh.NewGroup(
 						huh.NewConfirm().
-							Title(fmt.Sprintf("Include settings in sync? (%s)", strings.Join(keys, ", "))).
+							Title(settingsTitle).
 							Affirmative("Yes").
 							Negative("No").
 							Value(&confirm),
@@ -266,16 +314,27 @@ var initCmd = &cobra.Command{
 					}
 				}
 
+				hookTitle := fmt.Sprintf("Sync hooks? (Found: %s)", strings.Join(hookSummary, ", "))
+				hookOptAll := "Share all"
+				hookOptSome := "Choose which to share"
+				hookOptNone := "Don't share hooks"
+				if useProfiles {
+					hookTitle = fmt.Sprintf("Base hooks (shared by all profiles) — Found: %s", strings.Join(hookSummary, ", "))
+					hookOptAll = "Include all"
+					hookOptSome = "Choose which to include"
+					hookOptNone = "Don't include hooks"
+				}
+
 				var choice string
 				fmt.Println()
 				err := huh.NewForm(
 					huh.NewGroup(
 						huh.NewSelect[string]().
-							Title(fmt.Sprintf("Sync hooks? (Found: %s)", strings.Join(hookSummary, ", "))).
+							Title(hookTitle).
 							Options(
-								huh.NewOption("Share all", "all"),
-								huh.NewOption("Choose which to share", "some"),
-								huh.NewOption("Don't share hooks", "none"),
+								huh.NewOption(hookOptAll, "all"),
+								huh.NewOption(hookOptSome, "some"),
+								huh.NewOption(hookOptNone, "none"),
 							).
 							Value(&choice),
 					),
@@ -328,7 +387,12 @@ var initCmd = &cobra.Command{
 					displayToName[display] = name
 				}
 
-				selected, err := runPicker("Select hooks to share:", displayItems)
+				hookPickerTitle := "Select hooks to share:"
+				if useProfiles {
+					hookPickerTitle = "Select base hooks:"
+				}
+
+				selected, err := runPicker(hookPickerTitle, displayItems)
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
 						step = stepHookStrategy
@@ -356,62 +420,36 @@ var initCmd = &cobra.Command{
 			basePluginKeys = includePlugins
 		}
 
-		// Profile creation loop — only show if there are plugins and profiles aren't skipped.
-		if !initSkipProfiles && len(allPluginKeys) > 0 {
-			step = stepProfilePrompt
+		// Profile creation loop — only enter if user chose "With profiles".
+		if useProfiles {
+			// Show a summary of base config before entering profile creation.
+			fmt.Println()
+			fmt.Printf("Base configured: %d plugin(s)", len(basePluginKeys))
+			if includeSettings && len(scan.Settings) > 0 {
+				settingKeys := make([]string, 0, len(scan.Settings))
+				for k := range scan.Settings {
+					settingKeys = append(settingKeys, k)
+				}
+				sort.Strings(settingKeys)
+				fmt.Printf(", settings: %s", strings.Join(settingKeys, ", "))
+			}
+			if includeHooks == nil || len(includeHooks) > 0 {
+				hookCount := len(scan.Hooks)
+				if includeHooks != nil {
+					hookCount = len(includeHooks)
+				}
+				if hookCount > 0 {
+					fmt.Printf(", %d hook(s)", hookCount)
+				}
+			}
+			fmt.Println()
+
+			createdProfiles = make(map[string]profiles.Profile)
+			step = stepProfileName
 		}
 
 		for step != stepDone {
 			switch step {
-			case stepProfilePrompt:
-				// Show a summary of base config.
-				fmt.Println()
-				fmt.Printf("Base configured: %d plugin(s)", len(basePluginKeys))
-				if includeSettings && len(scan.Settings) > 0 {
-					settingKeys := make([]string, 0, len(scan.Settings))
-					for k := range scan.Settings {
-						settingKeys = append(settingKeys, k)
-					}
-					sort.Strings(settingKeys)
-					fmt.Printf(", settings: %s", strings.Join(settingKeys, ", "))
-				}
-				if includeHooks == nil || len(includeHooks) > 0 {
-					hookCount := len(scan.Hooks)
-					if includeHooks != nil {
-						hookCount = len(includeHooks)
-					}
-					if hookCount > 0 {
-						fmt.Printf(", %d hook(s)", hookCount)
-					}
-				}
-				fmt.Println()
-
-				var wantProfiles bool
-				err := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title("Set up profiles? (e.g., work/personal layers on top of base)").
-							Affirmative("Yes").
-							Negative("No").
-							Value(&wantProfiles),
-					),
-				).Run()
-				if err != nil {
-					if errors.Is(err, huh.ErrUserAborted) {
-						// Escaping from the profile prompt skips profiles entirely.
-						step = stepDone
-						continue
-					}
-					return err
-				}
-
-				if !wantProfiles {
-					step = stepDone
-				} else {
-					createdProfiles = make(map[string]profiles.Profile)
-					step = stepProfileName
-				}
-
 			case stepProfileName:
 				// Build preset options, filtering out already-used names.
 				type nameOption struct {
@@ -446,11 +484,8 @@ var initCmd = &cobra.Command{
 				).Run()
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
-						if len(createdProfiles) == 0 {
-							step = stepProfilePrompt
-						} else {
-							step = stepDone
-						}
+						// Esc from profile name — skip profiles entirely.
+						step = stepDone
 						continue
 					}
 					return err
