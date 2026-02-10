@@ -252,6 +252,55 @@ func TestUnregisterLocalMarketplace_PreservesOtherEntries(t *testing.T) {
 	assert.Len(t, mkts, 1)
 }
 
+func TestUnregisterLocalMarketplace_CleansUpStaleRefs(t *testing.T) {
+	claudeDir := setupClaudeDir(t)
+	syncDir := setupSyncDir(t)
+
+	// Register the marketplace so there's something to unregister.
+	err := plugins.RegisterLocalMarketplace(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Seed settings.json with enabledPlugins — mix of stale and valid entries.
+	settings := map[string]json.RawMessage{
+		"enabledPlugins": json.RawMessage(`{"foo@claude-sync-forks":true,"bar@other-marketplace":true}`),
+		"someOtherKey":   json.RawMessage(`"preserve-me"`),
+	}
+	err = claudecode.WriteSettings(claudeDir, settings)
+	require.NoError(t, err)
+
+	// Seed installed_plugins.json with matching entries.
+	ip := &claudecode.InstalledPlugins{
+		Version: 2,
+		Plugins: map[string][]claudecode.PluginInstallation{
+			"foo@claude-sync-forks": {{Scope: "user", Version: "1.0.0"}},
+			"bar@other-marketplace": {{Scope: "user", Version: "2.0.0"}},
+		},
+	}
+	err = claudecode.WriteInstalledPlugins(claudeDir, ip)
+	require.NoError(t, err)
+
+	// Unregister — should clean up stale refs.
+	err = plugins.UnregisterLocalMarketplace(claudeDir)
+	require.NoError(t, err)
+
+	// Verify enabledPlugins: stale entry removed, other preserved.
+	gotSettings, err := claudecode.ReadSettings(claudeDir)
+	require.NoError(t, err)
+	var gotEnabled map[string]bool
+	err = json.Unmarshal(gotSettings["enabledPlugins"], &gotEnabled)
+	require.NoError(t, err)
+	assert.NotContains(t, gotEnabled, "foo@claude-sync-forks")
+	assert.Contains(t, gotEnabled, "bar@other-marketplace")
+	// Other settings keys should be preserved.
+	assert.Contains(t, gotSettings, "someOtherKey")
+
+	// Verify installed_plugins.json: stale entry removed, other preserved.
+	gotIP, err := claudecode.ReadInstalledPlugins(claudeDir)
+	require.NoError(t, err)
+	assert.NotContains(t, gotIP.Plugins, "foo@claude-sync-forks")
+	assert.Contains(t, gotIP.Plugins, "bar@other-marketplace")
+}
+
 func TestRegisterLocalMarketplace_RemovesNestedMarketplaceJSON(t *testing.T) {
 	claudeDir := setupClaudeDir(t)
 	syncDir := setupSyncDir(t)
