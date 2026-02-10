@@ -272,7 +272,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 	sort.Strings(result.IncludedHooks)
 
 	cfg := config.Config{
-		Version:  "2.1.0",
+		Version:  "1.0.0",
 		Upstream: upstream,
 		Pinned:   map[string]string{},
 		Forked:   forkedNames,

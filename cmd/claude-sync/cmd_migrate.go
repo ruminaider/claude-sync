@@ -11,8 +11,8 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migrate v1 config to v2 (categorized plugins)",
-	Long:  "Interactively categorize each plugin as upstream, pinned, or forked and upgrade the config format to v2.",
+	Short: "Migrate legacy config format (no longer needed)",
+	Long:  "This command was used to migrate from a legacy flat-list config format. It is no longer needed.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		syncDir := paths.SyncDir()
 

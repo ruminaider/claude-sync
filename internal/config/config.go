@@ -10,8 +10,6 @@ import (
 )
 
 // ConfigV2 represents ~/.claude-sync/config.yaml with categorized plugins.
-// Version "1.0.0" uses a flat plugin list (all Upstream).
-// Version "2.0.0" uses categorized plugins: upstream, pinned, forked.
 type ConfigV2 struct {
 	Version  string            `yaml:"version"`
 	Upstream []string          `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
@@ -113,20 +111,10 @@ func Parse(data []byte) (Config, error) {
 	return cfg, nil
 }
 
-// parsePluginsNode parses the plugins node, handling both v1 (sequence) and v2 (mapping) formats.
+// parsePluginsNode parses the plugins mapping node with upstream/pinned/forked/excluded.
 func parsePluginsNode(node *yaml.Node, cfg *Config) error {
 	switch node.Kind {
-	case yaml.SequenceNode:
-		// V1 format: flat list -> all go to Upstream
-		var plugins []string
-		if err := node.Decode(&plugins); err != nil {
-			return fmt.Errorf("decoding plugin list: %w", err)
-		}
-		cfg.Upstream = plugins
-		return nil
-
 	case yaml.MappingNode:
-		// V2 format: categorized mapping with upstream/pinned/forked
 		for i := 0; i < len(node.Content)-1; i += 2 {
 			keyNode := node.Content[i]
 			valNode := node.Content[i+1]
@@ -316,38 +304,9 @@ func MarshalV2(cfg Config) ([]byte, error) {
 	return yaml.Marshal(doc)
 }
 
-// marshalV1 serializes a Config to V1 YAML format with flat plugin list.
-func marshalV1(cfg Config) ([]byte, error) {
-	hooksStrMap := make(map[string]string, len(cfg.Hooks))
-	for k, v := range cfg.Hooks {
-		hooksStrMap[k] = string(v)
-	}
-	v1 := struct {
-		Version  string            `yaml:"version"`
-		Plugins  []string          `yaml:"plugins"`
-		Settings map[string]any    `yaml:"settings,omitempty"`
-		Hooks    map[string]string `yaml:"hooks,omitempty"`
-	}{
-		Version:  cfg.Version,
-		Plugins:  cfg.Upstream,
-		Settings: cfg.Settings,
-		Hooks:    hooksStrMap,
-	}
-	return yaml.Marshal(v1)
-}
-
-// Marshal serializes a Config to YAML bytes. It auto-selects v1 or v2
-// format based on the version string.
+// Marshal serializes a Config to YAML bytes.
 func Marshal(cfg Config) ([]byte, error) {
-	if isV2(cfg.Version) {
-		return MarshalV2(cfg)
-	}
-	return marshalV1(cfg)
-}
-
-// isV2 returns true if the version string indicates a v2 config.
-func isV2(version string) bool {
-	return strings.HasPrefix(version, "2.")
+	return MarshalV2(cfg)
 }
 
 // ExpandHookCommand converts a simple command string to the full hook JSON format.

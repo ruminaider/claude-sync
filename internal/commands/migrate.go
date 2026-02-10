@@ -4,26 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 )
 
-// MigrateNeeded reads config.yaml from syncDir and returns true if the
-// config version is less than "2" (i.e., still v1 format).
+// MigrateNeeded always returns false — the legacy v1 flat-list format
+// is no longer supported.
 func MigrateNeeded(syncDir string) (bool, error) {
-	data, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
-	if err != nil {
-		return false, fmt.Errorf("reading config: %w", err)
-	}
-
-	cfg, err := config.Parse(data)
-	if err != nil {
-		return false, fmt.Errorf("parsing config: %w", err)
-	}
-
-	return !strings.HasPrefix(cfg.Version, "2."), nil
+	return false, nil
 }
 
 // MigratePlugins reads the plugin list from a v1 config. In v1 format the
@@ -58,7 +47,7 @@ func MigrateApply(syncDir string, categories map[string]string, versions map[str
 	}
 
 	newCfg := config.ConfigV2{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Pinned:   make(map[string]string),
 		Settings: oldCfg.Settings,
 		Hooks:    oldCfg.Hooks,

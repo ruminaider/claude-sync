@@ -48,9 +48,7 @@ func Pin(syncDir, pluginKey, version string) error {
 		cfg.Pinned[pluginKey] = version
 	}
 
-	cfg.Version = "2.0.0"
-
-	newData, err := config.MarshalV2(cfg)
+	newData, err := config.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}
@@ -89,9 +87,7 @@ func Unpin(syncDir, pluginKey string) error {
 	delete(cfg.Pinned, pluginKey)
 	cfg.Upstream = append(cfg.Upstream, pluginKey)
 
-	cfg.Version = "2.0.0"
-
-	newData, err := config.MarshalV2(cfg)
+	newData, err := config.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}

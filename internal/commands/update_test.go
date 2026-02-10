@@ -34,7 +34,7 @@ func setupUpdateTestEnv(t *testing.T) (claudeDir, syncDir string) {
 	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
 
 	// Create v2 config with upstream, pinned, and forked
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -96,7 +96,7 @@ func TestUpdateCheck_UpstreamOnly(t *testing.T) {
 	}`
 	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(installedPlugins), 0644)
 
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -124,7 +124,7 @@ func TestUpdateCheck_NotInstalledPlugin(t *testing.T) {
 	installedPlugins := `{"version": 2, "plugins": {}}`
 	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(installedPlugins), 0644)
 
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official

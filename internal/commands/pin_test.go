@@ -19,7 +19,7 @@ func setupV2TestEnv(t *testing.T) string {
 	require.NoError(t, os.MkdirAll(syncDir, 0755))
 
 	cfg := config.ConfigV2{
-		Version: "2.0.0",
+		Version: "1.0.0",
 		Upstream: []string{
 			"context7@claude-plugins-official",
 			"beads@beads-marketplace",

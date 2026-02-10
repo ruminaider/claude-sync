@@ -95,7 +95,7 @@ func setupV2StatusEnv(t *testing.T) (claudeDir, syncDir string) {
 
 	// Create v2 config
 	cfg := config.ConfigV2{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{"context7@claude-plugins-official"},
 		Pinned:   map[string]string{"beads@beads-marketplace": "0.44"},
 		Forked:   []string{"my-fork"},
@@ -113,7 +113,7 @@ func TestStatusV2(t *testing.T) {
 	result, err := commands.Status(claudeDir, syncDir)
 	require.NoError(t, err)
 
-	assert.Equal(t, "2.0.0", result.ConfigVersion)
+	assert.Equal(t, "1.0.0", result.ConfigVersion)
 
 	// Upstream: context7 is installed
 	require.Len(t, result.UpstreamSynced, 1)
@@ -194,7 +194,7 @@ func TestStatusJSON(t *testing.T) {
 	// Verify config_version value
 	var version string
 	json.Unmarshal(parsed["config_version"], &version)
-	assert.Equal(t, "2.0.0", version)
+	assert.Equal(t, "1.0.0", version)
 
 	// Verify upstream_synced content
 	var upstreamSynced []commands.PluginStatus

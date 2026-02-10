@@ -41,55 +41,30 @@ func setupMigrateSyncDir(t *testing.T, cfgContent string) string {
 	return syncDir
 }
 
-func TestMigrateDetectsV1(t *testing.T) {
-	v1Config := `version: "1.0.0"
-plugins:
-  - context7@claude-plugins-official
-  - beads@beads-marketplace
-settings:
-  model: opus
-`
-	syncDir := setupMigrateSyncDir(t, v1Config)
-
-	needed, err := commands.MigrateNeeded(syncDir)
+func TestMigrateNeeded_AlwaysFalse(t *testing.T) {
+	needed, err := commands.MigrateNeeded("/nonexistent")
 	require.NoError(t, err)
-	assert.True(t, needed, "v1 config should need migration")
-}
-
-func TestMigrateNotNeededForV2(t *testing.T) {
-	v2Config := `version: "2.0.0"
-plugins:
-  upstream:
-    - context7@claude-plugins-official
-  pinned:
-    - beads@beads-marketplace: "0.44.0"
-  forked:
-    - figma-minimal
-`
-	syncDir := setupMigrateSyncDir(t, v2Config)
-
-	needed, err := commands.MigrateNeeded(syncDir)
-	require.NoError(t, err)
-	assert.False(t, needed, "v2 config should not need migration")
+	assert.False(t, needed, "MigrateNeeded should always return false")
 }
 
 func TestMigrateApply(t *testing.T) {
-	v1Config := `version: "1.0.0"
+	cfgContent := `version: "1.0.0"
 plugins:
-  - context7@claude-plugins-official
-  - beads@beads-marketplace
-  - figma-minimal@claude-plugins-official
+  upstream:
+    - context7@claude-plugins-official
+    - beads@beads-marketplace
+    - figma-minimal@claude-plugins-official
 settings:
   model: opus
 hooks:
   PreCompact: "bd prime"
 `
-	syncDir := setupMigrateSyncDir(t, v1Config)
+	syncDir := setupMigrateSyncDir(t, cfgContent)
 
 	categories := map[string]string{
-		"context7@claude-plugins-official":      "upstream",
-		"beads@beads-marketplace":               "pinned",
-		"figma-minimal@claude-plugins-official":  "forked",
+		"context7@claude-plugins-official":     "upstream",
+		"beads@beads-marketplace":              "pinned",
+		"figma-minimal@claude-plugins-official": "forked",
 	}
 	versions := map[string]string{
 		"beads@beads-marketplace": "0.44.0",
@@ -105,7 +80,7 @@ hooks:
 	cfg, err := config.Parse(data)
 	require.NoError(t, err)
 
-	assert.Equal(t, "2.0.0", cfg.Version)
+	assert.Equal(t, "1.0.0", cfg.Version)
 	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
 	assert.Equal(t, "0.44.0", cfg.Pinned["beads@beads-marketplace"])
 	assert.Contains(t, cfg.Forked, "figma-minimal@claude-plugins-official")
@@ -113,21 +88,15 @@ hooks:
 	// Settings and hooks should be preserved.
 	assert.Equal(t, "opus", cfg.Settings["model"])
 	assertHookHasCommand(t, cfg.Hooks["PreCompact"], "bd prime")
-
-	// Verify git committed the change.
-	gitLog := exec.Command("git", "log", "--oneline", "-1")
-	gitLog.Dir = syncDir
-	out, err := gitLog.Output()
-	require.NoError(t, err)
-	assert.Contains(t, string(out), "Migrate config to v2")
 }
 
 func TestMigrateApply_PinnedRequiresVersion(t *testing.T) {
-	v1Config := `version: "1.0.0"
+	cfgContent := `version: "1.0.0"
 plugins:
-  - beads@beads-marketplace
+  upstream:
+    - beads@beads-marketplace
 `
-	syncDir := setupMigrateSyncDir(t, v1Config)
+	syncDir := setupMigrateSyncDir(t, cfgContent)
 
 	categories := map[string]string{
 		"beads@beads-marketplace": "pinned",
@@ -141,12 +110,13 @@ plugins:
 }
 
 func TestMigratePlugins(t *testing.T) {
-	v1Config := `version: "1.0.0"
+	cfgContent := `version: "1.0.0"
 plugins:
-  - context7@claude-plugins-official
-  - beads@beads-marketplace
+  upstream:
+    - context7@claude-plugins-official
+    - beads@beads-marketplace
 `
-	syncDir := setupMigrateSyncDir(t, v1Config)
+	syncDir := setupMigrateSyncDir(t, cfgContent)
 
 	plugins, err := commands.MigratePlugins(syncDir)
 	require.NoError(t, err)
