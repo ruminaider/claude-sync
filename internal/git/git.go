@@ -109,3 +109,21 @@ func HasRemote(dir, name string) bool {
 	_, err := Run(dir, "remote", "get-url", name)
 	return err == nil
 }
+
+// HasUpstream returns true if the current branch has an upstream tracking branch.
+func HasUpstream(dir string) bool {
+	_, err := Run(dir, "rev-parse", "--abbrev-ref", "@{u}")
+	return err == nil
+}
+
+// HasUnpushedCommits returns true if there are local commits not yet pushed
+// to the remote. Returns true if no upstream is configured (all commits are unpushed).
+func HasUnpushedCommits(dir string) bool {
+	if !HasUpstream(dir) {
+		// No upstream tracking — any local commits count as unpushed.
+		out, err := Run(dir, "rev-list", "HEAD")
+		return err == nil && out != ""
+	}
+	out, err := Run(dir, "rev-list", "@{u}..HEAD")
+	return err == nil && out != ""
+}

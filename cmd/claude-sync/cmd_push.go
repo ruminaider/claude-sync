@@ -34,6 +34,25 @@ var pushCmd = &cobra.Command{
 		}
 
 		if !scan.HasChanges() {
+			// No config changes, but there may be unpushed commits (e.g., fresh init).
+			if git.HasRemote(syncDir, "origin") && git.HasUnpushedCommits(syncDir) {
+				fmt.Println("No new changes. Pushing existing commits...")
+				if !git.HasUpstream(syncDir) {
+					branch, err := git.CurrentBranch(syncDir)
+					if err != nil {
+						return fmt.Errorf("detecting branch: %w", err)
+					}
+					if err := git.PushWithUpstream(syncDir, "origin", branch); err != nil {
+						return fmt.Errorf("pushing: %w", err)
+					}
+				} else {
+					if err := git.Push(syncDir); err != nil {
+						return fmt.Errorf("pushing: %w", err)
+					}
+				}
+				fmt.Println("Pushed to remote.")
+				return nil
+			}
 			fmt.Println("Nothing to push. Everything matches config.")
 			return nil
 		}
