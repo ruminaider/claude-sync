@@ -94,7 +94,7 @@ func setupV2PullEnv(t *testing.T) (claudeDir, syncDir string) {
 	require.NoError(t, os.MkdirAll(syncDir, 0755))
 
 	// Write a v2 config.yaml with upstream and forked plugins
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -343,7 +343,7 @@ func setupPullEnvWithSettingsAndHooks(t *testing.T) (claudeDir, syncDir string) 
 	syncDir = filepath.Join(t.TempDir(), ".claude-sync")
 	require.NoError(t, os.MkdirAll(syncDir, 0755))
 
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -479,7 +479,7 @@ func setupPullEnvWithProfile(t *testing.T, configYAML string, profileName string
 }
 
 func TestPull_AppliesProfilePluginAdds(t *testing.T) {
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -501,7 +501,7 @@ plugins:
 }
 
 func TestPull_AppliesProfilePluginRemoves(t *testing.T) {
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -535,7 +535,7 @@ plugins:
 }
 
 func TestPull_NoActiveProfile_BaseOnly(t *testing.T) {
-	configYAML := `version: "2.0.0"
+	configYAML := `version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official

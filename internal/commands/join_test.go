@@ -23,7 +23,7 @@ func setupRemoteRepo(t *testing.T, pluginKeys []string) string {
 	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
 
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: pluginKeys,
 		Pinned:   map[string]string{},
 	}
@@ -73,7 +73,7 @@ func TestJoin(t *testing.T) {
 	exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run()
 	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
 
-	cfgContent := "version: \"1.0.0\"\nplugins:\n  - context7@claude-plugins-official\n"
+	cfgContent := "version: \"1.0.0\"\nplugins:\n  upstream:\n    - context7@claude-plugins-official\n"
 	os.WriteFile(filepath.Join(remote, "config.yaml"), []byte(cfgContent), 0644)
 	exec.Command("git", "-C", remote, "add", ".").Run()
 	exec.Command("git", "-C", remote, "commit", "-m", "init").Run()
@@ -101,7 +101,7 @@ func TestJoin_BootstrapsClaudeDir(t *testing.T) {
 	exec.Command("git", "init", remote).Run()
 	exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run()
 	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
-	os.WriteFile(filepath.Join(remote, "config.yaml"), []byte("version: \"1.0.0\"\nplugins: []\n"), 0644)
+	os.WriteFile(filepath.Join(remote, "config.yaml"), []byte("version: \"1.0.0\"\nplugins:\n  upstream: []\n"), 0644)
 	exec.Command("git", "-C", remote, "add", ".").Run()
 	exec.Command("git", "-C", remote, "commit", "-m", "init").Run()
 
@@ -167,7 +167,7 @@ func TestJoin_ExposesConfigCategories(t *testing.T) {
 	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
 
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{"context7@claude-plugins-official"},
 		Pinned:   map[string]string{},
 		Settings: map[string]any{"model": "opus"},
@@ -213,7 +213,7 @@ func TestJoin_DetectsProfiles(t *testing.T) {
 	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
 
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{"context7@claude-plugins-official"},
 		Pinned:   map[string]string{},
 	}

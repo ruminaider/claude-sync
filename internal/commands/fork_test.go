@@ -56,7 +56,7 @@ func setupForkTestEnv(t *testing.T) (claudeDir, syncDir string) {
 	// Create syncDir with v2 config listing the plugin as upstream.
 	require.NoError(t, os.MkdirAll(syncDir, 0755))
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{pluginName + "@" + marketplace},
 		Pinned:   map[string]string{},
 	}

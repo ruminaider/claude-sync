@@ -79,7 +79,7 @@ func TestInit(t *testing.T) {
 	cfg, err := config.Parse(cfgData)
 	require.NoError(t, err)
 
-	assert.Equal(t, "2.1.0", cfg.Version)
+	assert.Equal(t, "1.0.0", cfg.Version)
 	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
 	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace")
 }
@@ -152,7 +152,7 @@ func TestInit_CreatesV2Config(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, err := config.Parse(data)
 	require.NoError(t, err)
-	assert.Equal(t, "2.1.0", cfg.Version)
+	assert.Equal(t, "1.0.0", cfg.Version)
 	assert.NotEmpty(t, cfg.Upstream)
 	assert.Empty(t, cfg.Pinned)
 	assert.Empty(t, cfg.Forked)

@@ -30,12 +30,13 @@ func makeHookJSON(command string) json.RawMessage {
 }
 
 func TestParseConfig(t *testing.T) {
-	t.Run("phase 1 simple format", func(t *testing.T) {
+	t.Run("categorized format", func(t *testing.T) {
 		input := []byte(`version: "1.0.0"
 plugins:
-  - context7@claude-plugins-official
-  - episodic-memory@superpowers-marketplace
-  - beads@beads-marketplace
+  upstream:
+    - context7@claude-plugins-official
+    - episodic-memory@superpowers-marketplace
+    - beads@beads-marketplace
 settings:
   model: opus
 hooks:
@@ -53,7 +54,8 @@ hooks:
 
 	t.Run("empty config", func(t *testing.T) {
 		input := []byte(`version: "1.0.0"
-plugins: []
+plugins:
+  upstream: []
 `)
 		cfg, err := config.Parse(input)
 		require.NoError(t, err)
@@ -89,7 +91,7 @@ func TestMarshalConfig(t *testing.T) {
 }
 
 func TestParseConfigV2(t *testing.T) {
-	input := []byte(`version: "2.0.0"
+	input := []byte(`version: "1.0.0"
 plugins:
   upstream:
     - context7@claude-plugins-official
@@ -104,35 +106,16 @@ settings:
 `)
 	cfg, err := config.Parse(input)
 	require.NoError(t, err)
-	assert.Equal(t, "2.0.0", cfg.Version)
+	assert.Equal(t, "1.0.0", cfg.Version)
 	assert.Equal(t, []string{"context7@claude-plugins-official", "playwright@claude-plugins-official"}, cfg.Upstream)
 	assert.Equal(t, "0.44.0", cfg.Pinned["beads@beads-marketplace"])
 	assert.Equal(t, []string{"compound-engineering-django-ts", "figma-minimal"}, cfg.Forked)
 	assert.Equal(t, "opus", cfg.Settings["model"])
 }
 
-func TestParseConfigV1Compat(t *testing.T) {
-	input := []byte(`version: "1.0.0"
-plugins:
-  - context7@claude-plugins-official
-  - beads@beads-marketplace
-  - episodic-memory@superpowers-marketplace
-`)
-	cfg, err := config.Parse(input)
-	require.NoError(t, err)
-	assert.Equal(t, "1.0.0", cfg.Version)
-	assert.Equal(t, []string{
-		"context7@claude-plugins-official",
-		"beads@beads-marketplace",
-		"episodic-memory@superpowers-marketplace",
-	}, cfg.Upstream)
-	assert.Empty(t, cfg.Pinned)
-	assert.Empty(t, cfg.Forked)
-}
-
 func TestMarshalConfigV2(t *testing.T) {
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{"context7@claude-plugins-official", "playwright@claude-plugins-official"},
 		Pinned:   map[string]string{"beads@beads-marketplace": "0.44.0"},
 		Forked:   []string{"figma-minimal"},
@@ -145,50 +128,34 @@ func TestMarshalConfigV2(t *testing.T) {
 	// Round-trip: parse back and verify
 	parsed, err := config.Parse(data)
 	require.NoError(t, err)
-	assert.Equal(t, "2.0.0", parsed.Version)
+	assert.Equal(t, "1.0.0", parsed.Version)
 	assert.Equal(t, cfg.Upstream, parsed.Upstream)
 	assert.Equal(t, cfg.Pinned, parsed.Pinned)
 	assert.Equal(t, cfg.Forked, parsed.Forked)
 	assert.Equal(t, "opus", parsed.Settings["model"])
 }
 
-func TestMarshalAutoSelectsFormat(t *testing.T) {
-	t.Run("v1 uses flat format", func(t *testing.T) {
-		cfg := config.Config{
-			Version:  "1.0.0",
-			Upstream: []string{"a@b", "c@d"},
-		}
-		data, err := config.Marshal(cfg)
-		require.NoError(t, err)
+func TestMarshalRoundTrip(t *testing.T) {
+	cfg := config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@b"},
+		Pinned:   map[string]string{"c@d": "1.0"},
+		Forked:   []string{"e"},
+	}
+	data, err := config.Marshal(cfg)
+	require.NoError(t, err)
 
-		parsed, err := config.Parse(data)
-		require.NoError(t, err)
-		assert.Equal(t, "1.0.0", parsed.Version)
-		assert.Equal(t, cfg.Upstream, parsed.Upstream)
-	})
-
-	t.Run("v2 uses categorized format", func(t *testing.T) {
-		cfg := config.Config{
-			Version:  "2.0.0",
-			Upstream: []string{"a@b"},
-			Pinned:   map[string]string{"c@d": "1.0"},
-			Forked:   []string{"e"},
-		}
-		data, err := config.Marshal(cfg)
-		require.NoError(t, err)
-
-		parsed, err := config.Parse(data)
-		require.NoError(t, err)
-		assert.Equal(t, "2.0.0", parsed.Version)
-		assert.Equal(t, cfg.Upstream, parsed.Upstream)
-		assert.Equal(t, cfg.Pinned, parsed.Pinned)
-		assert.Equal(t, cfg.Forked, parsed.Forked)
-	})
+	parsed, err := config.Parse(data)
+	require.NoError(t, err)
+	assert.Equal(t, "1.0.0", parsed.Version)
+	assert.Equal(t, cfg.Upstream, parsed.Upstream)
+	assert.Equal(t, cfg.Pinned, parsed.Pinned)
+	assert.Equal(t, cfg.Forked, parsed.Forked)
 }
 
 func TestAllPluginKeys(t *testing.T) {
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{"context7@claude-plugins-official", "playwright@claude-plugins-official"},
 		Pinned:   map[string]string{"beads@beads-marketplace": "0.44.0"},
 		Forked:   []string{"figma-minimal"},
@@ -209,7 +176,7 @@ func TestAllPluginKeys(t *testing.T) {
 
 func TestAllPluginKeys_NoDuplicates(t *testing.T) {
 	cfg := config.Config{
-		Version:  "2.0.0",
+		Version:  "1.0.0",
 		Upstream: []string{"context7@claude-plugins-official"},
 		Pinned:   map[string]string{"context7@claude-plugins-official": "1.0"},
 		Forked:   []string{},
@@ -222,7 +189,7 @@ func TestAllPluginKeys_NoDuplicates(t *testing.T) {
 
 func TestAllPluginKeys_EmptyConfig(t *testing.T) {
 	cfg := config.Config{
-		Version: "2.0.0",
+		Version: "1.0.0",
 		Pinned:  map[string]string{},
 	}
 
@@ -289,7 +256,8 @@ func TestMarshalUserPreferences(t *testing.T) {
 func TestParseConfig_BackwardCompatHooks(t *testing.T) {
 	t.Run("old format plain string is expanded", func(t *testing.T) {
 		input := []byte(`version: "1.0.0"
-plugins: []
+plugins:
+  upstream: []
 hooks:
   PreCompact: "bd prime"
 `)
@@ -299,7 +267,7 @@ hooks:
 	})
 
 	t.Run("new format JSON string is preserved", func(t *testing.T) {
-		input := []byte(`version: "2.0.0"
+		input := []byte(`version: "1.0.0"
 plugins:
   upstream: []
 hooks:
@@ -313,7 +281,7 @@ hooks:
 	t.Run("round-trip preserves raw JSON", func(t *testing.T) {
 		rawJSON := `[{"matcher":"proj/.*","hooks":[{"type":"command","command":"lint"},{"type":"command","command":"test"}]}]`
 		cfg := config.Config{
-			Version:  "2.0.0",
+			Version:  "1.0.0",
 			Upstream: []string{"a@b"},
 			Pinned:   map[string]string{},
 			Hooks: map[string]json.RawMessage{

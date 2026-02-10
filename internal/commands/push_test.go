@@ -97,7 +97,7 @@ func setupV2PushEnv(t *testing.T) (claudeDir, syncDir string) {
 
 	// Create v2 config with upstream and pinned plugins.
 	cfg := config.ConfigV2{
-		Version: "2.0.0",
+		Version: "1.0.0",
 		Upstream: []string{
 			"beads@beads-marketplace",
 			"context7@claude-plugins-official",
@@ -158,8 +158,7 @@ func TestPushApply_V2(t *testing.T) {
 
 	// New plugin should be in upstream.
 	assert.Contains(t, cfg.Upstream, "extra-plugin@local")
-	// Config should still be v2.
-	assert.Equal(t, "2.0.0", cfg.Version)
+	assert.Equal(t, "1.0.0", cfg.Version)
 	// Original plugins should still be present.
 	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
 	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace")

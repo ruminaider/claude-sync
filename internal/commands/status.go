@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -76,68 +75,66 @@ func Status(claudeDir, syncDir string) (*StatusResult, error) {
 		ConfigVersion: cfg.Version,
 	}
 
-	// V2 categorized logic
-	if strings.HasPrefix(cfg.Version, "2.") {
-		installedSet := make(map[string]bool)
-		for _, k := range installedPlugins.PluginKeys() {
-			installedSet[k] = true
-		}
+	// Categorized status for upstream, pinned, and forked plugins.
+	installedSet := make(map[string]bool)
+	for _, k := range installedPlugins.PluginKeys() {
+		installedSet[k] = true
+	}
 
-		// Build version lookup from installed plugins
-		versionLookup := make(map[string]string)
-		for key, installs := range installedPlugins.Plugins {
-			if len(installs) > 0 {
-				versionLookup[key] = installs[0].Version
-			}
+	// Build version lookup from installed plugins
+	versionLookup := make(map[string]string)
+	for key, installs := range installedPlugins.Plugins {
+		if len(installs) > 0 {
+			versionLookup[key] = installs[0].Version
 		}
+	}
 
-		// Upstream plugins
-		for _, key := range cfg.Upstream {
-			ps := PluginStatus{
-				Key:              key,
-				InstalledVersion: versionLookup[key],
-				Installed:        installedSet[key],
-			}
-			if installedSet[key] {
-				result.UpstreamSynced = append(result.UpstreamSynced, ps)
-			} else {
-				result.UpstreamMissing = append(result.UpstreamMissing, ps)
-			}
+	// Upstream plugins
+	for _, key := range cfg.Upstream {
+		ps := PluginStatus{
+			Key:              key,
+			InstalledVersion: versionLookup[key],
+			Installed:        installedSet[key],
 		}
-
-		// Pinned plugins
-		for key, pinnedVer := range cfg.Pinned {
-			ps := PluginStatus{
-				Key:              key,
-				InstalledVersion: versionLookup[key],
-				PinnedVersion:    pinnedVer,
-				Installed:        installedSet[key],
-			}
-			if installedSet[key] {
-				result.PinnedSynced = append(result.PinnedSynced, ps)
-			} else {
-				result.PinnedMissing = append(result.PinnedMissing, ps)
-			}
+		if installedSet[key] {
+			result.UpstreamSynced = append(result.UpstreamSynced, ps)
+		} else {
+			result.UpstreamMissing = append(result.UpstreamMissing, ps)
 		}
+	}
 
-		// Forked plugins — check both name@claude-sync-forks and plain name
-		for _, name := range cfg.Forked {
-			forkKey := plugins.ForkedPluginKey(name)
-			installed := installedSet[forkKey] || installedSet[name]
-			ver := versionLookup[forkKey]
-			if ver == "" {
-				ver = versionLookup[name]
-			}
-			ps := PluginStatus{
-				Key:              name,
-				InstalledVersion: ver,
-				Installed:        installed,
-			}
-			if installed {
-				result.ForkedSynced = append(result.ForkedSynced, ps)
-			} else {
-				result.ForkedMissing = append(result.ForkedMissing, ps)
-			}
+	// Pinned plugins
+	for key, pinnedVer := range cfg.Pinned {
+		ps := PluginStatus{
+			Key:              key,
+			InstalledVersion: versionLookup[key],
+			PinnedVersion:    pinnedVer,
+			Installed:        installedSet[key],
+		}
+		if installedSet[key] {
+			result.PinnedSynced = append(result.PinnedSynced, ps)
+		} else {
+			result.PinnedMissing = append(result.PinnedMissing, ps)
+		}
+	}
+
+	// Forked plugins — check both name@claude-sync-forks and plain name
+	for _, name := range cfg.Forked {
+		forkKey := plugins.ForkedPluginKey(name)
+		installed := installedSet[forkKey] || installedSet[name]
+		ver := versionLookup[forkKey]
+		if ver == "" {
+			ver = versionLookup[name]
+		}
+		ps := PluginStatus{
+			Key:              name,
+			InstalledVersion: ver,
+			Installed:        installed,
+		}
+		if installed {
+			result.ForkedSynced = append(result.ForkedSynced, ps)
+		} else {
+			result.ForkedMissing = append(result.ForkedMissing, ps)
 		}
 	}
 
