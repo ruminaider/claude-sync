@@ -781,12 +781,6 @@ var initCmd = &cobra.Command{
 				fmt.Printf("    → %s\n", p)
 			}
 		}
-		if len(result.Skipped) > 0 {
-			fmt.Printf("  Skipped:     %d plugin(s) (local scope)\n", len(result.Skipped))
-			for _, p := range result.Skipped {
-				fmt.Printf("    → %s\n", p)
-			}
-		}
 		if len(result.ExcludedPlugins) > 0 {
 			fmt.Printf("  Excluded:    %d plugin(s) (not selected)\n", len(result.ExcludedPlugins))
 		}

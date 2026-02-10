@@ -7,6 +7,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/paths"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
@@ -39,17 +40,30 @@ var pushCmd = &cobra.Command{
 
 		var selectedAdd []string
 		var selectedRemove []string
+		var unselectedPlugins []string
+		var profileTarget string
 
 		if pushAll {
 			selectedAdd = scan.AddedPlugins
 			selectedRemove = scan.RemovedPlugins
 		} else {
 			if len(scan.AddedPlugins) > 0 {
-				selected, err := runPicker("New plugins installed since last sync:", scan.AddedPlugins)
+				selected, err := runPicker("Untracked plugins:", scan.AddedPlugins)
 				if err != nil {
 					return err
 				}
 				selectedAdd = selected
+
+				// Compute unselected plugins for exclusion.
+				selectedSet := make(map[string]bool, len(selectedAdd))
+				for _, s := range selectedAdd {
+					selectedSet[s] = true
+				}
+				for _, p := range scan.AddedPlugins {
+					if !selectedSet[p] {
+						unselectedPlugins = append(unselectedPlugins, p)
+					}
+				}
 			}
 		}
 
@@ -58,7 +72,43 @@ var pushCmd = &cobra.Command{
 			return nil
 		}
 
-		if err := commands.PushApply(claudeDir, syncDir, selectedAdd, selectedRemove, pushMessage); err != nil {
+		// Profile routing prompt (only when adding plugins interactively).
+		if len(selectedAdd) > 0 && !pushAll {
+			profileNames, err := profiles.ListProfiles(syncDir)
+			if err != nil {
+				return err
+			}
+			if len(profileNames) > 0 {
+				options := make([]huh.Option[string], 0, len(profileNames)+1)
+				options = append(options, huh.NewOption("Base config (shared by all profiles)", ""))
+				for _, name := range profileNames {
+					options = append(options, huh.NewOption("Profile: "+name, name))
+				}
+
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title("Add selected plugins to:").
+							Options(options...).
+							Value(&profileTarget),
+					),
+				).Run()
+				if err != nil {
+					// Esc on profile prompt defaults to base config.
+					profileTarget = ""
+				}
+			}
+		}
+
+		if err := commands.PushApply(commands.PushApplyOptions{
+			ClaudeDir:      claudeDir,
+			SyncDir:        syncDir,
+			AddPlugins:     selectedAdd,
+			RemovePlugins:  selectedRemove,
+			ExcludePlugins: unselectedPlugins,
+			ProfileTarget:  profileTarget,
+			Message:        pushMessage,
+		}); err != nil {
 			return err
 		}
 
