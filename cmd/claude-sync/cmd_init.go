@@ -431,7 +431,7 @@ var initCmd = &cobra.Command{
 				}
 				options = append(options, huh.NewOption("Custom name...", "_custom"))
 				if len(createdProfiles) > 0 {
-					options = append(options, huh.NewOption("No more profiles", "_done"))
+					options = append(options, huh.NewOption("Done creating profiles", "_done"))
 				}
 
 				var nameChoice string
@@ -449,7 +449,7 @@ var initCmd = &cobra.Command{
 						if len(createdProfiles) == 0 {
 							step = stepProfilePrompt
 						} else {
-							step = stepProfileActivate
+							step = stepDone
 						}
 						continue
 					}
@@ -458,7 +458,7 @@ var initCmd = &cobra.Command{
 
 				switch nameChoice {
 				case "_done":
-					step = stepProfileActivate
+					step = stepDone
 				case "_custom":
 					var customName string
 					err := huh.NewForm(
@@ -705,10 +705,11 @@ var initCmd = &cobra.Command{
 			case stepProfileLoop:
 				// Save the completed profile and reset for next one.
 				createdProfiles[currentProfileName] = currentProfile
+				fmt.Printf("  ✓ Profile %q configured\n", currentProfileName)
 				currentProfile = profiles.Profile{}
 				currentProfileName = ""
 
-				// Go to stepProfileName which will show "No more profiles" option.
+				// Go to stepProfileName which will show "Done creating profiles" option.
 				step = stepProfileName
 
 			case stepProfileActivate:

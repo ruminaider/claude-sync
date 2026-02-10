@@ -44,8 +44,28 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 
 	diff := csync.ComputePluginDiff(cfg.AllPluginKeys(), plugins.PluginKeys())
 
+	// Filter out untracked plugins that are covered by forked entries.
+	// Forked plugins are stored as simple names (e.g. "figma-minimal") but
+	// Claude Code sees full keys (e.g. "figma-minimal@claude-sync-forks"
+	// and "figma-minimal@figma-minimal-marketplace").
+	forkedSet := make(map[string]bool, len(cfg.Forked))
+	for _, f := range cfg.Forked {
+		forkedSet[f] = true
+	}
+
+	var filtered []string
+	for _, p := range diff.Untracked {
+		name := p
+		if idx := strings.Index(p, "@"); idx > 0 {
+			name = p[:idx]
+		}
+		if !forkedSet[name] {
+			filtered = append(filtered, p)
+		}
+	}
+
 	return &PushScanResult{
-		AddedPlugins:   diff.Untracked,
+		AddedPlugins:   filtered,
 		RemovedPlugins: diff.ToInstall,
 	}, nil
 }
