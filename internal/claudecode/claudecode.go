@@ -107,6 +107,16 @@ func WriteMarketplaces(claudeDir string, mkts map[string]json.RawMessage) error 
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// WriteInstalledPlugins writes installed_plugins.json.
+func WriteInstalledPlugins(claudeDir string, ip *InstalledPlugins) error {
+	data, err := json.MarshalIndent(ip, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling installed plugins: %w", err)
+	}
+	path := filepath.Join(claudeDir, "plugins", "installed_plugins.json")
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // Bootstrap creates minimal Claude Code directory structure for fresh machines.
 func Bootstrap(claudeDir string) error {
 	pluginDir := filepath.Join(claudeDir, "plugins")

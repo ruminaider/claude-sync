@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
@@ -196,6 +197,10 @@ func UnregisterLocalMarketplace(claudeDir string) error {
 		return fmt.Errorf("writing marketplaces: %w", err)
 	}
 
+	// Best-effort: remove stale enabledPlugins and installed_plugins entries
+	// that reference the marketplace we just removed.
+	cleanupStalePluginRefs(claudeDir, MarketplaceName)
+
 	return nil
 }
 
@@ -229,6 +234,49 @@ func ListForkedPlugins(syncDir string) ([]string, error) {
 		plugins = []string{}
 	}
 	return plugins, nil
+}
+
+// cleanupStalePluginRefs removes references to the given marketplace from
+// settings.json (enabledPlugins) and installed_plugins.json. This is best-effort;
+// all errors are silently ignored since the marketplace itself is already gone.
+func cleanupStalePluginRefs(claudeDir, marketplace string) {
+	suffix := "@" + marketplace
+
+	// Clean enabledPlugins in settings.json.
+	if settings, err := claudecode.ReadSettings(claudeDir); err == nil {
+		if raw, ok := settings["enabledPlugins"]; ok {
+			var enabled map[string]bool
+			if json.Unmarshal(raw, &enabled) == nil {
+				changed := false
+				for key := range enabled {
+					if strings.HasSuffix(key, suffix) {
+						delete(enabled, key)
+						changed = true
+					}
+				}
+				if changed {
+					if data, err := json.Marshal(enabled); err == nil {
+						settings["enabledPlugins"] = json.RawMessage(data)
+						_ = claudecode.WriteSettings(claudeDir, settings)
+					}
+				}
+			}
+		}
+	}
+
+	// Clean installed_plugins.json.
+	if ip, err := claudecode.ReadInstalledPlugins(claudeDir); err == nil {
+		changed := false
+		for key := range ip.Plugins {
+			if strings.HasSuffix(key, suffix) {
+				delete(ip.Plugins, key)
+				changed = true
+			}
+		}
+		if changed {
+			_ = claudecode.WriteInstalledPlugins(claudeDir, ip)
+		}
+	}
 }
 
 // ForkedPluginKey returns the marketplace-qualified plugin key for a forked plugin.
