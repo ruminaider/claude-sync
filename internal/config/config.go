@@ -17,6 +17,7 @@ type ConfigV2 struct {
 	Upstream []string          `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
 	Pinned   map[string]string `yaml:"-"` // parsed from plugins.pinned (key -> version)
 	Forked   []string          `yaml:"-"` // parsed from plugins.forked
+	Excluded []string          `yaml:"-"` // plugins user excluded during init
 	Settings map[string]any                `yaml:"settings,omitempty"`
 	Hooks    map[string]json.RawMessage `yaml:"-"`
 }
@@ -147,6 +148,12 @@ func parsePluginsNode(node *yaml.Node, cfg *Config) error {
 					return fmt.Errorf("decoding forked plugins: %w", err)
 				}
 				cfg.Forked = forked
+			case "excluded":
+				var excluded []string
+				if err := valNode.Decode(&excluded); err != nil {
+					return fmt.Errorf("decoding excluded plugins: %w", err)
+				}
+				cfg.Excluded = excluded
 			}
 		}
 		return nil
@@ -254,6 +261,20 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		pluginsMap.Content = append(pluginsMap.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "forked", Tag: "!!str"},
 			forkedSeq,
+		)
+	}
+
+	// excluded
+	if len(cfg.Excluded) > 0 {
+		excludedSeq := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, e := range cfg.Excluded {
+			excludedSeq.Content = append(excludedSeq.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Value: e, Tag: "!!str"},
+			)
+		}
+		pluginsMap.Content = append(pluginsMap.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "excluded", Tag: "!!str"},
+			excludedSeq,
 		)
 	}
 
