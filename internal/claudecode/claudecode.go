@@ -117,6 +117,77 @@ func WriteInstalledPlugins(claudeDir string, ip *InstalledPlugins) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// ReadMCPConfig reads ~/.claude/.mcp.json as a map of server configs.
+// Returns empty map if file doesn't exist.
+func ReadMCPConfig(claudeDir string) (map[string]json.RawMessage, error) {
+	path := filepath.Join(claudeDir, ".mcp.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]json.RawMessage{}, nil
+		}
+		return nil, fmt.Errorf("reading MCP config: %w", err)
+	}
+
+	// .mcp.json has a top-level "mcpServers" key
+	var wrapper struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		// Try direct map format as fallback
+		var direct map[string]json.RawMessage
+		if err2 := json.Unmarshal(data, &direct); err2 != nil {
+			return nil, fmt.Errorf("parsing MCP config: %w", err)
+		}
+		return direct, nil
+	}
+	if wrapper.MCPServers == nil {
+		return map[string]json.RawMessage{}, nil
+	}
+	return wrapper.MCPServers, nil
+}
+
+// WriteMCPConfig writes the MCP server configs to ~/.claude/.mcp.json.
+func WriteMCPConfig(claudeDir string, mcp map[string]json.RawMessage) error {
+	wrapper := map[string]any{
+		"mcpServers": mcp,
+	}
+	data, err := json.MarshalIndent(wrapper, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling MCP config: %w", err)
+	}
+	path := filepath.Join(claudeDir, ".mcp.json")
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+// ReadKeybindings reads ~/.claude/keybindings.json.
+// Returns empty map if file doesn't exist.
+func ReadKeybindings(claudeDir string) (map[string]any, error) {
+	path := filepath.Join(claudeDir, "keybindings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, fmt.Errorf("reading keybindings: %w", err)
+	}
+	var kb map[string]any
+	if err := json.Unmarshal(data, &kb); err != nil {
+		return nil, fmt.Errorf("parsing keybindings: %w", err)
+	}
+	return kb, nil
+}
+
+// WriteKeybindings writes keybindings to ~/.claude/keybindings.json.
+func WriteKeybindings(claudeDir string, kb map[string]any) error {
+	data, err := json.MarshalIndent(kb, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling keybindings: %w", err)
+	}
+	path := filepath.Join(claudeDir, "keybindings.json")
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // Bootstrap creates minimal Claude Code directory structure for fresh machines.
 func Bootstrap(claudeDir string) error {
 	pluginDir := filepath.Join(claudeDir, "plugins")

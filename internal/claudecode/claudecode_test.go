@@ -108,3 +108,44 @@ func TestBootstrap(t *testing.T) {
 	_, err = os.Stat(filepath.Join(dir, "plugins", "known_marketplaces.json"))
 	assert.NoError(t, err)
 }
+
+func TestReadWriteMCPConfig(t *testing.T) {
+	dir := t.TempDir()
+	mcp := map[string]json.RawMessage{
+		"context7": json.RawMessage(`{"type":"stdio","command":"npx","args":["-y","@context7/mcp"]}`),
+	}
+	err := claudecode.WriteMCPConfig(dir, mcp)
+	require.NoError(t, err)
+
+	loaded, err := claudecode.ReadMCPConfig(dir)
+	require.NoError(t, err)
+	assert.Contains(t, loaded, "context7")
+}
+
+func TestReadMCPConfig_Missing(t *testing.T) {
+	dir := t.TempDir()
+	loaded, err := claudecode.ReadMCPConfig(dir)
+	require.NoError(t, err)
+	assert.Empty(t, loaded)
+}
+
+func TestReadWriteKeybindings(t *testing.T) {
+	dir := t.TempDir()
+	kb := map[string]any{
+		"ctrl+s": "save",
+		"ctrl+q": "quit",
+	}
+	err := claudecode.WriteKeybindings(dir, kb)
+	require.NoError(t, err)
+
+	loaded, err := claudecode.ReadKeybindings(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "save", loaded["ctrl+s"])
+}
+
+func TestReadKeybindings_Missing(t *testing.T) {
+	dir := t.TempDir()
+	loaded, err := claudecode.ReadKeybindings(dir)
+	require.NoError(t, err)
+	assert.Empty(t, loaded)
+}
