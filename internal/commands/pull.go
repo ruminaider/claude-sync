@@ -7,8 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"time"
 
+	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/plugins"
@@ -17,17 +20,30 @@ import (
 )
 
 type PullResult struct {
-	ToInstall         []string
-	ToRemove          []string
-	Synced            []string
-	Untracked         []string
-	EffectiveDesired  []string
-	Installed         []string
-	Failed            []string
-	SettingsApplied   []string
-	HooksApplied      []string
-	SkippedCategories []string
-	ActiveProfile     string // active profile applied (empty = base only)
+	ToInstall          []string
+	ToRemove           []string
+	Synced             []string
+	Untracked          []string
+	EffectiveDesired   []string
+	Installed          []string
+	Failed             []string
+	SettingsApplied    []string
+	HooksApplied       []string
+	SkippedCategories  []string
+	ActiveProfile      string // active profile applied (empty = base only)
+	PermissionsApplied bool
+	ClaudeMDAssembled  bool
+	MCPApplied         []string
+	KeybindingsApplied bool
+	PendingHighRisk    []approval.Change
+}
+
+// PullOptions configures pull behavior.
+type PullOptions struct {
+	ClaudeDir string
+	SyncDir   string
+	Quiet     bool
+	Auto      bool // auto mode: safe changes auto-apply, high-risk deferred to pending
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -108,9 +124,27 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 	return result, nil
 }
 
+// Pull is the backward-compatible wrapper.
 func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
+	return PullWithOptions(PullOptions{
+		ClaudeDir: claudeDir,
+		SyncDir:   syncDir,
+		Quiet:     quiet,
+	})
+}
+
+func PullWithOptions(opts PullOptions) (*PullResult, error) {
+	claudeDir := opts.ClaudeDir
+	syncDir := opts.SyncDir
+	quiet := opts.Quiet
+
 	if _, err := os.Stat(syncDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("claude-sync not initialized. Run 'claude-sync init' or 'claude-sync join <url>'")
+	}
+
+	// In auto mode, push any unpushed commits before pulling.
+	if opts.Auto && git.HasRemote(syncDir, "origin") && git.HasUnpushedCommits(syncDir) {
+		_ = git.Push(syncDir) // best-effort push before pull
 	}
 
 	if git.HasRemote(syncDir, "origin") {
@@ -165,18 +199,21 @@ func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
 		prefs, _ = config.ParseUserPreferences(prefsData)
 	}
 
-	// Apply settings and hooks from config, respecting skip preferences.
+	// Parse config for settings, hooks, and new surfaces.
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err == nil {
 		cfg, err := config.Parse(cfgData)
 		if err == nil {
-			// Merge active profile settings/hooks into config before applying.
+			// Merge active profile into config before applying.
 			activeName, _ := profiles.ReadActiveProfile(syncDir)
+			var activeProfile *profiles.Profile
 			if activeName != "" {
-				p, err := profiles.ReadProfile(syncDir, activeName)
-				if err == nil {
+				p, pErr := profiles.ReadProfile(syncDir, activeName)
+				if pErr == nil {
+					activeProfile = &p
 					cfg.Settings = profiles.MergeSettings(cfg.Settings, p)
 					cfg.Hooks = profiles.MergeHooks(cfg.Hooks, p)
+					cfg.Permissions = profiles.MergePermissions(cfg.Permissions, p)
 				}
 			}
 
@@ -189,7 +226,17 @@ func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
 				result.SkippedCategories = append(result.SkippedCategories, string(config.CategoryHooks))
 			}
 
-			applied, hookNames, applyErr := ApplySettings(claudeDir, cfg)
+			// Determine which high-risk items to skip in auto mode.
+			skipHooks := opts.Auto
+			skipPermissions := opts.Auto
+			skipMCP := opts.Auto
+
+			// Apply settings and hooks (hooks skipped in auto mode).
+			settingsCfg := cfg
+			if skipHooks {
+				settingsCfg.Hooks = nil
+			}
+			applied, hookNames, applyErr := ApplySettings(claudeDir, settingsCfg)
 			if applyErr != nil {
 				if !quiet {
 					fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
@@ -197,6 +244,108 @@ func Pull(claudeDir, syncDir string, quiet bool) (*PullResult, error) {
 			} else {
 				result.SettingsApplied = applied
 				result.HooksApplied = hookNames
+			}
+
+			// Apply permissions (additive merge, skipped in auto mode).
+			if !skipPermissions && (len(cfg.Permissions.Allow) > 0 || len(cfg.Permissions.Deny) > 0) {
+				if !prefs.ShouldSkip(config.CategoryPermissions) {
+					if applyPermissions(claudeDir, cfg.Permissions) == nil {
+						result.PermissionsApplied = true
+					}
+				}
+			}
+
+			// Assemble CLAUDE.md from fragments (always safe).
+			includes := cfg.ClaudeMD.Include
+			if activeProfile != nil {
+				includes = profiles.MergeClaudeMD(includes, *activeProfile)
+			}
+			if len(includes) > 0 {
+				assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
+				if asmErr == nil && assembled != "" {
+					claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+					if os.WriteFile(claudeMDPath, []byte(assembled), 0644) == nil {
+						result.ClaudeMDAssembled = true
+					}
+				}
+			}
+
+			// Apply MCP servers (additive merge, skipped in auto mode).
+			mcpServers := cfg.MCP
+			if activeProfile != nil {
+				mcpServers = profiles.MergeMCP(mcpServers, *activeProfile)
+			}
+			if !skipMCP && len(mcpServers) > 0 {
+				if !prefs.ShouldSkip(config.CategoryMCP) {
+					existing, _ := claudecode.ReadMCPConfig(claudeDir)
+					for k, v := range mcpServers {
+						existing[k] = v
+					}
+					if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
+						result.MCPApplied = make([]string, 0, len(mcpServers))
+						for k := range mcpServers {
+							result.MCPApplied = append(result.MCPApplied, k)
+						}
+						sort.Strings(result.MCPApplied)
+					}
+				}
+			}
+
+			// Apply keybindings (always safe).
+			kbConfig := cfg.Keybindings
+			if activeProfile != nil {
+				kbConfig = profiles.MergeKeybindings(kbConfig, *activeProfile)
+			}
+			if len(kbConfig) > 0 {
+				if claudecode.WriteKeybindings(claudeDir, kbConfig) == nil {
+					result.KeybindingsApplied = true
+				}
+			}
+
+			// In auto mode, write high-risk items to pending.
+			if opts.Auto {
+				changes := approval.ConfigChanges{
+					Settings:       cfg.Settings,
+					HasHookChanges: len(cfg.Hooks) > 0,
+				}
+				if len(cfg.Permissions.Allow) > 0 || len(cfg.Permissions.Deny) > 0 {
+					changes.Permissions = &approval.PermissionChanges{
+						Allow: cfg.Permissions.Allow,
+						Deny:  cfg.Permissions.Deny,
+					}
+				}
+				if len(mcpServers) > 0 {
+					changes.HasMCPChanges = true
+				}
+				if len(kbConfig) > 0 {
+					changes.Keybindings = true
+				}
+				if len(includes) > 0 {
+					changes.ClaudeMD = includes
+				}
+
+				classified := approval.Classify(changes)
+
+				if len(classified.HighRisk) > 0 {
+					pending := approval.PendingChanges{
+						PendingSince: time.Now().UTC().Format(time.RFC3339),
+					}
+					if len(cfg.Permissions.Allow) > 0 || len(cfg.Permissions.Deny) > 0 {
+						pending.Permissions = &approval.PendingPermissions{
+							Allow: cfg.Permissions.Allow,
+							Deny:  cfg.Permissions.Deny,
+						}
+					}
+					if len(mcpServers) > 0 {
+						pending.MCP = mcpServers
+					}
+					if len(cfg.Hooks) > 0 {
+						pending.Hooks = cfg.Hooks
+					}
+
+					_ = approval.WritePending(syncDir, pending)
+					result.PendingHighRisk = classified.HighRisk
+				}
 			}
 		}
 	}
@@ -276,5 +425,52 @@ func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, err
 	sort.Strings(settingsApplied)
 	sort.Strings(hooksApplied)
 	return settingsApplied, hooksApplied, nil
+}
+
+// applyPermissions additively merges permissions into settings.json.
+func applyPermissions(claudeDir string, perms config.Permissions) error {
+	settings, err := claudecode.ReadSettings(claudeDir)
+	if err != nil {
+		settings = make(map[string]json.RawMessage)
+	}
+
+	var existingPerms struct {
+		Allow []string `json:"allow"`
+		Deny  []string `json:"deny"`
+	}
+	if permRaw, ok := settings["permissions"]; ok {
+		json.Unmarshal(permRaw, &existingPerms)
+	}
+
+	mergedAllow := appendUniqueStrings(existingPerms.Allow, perms.Allow)
+	mergedDeny := appendUniqueStrings(existingPerms.Deny, perms.Deny)
+
+	permData, err := json.Marshal(map[string]any{
+		"allow": mergedAllow,
+		"deny":  mergedDeny,
+	})
+	if err != nil {
+		return fmt.Errorf("marshaling permissions: %w", err)
+	}
+	settings["permissions"] = json.RawMessage(permData)
+
+	return claudecode.WriteSettings(claudeDir, settings)
+}
+
+// appendUniqueStrings appends items from add to base without duplicates.
+func appendUniqueStrings(base, add []string) []string {
+	seen := make(map[string]bool, len(base))
+	for _, s := range base {
+		seen[s] = true
+	}
+	result := make([]string, len(base))
+	copy(result, base)
+	for _, s := range add {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	return result
 }
 

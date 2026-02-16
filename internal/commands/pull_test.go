@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/plugins"
@@ -558,4 +560,323 @@ plugins:
 	assert.Contains(t, result.EffectiveDesired, "beads@beads-marketplace")
 	assert.NotContains(t, result.EffectiveDesired, "extra-tool@some-marketplace")
 	assert.Equal(t, "", result.ActiveProfile)
+}
+
+// --- New surface tests ---
+
+func TestApplySettingsWithPermissions(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	// Write existing settings.json with existing permissions.
+	existing := map[string]json.RawMessage{
+		"permissions": json.RawMessage(`{"allow":["Read","Write"],"deny":["Bash"]}`),
+	}
+	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+permissions:
+  allow:
+    - Read
+    - Execute
+  deny:
+    - Bash
+    - Network
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.True(t, result.PermissionsApplied)
+
+	// Check merged permissions in settings.json.
+	settings, err := claudecode.ReadSettings(claudeDir)
+	require.NoError(t, err)
+
+	var mergedPerms struct {
+		Allow []string `json:"allow"`
+		Deny  []string `json:"deny"`
+	}
+	require.NoError(t, json.Unmarshal(settings["permissions"], &mergedPerms))
+	// "Read" and "Bash" should not be duplicated.
+	assert.Equal(t, []string{"Read", "Write", "Execute"}, mergedPerms.Allow)
+	assert.Equal(t, []string{"Bash", "Network"}, mergedPerms.Deny)
+}
+
+func TestPullClaudeMDAssembly(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	// Create claude-md fragments.
+	claudeMdDir := filepath.Join(syncDir, "claude-md")
+	require.NoError(t, os.MkdirAll(claudeMdDir, 0755))
+	require.NoError(t, claudemd.WriteFragment(claudeMdDir, "intro", "## Introduction\nWelcome to the project."))
+	require.NoError(t, claudemd.WriteFragment(claudeMdDir, "rules", "## Rules\nAlways use Go."))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+claude_md:
+  include:
+    - intro
+    - rules
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.True(t, result.ClaudeMDAssembled)
+
+	// Verify CLAUDE.md was written.
+	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+	data, err := os.ReadFile(claudeMDPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "## Introduction")
+	assert.Contains(t, string(data), "## Rules")
+}
+
+func TestPullMCPApply(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+mcp:
+  memory:
+    command: npx
+    args:
+      - "-y"
+      - "@anthropic/memory-server"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Contains(t, result.MCPApplied, "memory")
+
+	// Verify .mcp.json was written with mcpServers wrapper.
+	mcpPath := filepath.Join(claudeDir, ".mcp.json")
+	data, err := os.ReadFile(mcpPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "mcpServers")
+	assert.Contains(t, string(data), "memory")
+}
+
+func TestPullKeybindings(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+keybindings:
+  Ctrl+K: clear_screen
+  Ctrl+L: toggle_log
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.True(t, result.KeybindingsApplied)
+
+	// Verify keybindings.json was written.
+	kb, err := claudecode.ReadKeybindings(claudeDir)
+	require.NoError(t, err)
+	assert.Equal(t, "clear_screen", kb["Ctrl+K"])
+	assert.Equal(t, "toggle_log", kb["Ctrl+L"])
+}
+
+func TestPullAutoModeDefersPending(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+settings:
+  model: opus
+hooks:
+  PreCompact: "bd prime"
+permissions:
+  allow:
+    - Execute
+  deny:
+    - Network
+mcp:
+  memory:
+    command: npx
+keybindings:
+  Ctrl+K: clear
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	result, err := commands.PullWithOptions(commands.PullOptions{
+		ClaudeDir: claudeDir,
+		SyncDir:   syncDir,
+		Quiet:     true,
+		Auto:      true,
+	})
+	require.NoError(t, err)
+
+	// Safe changes should be applied.
+	assert.Contains(t, result.SettingsApplied, "model")
+	assert.True(t, result.KeybindingsApplied)
+
+	// High-risk changes should NOT be applied.
+	assert.Empty(t, result.HooksApplied)
+	assert.False(t, result.PermissionsApplied)
+	assert.Empty(t, result.MCPApplied)
+
+	// Pending high-risk changes should be listed.
+	assert.NotEmpty(t, result.PendingHighRisk)
+
+	// pending-changes.yaml should exist.
+	pending, err := approval.ReadPending(syncDir)
+	require.NoError(t, err)
+	assert.False(t, pending.IsEmpty())
+	assert.NotNil(t, pending.Permissions)
+	assert.Contains(t, pending.Permissions.Allow, "Execute")
+	assert.Contains(t, pending.Permissions.Deny, "Network")
+	assert.NotEmpty(t, pending.Hooks)
+	assert.NotEmpty(t, pending.MCP)
+}
+
+func TestAppendUniqueStrings(t *testing.T) {
+	// Test via the exported PullWithOptions to ensure the helper works.
+	// We test the behavior indirectly through permissions merge.
+
+	tests := []struct {
+		name     string
+		base     []string
+		add      []string
+		expected []string
+	}{
+		{
+			name:     "no duplicates",
+			base:     []string{"a", "b"},
+			add:      []string{"c", "d"},
+			expected: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:     "with duplicates",
+			base:     []string{"a", "b"},
+			add:      []string{"b", "c"},
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "empty base",
+			base:     nil,
+			add:      []string{"a", "b"},
+			expected: []string{"a", "b"},
+		},
+		{
+			name:     "empty add",
+			base:     []string{"a", "b"},
+			add:      nil,
+			expected: []string{"a", "b"},
+		},
+		{
+			name:     "both empty",
+			base:     nil,
+			add:      nil,
+			expected: []string{},
+		},
+		{
+			name:     "all duplicates",
+			base:     []string{"a", "b"},
+			add:      []string{"a", "b"},
+			expected: []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test through permissions merge flow.
+			claudeDir := t.TempDir()
+			require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+			if len(tt.base) > 0 {
+				perms := map[string]any{"allow": tt.base, "deny": []string{}}
+				permData, _ := json.Marshal(perms)
+				existing := map[string]json.RawMessage{
+					"permissions": json.RawMessage(permData),
+				}
+				require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+			}
+
+			syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+			require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+			// Build config YAML with permissions.
+			cfgYAML := "version: \"1.0.0\"\nplugins:\n  upstream: []\n"
+			if len(tt.add) > 0 {
+				cfgYAML += "permissions:\n  allow:\n"
+				for _, a := range tt.add {
+					cfgYAML += "    - " + a + "\n"
+				}
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(cfgYAML), 0644))
+			require.NoError(t, exec.Command("git", "init", syncDir).Run())
+			require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+			require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+			require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+			require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+			_, pullErr := commands.Pull(claudeDir, syncDir, true)
+			require.NoError(t, pullErr)
+
+			if len(tt.add) > 0 {
+				settings, err := claudecode.ReadSettings(claudeDir)
+				require.NoError(t, err)
+				var mergedPerms struct {
+					Allow []string `json:"allow"`
+				}
+				require.NoError(t, json.Unmarshal(settings["permissions"], &mergedPerms))
+				assert.Equal(t, tt.expected, mergedPerms.Allow)
+			}
+		})
+	}
 }

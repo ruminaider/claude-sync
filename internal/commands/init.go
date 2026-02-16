@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
@@ -18,41 +19,54 @@ import (
 
 // InitScanResult holds what was found during scanning without writing anything.
 type InitScanResult struct {
-	PluginKeys []string          // all plugin keys
-	Upstream   []string          // portable marketplace plugins
-	AutoForked []string          // non-portable plugins that would be forked
-	Settings   map[string]any                // syncable settings found
-	Hooks      map[string]json.RawMessage // hooks found (hookName -> raw JSON)
+	PluginKeys     []string                   // all plugin keys
+	Upstream       []string                   // portable marketplace plugins
+	AutoForked     []string                   // non-portable plugins that would be forked
+	Settings       map[string]any             // syncable settings found
+	Hooks          map[string]json.RawMessage // hooks found (hookName -> raw JSON)
+	Permissions    config.Permissions         // permissions found
+	ClaudeMDContent string                    // raw content from ~/.claude/CLAUDE.md
+	MCP            map[string]json.RawMessage // MCP server configs found
+	Keybindings    map[string]any             // keybindings found
 }
 
 // InitResult describes how plugins were categorized during init.
 type InitResult struct {
-	Upstream         []string // portable marketplace plugins
-	AutoForked       []string // non-portable plugins copied into sync repo
-	ExcludedPlugins  []string // plugins excluded by user selection
-	RemotePushed     bool     // whether the initial commit was pushed to a remote
-	IncludedSettings []string // settings keys written to config
-	IncludedHooks    []string // hook names written to config
-	ProfileNames     []string // profiles created
-	ActiveProfile    string   // profile activated on this machine
+	Upstream            []string // portable marketplace plugins
+	AutoForked          []string // non-portable plugins copied into sync repo
+	ExcludedPlugins     []string // plugins excluded by user selection
+	RemotePushed        bool     // whether the initial commit was pushed to a remote
+	IncludedSettings    []string // settings keys written to config
+	IncludedHooks       []string // hook names written to config
+	ProfileNames        []string // profiles created
+	ActiveProfile       string   // profile activated on this machine
+	PermissionsIncluded bool     // whether permissions were included
+	ClaudeMDFragments   []string // CLAUDE.md fragment names created
+	MCPIncluded         []string // MCP server names included
+	KeybindingsIncluded bool     // whether keybindings were included
 }
 
 // InitOptions configures what Init includes in the sync config.
 type InitOptions struct {
-	ClaudeDir       string
-	SyncDir         string
-	RemoteURL       string
-	IncludeSettings bool                       // whether to write settings to config
-	IncludeHooks    map[string]json.RawMessage // specific hooks to include (nil = all, empty = none)
-	IncludePlugins  []string                   // specific plugin keys to include (nil = all, empty = none)
-	Profiles        map[string]profiles.Profile // nil = no profiles, non-nil = write profile files
-	ActiveProfile   string                      // profile to activate on this machine (empty = none)
+	ClaudeDir         string
+	SyncDir           string
+	RemoteURL         string
+	IncludeSettings   bool                       // whether to write settings to config
+	IncludeHooks      map[string]json.RawMessage // specific hooks to include (nil = all, empty = none)
+	IncludePlugins    []string                   // specific plugin keys to include (nil = all, empty = none)
+	Profiles          map[string]profiles.Profile // nil = no profiles, non-nil = write profile files
+	ActiveProfile     string                      // profile to activate on this machine (empty = none)
+	Permissions       config.Permissions          // permissions to include
+	ImportClaudeMD    bool                        // whether to import CLAUDE.md
+	ClaudeMDFragments []string                    // fragment names (set internally)
+	MCP               map[string]json.RawMessage  // MCP server configs to include
+	Keybindings       map[string]any              // keybindings to include
 }
 
 // Fields from settings.json that should NOT be synced.
 var excludedSettingsFields = map[string]bool{
 	"enabledPlugins": true,
-	"statusLine":     true,
+	"hooks":          true,
 	"permissions":    true,
 }
 
@@ -108,11 +122,13 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 
 	settingsRaw, err := claudecode.ReadSettings(claudeDir)
 	if err == nil {
-		if model, ok := settingsRaw["model"]; ok {
-			var m string
-			json.Unmarshal(model, &m)
-			if m != "" {
-				result.Settings["model"] = m
+		for key, raw := range settingsRaw {
+			if excludedSettingsFields[key] {
+				continue
+			}
+			var val any
+			if json.Unmarshal(raw, &val) == nil && val != nil {
+				result.Settings[key] = val
 			}
 		}
 
@@ -124,6 +140,37 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 				}
 			}
 		}
+
+		if permRaw, ok := settingsRaw["permissions"]; ok {
+			var permData struct {
+				Allow []string `json:"allow"`
+				Deny  []string `json:"deny"`
+			}
+			if json.Unmarshal(permRaw, &permData) == nil {
+				result.Permissions = config.Permissions{
+					Allow: permData.Allow,
+					Deny:  permData.Deny,
+				}
+			}
+		}
+	}
+
+	// Read CLAUDE.md
+	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+	if data, err := os.ReadFile(claudeMDPath); err == nil {
+		result.ClaudeMDContent = string(data)
+	}
+
+	// Read MCP config
+	mcp, err := claudecode.ReadMCPConfig(claudeDir)
+	if err == nil && len(mcp) > 0 {
+		result.MCP = mcp
+	}
+
+	// Read keybindings
+	kb, err := claudecode.ReadKeybindings(claudeDir)
+	if err == nil && len(kb) > 0 {
+		result.Keybindings = kb
 	}
 
 	return result, nil
@@ -225,11 +272,13 @@ func Init(opts InitOptions) (*InitResult, error) {
 
 	settingsRaw, err := claudecode.ReadSettings(claudeDir)
 	if err == nil {
-		if model, ok := settingsRaw["model"]; ok {
-			var m string
-			json.Unmarshal(model, &m)
-			if m != "" {
-				syncedSettings["model"] = m
+		for key, raw := range settingsRaw {
+			if excludedSettingsFields[key] {
+				continue
+			}
+			var val any
+			if json.Unmarshal(raw, &val) == nil && val != nil {
+				syncedSettings[key] = val
 			}
 		}
 
@@ -272,13 +321,16 @@ func Init(opts InitOptions) (*InitResult, error) {
 	sort.Strings(result.IncludedHooks)
 
 	cfg := config.Config{
-		Version:  "1.0.0",
-		Upstream: upstream,
-		Pinned:   map[string]string{},
-		Forked:   forkedNames,
-		Excluded: result.ExcludedPlugins,
-		Settings: cfgSettings,
-		Hooks:    cfgHooks,
+		Version:     "1.0.0",
+		Upstream:    upstream,
+		Pinned:      map[string]string{},
+		Forked:      forkedNames,
+		Excluded:    result.ExcludedPlugins,
+		Settings:    cfgSettings,
+		Hooks:       cfgHooks,
+		Permissions: opts.Permissions,
+		MCP:         opts.MCP,
+		Keybindings: opts.Keybindings,
 	}
 
 	cfgData, err := config.Marshal(cfg)
@@ -289,7 +341,44 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, fmt.Errorf("writing config: %w", err)
 	}
 
-	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\n"
+	// Import CLAUDE.md if requested.
+	if opts.ImportClaudeMD {
+		claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
+		claudeMDData, readErr := os.ReadFile(claudeMDPath)
+		if readErr == nil {
+			importResult, importErr := claudemd.ImportClaudeMD(syncDir, string(claudeMDData))
+			if importErr != nil {
+				return nil, fmt.Errorf("importing CLAUDE.md: %w", importErr)
+			}
+			cfg.ClaudeMD.Include = importResult.FragmentNames
+			result.ClaudeMDFragments = importResult.FragmentNames
+			// Re-write config with updated ClaudeMD.Include.
+			cfgData, err = config.Marshal(cfg)
+			if err != nil {
+				return nil, fmt.Errorf("marshaling config with CLAUDE.md: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644); err != nil {
+				return nil, fmt.Errorf("writing config with CLAUDE.md: %w", err)
+			}
+		}
+	}
+
+	// Set result fields for new surfaces.
+	if len(opts.Permissions.Allow) > 0 || len(opts.Permissions.Deny) > 0 {
+		result.PermissionsIncluded = true
+	}
+	if len(opts.MCP) > 0 {
+		result.MCPIncluded = make([]string, 0, len(opts.MCP))
+		for k := range opts.MCP {
+			result.MCPIncluded = append(result.MCPIncluded, k)
+		}
+		sort.Strings(result.MCPIncluded)
+	}
+	if len(opts.Keybindings) > 0 {
+		result.KeybindingsIncluded = true
+	}
+
+	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n"
 	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return nil, fmt.Errorf("writing .gitignore: %w", err)
 	}

@@ -11,21 +11,40 @@ import (
 )
 
 var quietFlag bool
+var autoFlag bool
 
 var pullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Pull latest config and apply locally",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !quietFlag {
-			fmt.Println("Pulling latest config...")
-		}
+		var result *commands.PullResult
+		var err error
 
-		result, err := commands.Pull(paths.ClaudeDir(), paths.SyncDir(), quietFlag)
+		if autoFlag {
+			result, err = commands.PullWithOptions(commands.PullOptions{
+				ClaudeDir: paths.ClaudeDir(),
+				SyncDir:   paths.SyncDir(),
+				Quiet:     true,
+				Auto:      true,
+			})
+		} else {
+			if !quietFlag {
+				fmt.Println("Pulling latest config...")
+			}
+			result, err = commands.Pull(paths.ClaudeDir(), paths.SyncDir(), quietFlag)
+		}
 		if err != nil {
 			return err
 		}
 
-		if quietFlag {
+		if quietFlag || autoFlag {
+			// In auto mode, still show pending high-risk warnings.
+			if autoFlag && len(result.PendingHighRisk) > 0 {
+				fmt.Fprintf(os.Stderr, "%d high-risk change(s) deferred. Run 'claude-sync approve' to apply:\n", len(result.PendingHighRisk))
+				for _, c := range result.PendingHighRisk {
+					fmt.Fprintf(os.Stderr, "  - %s\n", c.Description)
+				}
+			}
 			return nil
 		}
 
@@ -39,6 +58,18 @@ var pullCmd = &cobra.Command{
 		if len(result.HooksApplied) > 0 {
 			fmt.Printf("✓ Hooks applied: %s\n", strings.Join(result.HooksApplied, ", "))
 		}
+		if result.PermissionsApplied {
+			fmt.Println("✓ Permissions applied")
+		}
+		if result.ClaudeMDAssembled {
+			fmt.Println("✓ CLAUDE.md assembled from fragments")
+		}
+		if len(result.MCPApplied) > 0 {
+			fmt.Printf("✓ MCP servers applied: %s\n", strings.Join(result.MCPApplied, ", "))
+		}
+		if result.KeybindingsApplied {
+			fmt.Println("✓ Keybindings applied")
+		}
 
 		if len(result.SkippedCategories) > 0 {
 			fmt.Printf("  Skipped: %s (per user-preferences.yaml)\n", strings.Join(result.SkippedCategories, ", "))
@@ -51,11 +82,20 @@ var pullCmd = &cobra.Command{
 			}
 		}
 
-		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 && len(result.SkippedCategories) == 0
+		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
+			len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
+			len(result.MCPApplied) == 0 && !result.KeybindingsApplied
 		if len(result.Failed) > 0 {
 			fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
 		} else if nothingChanged {
 			fmt.Println("Everything up to date.")
+		}
+
+		if len(result.PendingHighRisk) > 0 {
+			fmt.Printf("\n⚠ %d high-risk change(s) deferred. Run 'claude-sync approve' to apply:\n", len(result.PendingHighRisk))
+			for _, c := range result.PendingHighRisk {
+				fmt.Printf("  • %s\n", c.Description)
+			}
 		}
 
 		if len(result.Untracked) > 0 && len(result.Failed) == 0 {
@@ -72,4 +112,5 @@ var pullCmd = &cobra.Command{
 
 func init() {
 	pullCmd.Flags().BoolVarP(&quietFlag, "quiet", "q", false, "Suppress output")
+	pullCmd.Flags().BoolVar(&autoFlag, "auto", false, "Auto mode: apply safe changes, defer high-risk to pending")
 }

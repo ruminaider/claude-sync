@@ -600,3 +600,278 @@ func TestInit_GitignoreIncludesActiveProfile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(gitignore), "active-profile")
 }
+
+// --- New surface tests ---
+
+func TestInitScan_Permissions(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+
+	settings := `{
+		"permissions": {
+			"allow": ["Read", "Edit"],
+			"deny": ["Bash"]
+		}
+	}`
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"Read", "Edit"}, scan.Permissions.Allow)
+	assert.Equal(t, []string{"Bash"}, scan.Permissions.Deny)
+	// Permissions should not appear in generic settings.
+	_, hasPerms := scan.Settings["permissions"]
+	assert.False(t, hasPerms)
+}
+
+func TestInitScan_ClaudeMD(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	claudeMD := "# My Config\n\n## Section One\nSome content\n\n## Section Two\nMore content\n"
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte(claudeMD), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Equal(t, claudeMD, scan.ClaudeMDContent)
+}
+
+func TestInitScan_MCP(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	mcpConfig := `{
+		"mcpServers": {
+			"context7": {"command": "npx", "args": ["-y", "@context7/mcp"]},
+			"memory": {"command": "npx", "args": ["-y", "@memory/mcp"]}
+		}
+	}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpConfig), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Len(t, scan.MCP, 2)
+	assert.Contains(t, scan.MCP, "context7")
+	assert.Contains(t, scan.MCP, "memory")
+}
+
+func TestInitScan_Keybindings(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	kb := `{"ctrl+k": "clear", "ctrl+l": "log"}`
+	os.WriteFile(filepath.Join(claudeDir, "keybindings.json"), []byte(kb), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.Len(t, scan.Keybindings, 2)
+	assert.Equal(t, "clear", scan.Keybindings["ctrl+k"])
+	assert.Equal(t, "log", scan.Keybindings["ctrl+l"])
+}
+
+func TestInitScan_GenericSettings(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+
+	settings := `{
+		"model": "claude-sonnet-4-5-20250929",
+		"statusLine": "fancy",
+		"theme": "dark",
+		"enabledPlugins": {"beads@beads-marketplace": true},
+		"hooks": {"PreCompact": [{"matcher":"","hooks":[{"type":"command","command":"bd prime"}]}]},
+		"permissions": {"allow": ["Read"]}
+	}`
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	// model, statusLine, theme should be in generic settings.
+	assert.Equal(t, "claude-sonnet-4-5-20250929", scan.Settings["model"])
+	assert.Equal(t, "fancy", scan.Settings["statusLine"])
+	assert.Equal(t, "dark", scan.Settings["theme"])
+
+	// enabledPlugins, hooks, permissions should NOT be in generic settings.
+	_, hasEnabled := scan.Settings["enabledPlugins"]
+	assert.False(t, hasEnabled)
+	_, hasHooks := scan.Settings["hooks"]
+	assert.False(t, hasHooks)
+	_, hasPerms := scan.Settings["permissions"]
+	assert.False(t, hasPerms)
+
+	// Hooks and permissions should be in their dedicated fields.
+	assertHookHasCommand(t, scan.Hooks["PreCompact"], "bd prime")
+	assert.Equal(t, []string{"Read"}, scan.Permissions.Allow)
+}
+
+func TestInit_WithClaudeMD(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	claudeMD := "## Git Commits\nNo co-authored-by\n\n## Color Schemes\nUse Catppuccin Mocha\n"
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte(claudeMD), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:      claudeDir,
+		SyncDir:        syncDir,
+		IncludeSettings: true,
+		IncludeHooks:   nil,
+		ImportClaudeMD: true,
+	})
+	require.NoError(t, err)
+
+	assert.Len(t, result.ClaudeMDFragments, 2)
+	assert.Contains(t, result.ClaudeMDFragments, "git-commits")
+	assert.Contains(t, result.ClaudeMDFragments, "color-schemes")
+
+	// Verify fragment files exist.
+	_, err = os.Stat(filepath.Join(syncDir, "claude-md", "git-commits.md"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(syncDir, "claude-md", "color-schemes.md"))
+	assert.NoError(t, err)
+
+	// Verify config.yaml has claude_md.include.
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"git-commits", "color-schemes"}, cfg.ClaudeMD.Include)
+}
+
+func TestInit_WithPermissions(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		Permissions: config.Permissions{
+			Allow: []string{"Read", "Edit"},
+			Deny:  []string{"Bash"},
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, result.PermissionsIncluded)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Read", "Edit"}, cfg.Permissions.Allow)
+	assert.Equal(t, []string{"Bash"}, cfg.Permissions.Deny)
+}
+
+func TestInit_WithMCP(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	mcp := map[string]json.RawMessage{
+		"context7": json.RawMessage(`{"command":"npx","args":["-y","@context7/mcp"]}`),
+	}
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		MCP:             mcp,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"context7"}, result.MCPIncluded)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.MCP, "context7")
+}
+
+func TestInit_WithKeybindings(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		IncludeHooks:    nil,
+		Keybindings:     map[string]any{"ctrl+k": "clear"},
+	})
+	require.NoError(t, err)
+	assert.True(t, result.KeybindingsIncluded)
+
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, "clear", cfg.Keybindings["ctrl+k"])
+}
+
+func TestInit_GitignoreHasPendingChanges(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gitignore), "pending-changes.yaml")
+}

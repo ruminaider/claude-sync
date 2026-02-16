@@ -1,6 +1,7 @@
 package commands_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -261,4 +262,115 @@ func TestPushApply_ExcludesPlugins(t *testing.T) {
 	assert.Contains(t, cfg.Upstream, "extra-plugin@local")
 	assert.Contains(t, cfg.Excluded, "unwanted-a@mkt")
 	assert.Contains(t, cfg.Excluded, "unwanted-b@mkt")
+}
+
+func TestPushScan_Permissions(t *testing.T) {
+	claudeDir, syncDir := setupV2PushEnv(t)
+
+	// Write settings.json with permissions.
+	settings := map[string]any{
+		"permissions": map[string]any{
+			"allow": []string{"Bash(git *)"},
+			"deny":  []string{"Bash(rm *)"},
+		},
+	}
+	settingsData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsData, 0644)
+
+	// Config has no permissions by default, so a diff should be detected.
+	scan, err := commands.PushScan(claudeDir, syncDir)
+	require.NoError(t, err)
+	assert.True(t, scan.ChangedPermissions)
+	assert.True(t, scan.HasChanges())
+}
+
+func TestPushScan_NoChanges_AllSurfaces(t *testing.T) {
+	claudeDir, syncDir := setupV2PushEnv(t)
+
+	// No settings.json, no CLAUDE.md, no MCP, no keybindings.
+	// Remove settings.json if it exists (setupV2PushEnv doesn't create one).
+
+	scan, err := commands.PushScan(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Only plugin difference expected (extra-plugin@local), but no surface changes.
+	assert.False(t, scan.ChangedPermissions)
+	assert.Nil(t, scan.ChangedClaudeMD)
+	assert.False(t, scan.ChangedMCP)
+	assert.False(t, scan.ChangedKeybindings)
+}
+
+func TestPushScan_MCP(t *testing.T) {
+	claudeDir, syncDir := setupV2PushEnv(t)
+
+	// Write .mcp.json with a server.
+	mcpData := `{"mcpServers": {"my-server": {"command": "node", "args": ["server.js"]}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	scan, err := commands.PushScan(claudeDir, syncDir)
+	require.NoError(t, err)
+	assert.True(t, scan.ChangedMCP)
+}
+
+func TestPushScan_Keybindings(t *testing.T) {
+	claudeDir, syncDir := setupV2PushEnv(t)
+
+	// Write keybindings.json.
+	kbData := `{"ctrl+k": "clearScreen"}`
+	os.WriteFile(filepath.Join(claudeDir, "keybindings.json"), []byte(kbData), 0644)
+
+	scan, err := commands.PushScan(claudeDir, syncDir)
+	require.NoError(t, err)
+	assert.True(t, scan.ChangedKeybindings)
+}
+
+func TestPushApply_UpdatePermissions(t *testing.T) {
+	_, syncDir := setupV2PushEnv(t)
+	claudeDir := filepath.Dir(syncDir)
+
+	// Write settings.json with permissions.
+	settings := map[string]any{
+		"permissions": map[string]any{
+			"allow": []string{"Bash(git *)"},
+		},
+	}
+	settingsData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsData, 0644)
+
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:         claudeDir,
+		SyncDir:           syncDir,
+		UpdatePermissions: true,
+		Message:           "Update permissions",
+	})
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Permissions.Allow, "Bash(git *)")
+}
+
+func TestPushApply_UpdateMCP(t *testing.T) {
+	_, syncDir := setupV2PushEnv(t)
+	claudeDir := filepath.Dir(syncDir)
+
+	// Write .mcp.json.
+	mcpData := `{"mcpServers": {"test-server": {"command": "test"}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir: claudeDir,
+		SyncDir:   syncDir,
+		UpdateMCP: true,
+		Message:   "Update MCP",
+	})
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.MCP, "test-server")
 }

@@ -87,6 +87,24 @@ var initCmd = &cobra.Command{
 			sort.Strings(hookDisplays)
 			fmt.Printf("Found hooks: %s\n", strings.Join(hookDisplays, ", "))
 		}
+		if len(scan.Permissions.Allow) > 0 || len(scan.Permissions.Deny) > 0 {
+			fmt.Printf("Found permissions: %d allow, %d deny\n", len(scan.Permissions.Allow), len(scan.Permissions.Deny))
+		}
+		if scan.ClaudeMDContent != "" {
+			sections := len(strings.Split(scan.ClaudeMDContent, "\n## "))
+			fmt.Printf("Found CLAUDE.md (%d section(s))\n", sections)
+		}
+		if len(scan.MCP) > 0 {
+			mcpNames := make([]string, 0, len(scan.MCP))
+			for k := range scan.MCP {
+				mcpNames = append(mcpNames, k)
+			}
+			sort.Strings(mcpNames)
+			fmt.Printf("Found MCP servers: %s\n", strings.Join(mcpNames, ", "))
+		}
+		if len(scan.Keybindings) > 0 {
+			fmt.Printf("Found keybindings: %d\n", len(scan.Keybindings))
+		}
 
 		// Phase 2: Interactive prompts with go-back navigation.
 		var includePlugins []string                 // nil = all
@@ -798,6 +816,10 @@ var initCmd = &cobra.Command{
 			IncludePlugins:  includePlugins,
 			Profiles:        createdProfiles,
 			ActiveProfile:   activeProfile,
+			Permissions:     scan.Permissions,
+			ImportClaudeMD:  scan.ClaudeMDContent != "",
+			MCP:             scan.MCP,
+			Keybindings:     scan.Keybindings,
 		})
 		if err != nil {
 			return err
@@ -830,6 +852,20 @@ var initCmd = &cobra.Command{
 		}
 		if result.ActiveProfile != "" {
 			fmt.Printf("  Active:      %s\n", result.ActiveProfile)
+		}
+		if result.PermissionsIncluded {
+			allowCount := len(scan.Permissions.Allow)
+			denyCount := len(scan.Permissions.Deny)
+			fmt.Printf("  Permissions: %d allow, %d deny\n", allowCount, denyCount)
+		}
+		if len(result.ClaudeMDFragments) > 0 {
+			fmt.Printf("  CLAUDE.md:   %d fragment(s)\n", len(result.ClaudeMDFragments))
+		}
+		if len(result.MCPIncluded) > 0 {
+			fmt.Printf("  MCP servers: %s\n", strings.Join(result.MCPIncluded, ", "))
+		}
+		if result.KeybindingsIncluded {
+			fmt.Println("  Keybindings: included")
 		}
 
 		if result.RemotePushed {
