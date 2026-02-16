@@ -42,6 +42,9 @@ func init() {
 	rootCmd.AddCommand(forkCmd)
 	rootCmd.AddCommand(unforkCmd)
 	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(approveCmd)
+	rootCmd.AddCommand(rejectCmd)
+	rootCmd.AddCommand(autoCommitCmd)
 }
 
 func main() {

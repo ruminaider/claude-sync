@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/commands"
@@ -31,11 +32,22 @@ var statusCmd = &cobra.Command{
 
 		// V2 categorized display
 		if strings.HasPrefix(result.ConfigVersion, "2.") {
-			return displayV2Status(result)
+			if err := displayV2Status(result); err != nil {
+				return err
+			}
+		} else {
+			// V1 fallback display
+			if err := displayV1Status(result); err != nil {
+				return err
+			}
 		}
 
-		// V1 fallback display
-		return displayV1Status(result)
+		// Display pending changes if any.
+		if result.PendingChanges != nil {
+			displayPendingChanges(result)
+		}
+
+		return nil
 	},
 }
 
@@ -154,4 +166,33 @@ func displayV2Status(result *commands.StatusResult) error {
 	}
 
 	return nil
+}
+
+func displayPendingChanges(result *commands.StatusResult) {
+	fmt.Println("PENDING (run 'claude-sync approve' to apply, 'claude-sync reject' to discard)")
+	if result.PendingChanges.Permissions != nil {
+		if len(result.PendingChanges.Permissions.Allow) > 0 {
+			fmt.Printf("  %s Permissions allow: %s\n", warningSign, strings.Join(result.PendingChanges.Permissions.Allow, ", "))
+		}
+		if len(result.PendingChanges.Permissions.Deny) > 0 {
+			fmt.Printf("  %s Permissions deny: %s\n", warningSign, strings.Join(result.PendingChanges.Permissions.Deny, ", "))
+		}
+	}
+	if len(result.PendingChanges.MCP) > 0 {
+		mcpNames := make([]string, 0, len(result.PendingChanges.MCP))
+		for k := range result.PendingChanges.MCP {
+			mcpNames = append(mcpNames, k)
+		}
+		sort.Strings(mcpNames)
+		fmt.Printf("  %s MCP servers: %s\n", warningSign, strings.Join(mcpNames, ", "))
+	}
+	if len(result.PendingChanges.Hooks) > 0 {
+		hookNames := make([]string, 0, len(result.PendingChanges.Hooks))
+		for k := range result.PendingChanges.Hooks {
+			hookNames = append(hookNames, k)
+		}
+		sort.Strings(hookNames)
+		fmt.Printf("  %s Hooks: %s\n", warningSign, strings.Join(hookNames, ", "))
+	}
+	fmt.Println()
 }

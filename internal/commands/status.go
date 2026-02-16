@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/plugins"
@@ -33,8 +34,9 @@ type StatusResult struct {
 	PinnedSynced    []PluginStatus `json:"pinned_synced,omitempty"`
 	PinnedMissing   []PluginStatus `json:"pinned_missing,omitempty"`
 	ForkedSynced    []PluginStatus `json:"forked_synced,omitempty"`
-	ForkedMissing   []PluginStatus `json:"forked_missing,omitempty"`
-	ConfigVersion   string         `json:"config_version"`
+	ForkedMissing   []PluginStatus          `json:"forked_missing,omitempty"`
+	ConfigVersion   string                  `json:"config_version"`
+	PendingChanges  *approval.PendingChanges `json:"pending_changes,omitempty"`
 }
 
 // JSON returns the StatusResult as indented JSON bytes.
@@ -136,6 +138,12 @@ func Status(claudeDir, syncDir string) (*StatusResult, error) {
 		} else {
 			result.ForkedMissing = append(result.ForkedMissing, ps)
 		}
+	}
+
+	// Check for pending high-risk changes.
+	pending, err := approval.ReadPending(syncDir)
+	if err == nil && !pending.IsEmpty() {
+		result.PendingChanges = &pending
 	}
 
 	return result, nil
