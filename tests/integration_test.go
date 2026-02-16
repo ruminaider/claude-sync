@@ -10,6 +10,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -228,7 +229,7 @@ func TestV2Workflow(t *testing.T) {
 	// ---------------------------------------------------------------
 	// Step 3: Verify v2 format — version 2.1.0, all 3 plugins in Upstream.
 	// ---------------------------------------------------------------
-	assert.Equal(t, "2.1.0", cfg.Version, "config version should be 2.1.0")
+	assert.Equal(t, "1.0.0", cfg.Version, "config version should be 1.0.0")
 	assert.Len(t, cfg.Upstream, 3, "all 3 plugins should be in upstream")
 	assert.Empty(t, cfg.Pinned, "no plugins should be pinned initially")
 	assert.Empty(t, cfg.Forked, "no plugins should be forked initially")
@@ -258,7 +259,7 @@ func TestV2Workflow(t *testing.T) {
 	status, err := commands.Status(claudeDir, syncDir)
 	require.NoError(t, err, "Status should succeed")
 
-	assert.Equal(t, "2.0.0", status.ConfigVersion, "status config version should be 2.0.0")
+	assert.Equal(t, "1.0.0", status.ConfigVersion, "status config version should be 1.0.0")
 	assert.NotEmpty(t, status.UpstreamSynced, "should have upstream synced plugins")
 	assert.NotEmpty(t, status.PinnedSynced, "should have pinned synced plugins")
 	assert.Len(t, status.UpstreamSynced, 2, "should have 2 upstream synced plugins")
@@ -278,8 +279,8 @@ func TestV2Workflow(t *testing.T) {
 		"JSON output should contain upstream_synced key")
 	assert.Contains(t, string(jsonData), "pinned_synced",
 		"JSON output should contain pinned_synced key")
-	assert.Equal(t, "2.0.0", jsonMap["config_version"],
-		"JSON config_version should be 2.0.0")
+	assert.Equal(t, "1.0.0", jsonMap["config_version"],
+		"JSON config_version should be 1.0.0")
 
 	// ---------------------------------------------------------------
 	// Step 8: Unpin "beads@beads-marketplace".
@@ -300,4 +301,203 @@ func TestV2Workflow(t *testing.T) {
 	assert.Empty(t, cfg.Pinned, "pinned should be empty after unpin")
 	assert.Contains(t, cfg.Upstream, "beads@beads-marketplace",
 		"beads should be back in upstream after unpin")
+}
+
+func TestFullSurfaceSync(t *testing.T) {
+	machine1Claude := t.TempDir()
+	machine1Sync := filepath.Join(t.TempDir(), ".claude-sync")
+	machine2Claude := t.TempDir()
+	machine2Sync := filepath.Join(t.TempDir(), ".claude-sync")
+
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	gitRun(t, ".", "init", "--bare", remoteDir)
+
+	// ---------------------------------------------------------------
+	// Step 1: Machine 1 — set up Claude Code dir with 2 plugins.
+	// ---------------------------------------------------------------
+	setupMockClaude(t, machine1Claude, []string{
+		"context7@claude-plugins-official",
+		"beads@beads-marketplace",
+	})
+
+	// Write settings with model and permissions into settings.json.
+	settingsData, err := json.MarshalIndent(map[string]any{
+		"model": "opus",
+		"permissions": map[string]any{
+			"allow": []string{"Bash(*)"},
+			"deny":  []string{"rm -rf"},
+		},
+	}, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(machine1Claude, "settings.json"), settingsData, 0644))
+
+	// Write CLAUDE.md.
+	claudeMDContent := "## Git Conventions\nUse conventional commits.\n\n## Testing\nAlways write tests."
+	require.NoError(t, os.WriteFile(filepath.Join(machine1Claude, "CLAUDE.md"), []byte(claudeMDContent), 0644))
+
+	// Write MCP config.
+	mcpData, err := json.MarshalIndent(map[string]any{
+		"mcpServers": map[string]any{
+			"test-server": map[string]any{"command": "test-cmd"},
+		},
+	}, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(machine1Claude, ".mcp.json"), mcpData, 0644))
+
+	// Write keybindings.
+	kbData, err := json.MarshalIndent(map[string]any{
+		"submitWithEnter": false,
+	}, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(machine1Claude, "keybindings.json"), kbData, 0644))
+
+	// ---------------------------------------------------------------
+	// Step 2: Machine 1 — Init with ALL surfaces enabled.
+	// ---------------------------------------------------------------
+	mcpServers := map[string]json.RawMessage{
+		"test-server": json.RawMessage(`{"command":"test-cmd"}`),
+	}
+	keybindings := map[string]any{
+		"submitWithEnter": false,
+	}
+
+	initResult, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       machine1Claude,
+		SyncDir:         machine1Sync,
+		IncludeSettings: true,
+		Permissions:     config.Permissions{Allow: []string{"Bash(*)"}, Deny: []string{"rm -rf"}},
+		ImportClaudeMD:  true,
+		MCP:             mcpServers,
+		Keybindings:     keybindings,
+	})
+	require.NoError(t, err, "Init should succeed on machine 1")
+	assert.True(t, initResult.PermissionsIncluded, "permissions should be included")
+	assert.Contains(t, initResult.MCPIncluded, "test-server", "MCP should include test-server")
+	assert.True(t, initResult.KeybindingsIncluded, "keybindings should be included")
+	assert.NotEmpty(t, initResult.ClaudeMDFragments, "CLAUDE.md fragments should be created")
+
+	// ---------------------------------------------------------------
+	// Step 3: Machine 1 — Add remote and push.
+	// ---------------------------------------------------------------
+	gitRun(t, machine1Sync, "remote", "add", "origin", remoteDir)
+	gitRun(t, machine1Sync, "push", "-u", "origin", "HEAD")
+
+	// ---------------------------------------------------------------
+	// Step 4: Machine 2 — set up mock Claude dir with 1 plugin.
+	// ---------------------------------------------------------------
+	setupMockClaude(t, machine2Claude, []string{
+		"context7@claude-plugins-official",
+	})
+
+	// ---------------------------------------------------------------
+	// Step 5: Machine 2 — Join from the remote.
+	// ---------------------------------------------------------------
+	_, err = commands.Join(remoteDir, machine2Claude, machine2Sync)
+	require.NoError(t, err, "Join should succeed on machine 2")
+
+	// ---------------------------------------------------------------
+	// Step 6: Machine 2 — Pull in AUTO mode.
+	// ---------------------------------------------------------------
+	result, err := commands.PullWithOptions(commands.PullOptions{
+		ClaudeDir: machine2Claude,
+		SyncDir:   machine2Sync,
+		Auto:      true,
+	})
+	require.NoError(t, err, "PullWithOptions should succeed on machine 2")
+
+	// ---------------------------------------------------------------
+	// Step 7: Verify safe surfaces were applied.
+	// ---------------------------------------------------------------
+
+	// Plugins: beads should be in ToInstall (not installed on machine 2).
+	assert.Contains(t, result.ToInstall, "beads@beads-marketplace",
+		"beads should need installation on machine 2")
+
+	// Settings: model should have been applied to settings.json.
+	m2Settings, err := claudecode.ReadSettings(machine2Claude)
+	require.NoError(t, err, "should read machine 2 settings")
+	assert.Contains(t, string(m2Settings["model"]), "opus",
+		"model setting should be applied on machine 2")
+
+	// CLAUDE.md: should be assembled on machine 2.
+	assert.True(t, result.ClaudeMDAssembled, "CLAUDE.md should be assembled")
+	m2ClaudeMD, err := os.ReadFile(filepath.Join(machine2Claude, "CLAUDE.md"))
+	require.NoError(t, err, "should read CLAUDE.md on machine 2")
+	assert.Contains(t, string(m2ClaudeMD), "Git Conventions",
+		"CLAUDE.md should contain Git Conventions")
+	assert.Contains(t, string(m2ClaudeMD), "Testing",
+		"CLAUDE.md should contain Testing")
+
+	// Keybindings: should be applied.
+	assert.True(t, result.KeybindingsApplied, "keybindings should be applied")
+	m2KB, err := claudecode.ReadKeybindings(machine2Claude)
+	require.NoError(t, err, "should read keybindings on machine 2")
+	assert.Equal(t, false, m2KB["submitWithEnter"],
+		"keybinding submitWithEnter should be false")
+
+	// ---------------------------------------------------------------
+	// Step 8: Verify high-risk surfaces are deferred in auto mode.
+	// ---------------------------------------------------------------
+	assert.NotEmpty(t, result.PendingHighRisk, "should have pending high-risk changes")
+
+	// Permissions should NOT be in settings.json yet.
+	assert.False(t, result.PermissionsApplied,
+		"permissions should NOT be applied in auto mode")
+
+	// MCP should NOT be applied yet.
+	assert.Empty(t, result.MCPApplied,
+		"MCP should NOT be applied in auto mode")
+
+	// Pending file should exist with permissions and MCP.
+	pending, err := approval.ReadPending(machine2Sync)
+	require.NoError(t, err, "should read pending changes")
+	assert.False(t, pending.IsEmpty(), "pending changes should not be empty")
+	require.NotNil(t, pending.Permissions, "pending should have permissions")
+	assert.Contains(t, pending.Permissions.Allow, "Bash(*)",
+		"pending permissions should include Bash(*)")
+	assert.Contains(t, pending.Permissions.Deny, "rm -rf",
+		"pending permissions should include rm -rf deny")
+	assert.NotEmpty(t, pending.MCP, "pending should have MCP changes")
+	assert.Contains(t, pending.MCP, "test-server",
+		"pending MCP should include test-server")
+
+	// ---------------------------------------------------------------
+	// Step 9: Machine 2 — Approve pending changes.
+	// ---------------------------------------------------------------
+	approveResult, err := commands.Approve(machine2Claude, machine2Sync)
+	require.NoError(t, err, "Approve should succeed on machine 2")
+
+	// ---------------------------------------------------------------
+	// Step 10: Verify high-risk surfaces are now applied.
+	// ---------------------------------------------------------------
+	assert.True(t, approveResult.PermissionsApplied,
+		"permissions should be applied after approve")
+	assert.Contains(t, approveResult.MCPApplied, "test-server",
+		"MCP test-server should be applied after approve")
+
+	// Verify permissions are now in settings.json.
+	m2Settings, err = claudecode.ReadSettings(machine2Claude)
+	require.NoError(t, err, "should read settings after approve")
+	var perms struct {
+		Allow []string `json:"allow"`
+		Deny  []string `json:"deny"`
+	}
+	require.NoError(t, json.Unmarshal(m2Settings["permissions"], &perms),
+		"should parse permissions from settings")
+	assert.Contains(t, perms.Allow, "Bash(*)",
+		"permissions allow should contain Bash(*) after approve")
+	assert.Contains(t, perms.Deny, "rm -rf",
+		"permissions deny should contain rm -rf after approve")
+
+	// Verify MCP is now in .mcp.json.
+	m2MCP, err := claudecode.ReadMCPConfig(machine2Claude)
+	require.NoError(t, err, "should read MCP config after approve")
+	assert.Contains(t, m2MCP, "test-server",
+		"MCP should contain test-server after approve")
+
+	// Verify pending-changes.yaml is cleared.
+	pendingAfter, err := approval.ReadPending(machine2Sync)
+	require.NoError(t, err, "should read pending after approve")
+	assert.True(t, pendingAfter.IsEmpty(),
+		"pending changes should be empty after approve")
 }
