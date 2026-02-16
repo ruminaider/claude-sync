@@ -600,4 +600,346 @@ func TestProfileSummary(t *testing.T) {
 		assert.Contains(t, summary, "+1 plugin")
 		assert.Contains(t, summary, "-2 hooks")
 	})
+
+	t.Run("permissions in summary", func(t *testing.T) {
+		p := profiles.Profile{
+			Permissions: profiles.ProfilePermissions{
+				AddAllow: []string{"Bash(git *)", "Read"},
+				AddDeny:  []string{"Bash(rm *)"},
+			},
+		}
+		summary := profiles.ProfileSummary(p)
+		assert.Contains(t, summary, "+2 allow permissions")
+		assert.Contains(t, summary, "+1 deny permission")
+	})
+
+	t.Run("claude_md in summary", func(t *testing.T) {
+		p := profiles.Profile{
+			ClaudeMD: profiles.ProfileClaudeMD{
+				Add:    []string{"a.md", "b.md"},
+				Remove: []string{"c.md"},
+			},
+		}
+		summary := profiles.ProfileSummary(p)
+		assert.Contains(t, summary, "+2 claude_md includes")
+		assert.Contains(t, summary, "-1 claude_md include")
+	})
+
+	t.Run("mcp in summary", func(t *testing.T) {
+		p := profiles.Profile{
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{
+					"pg": json.RawMessage(`{"command":"npx"}`),
+				},
+				Remove: []string{"old-server"},
+			},
+		}
+		summary := profiles.ProfileSummary(p)
+		assert.Contains(t, summary, "+1 mcp server")
+		assert.Contains(t, summary, "-1 mcp server")
+	})
+
+	t.Run("keybindings in summary", func(t *testing.T) {
+		p := profiles.Profile{
+			Keybindings: profiles.ProfileKeybindings{
+				Override: map[string]any{"ctrl+k": "clear", "ctrl+l": "redraw"},
+			},
+		}
+		summary := profiles.ProfileSummary(p)
+		assert.Contains(t, summary, "2 keybinding overrides")
+	})
+}
+
+func TestMergePermissions(t *testing.T) {
+	t.Run("appends without duplicates", func(t *testing.T) {
+		base := config.Permissions{
+			Allow: []string{"Bash(git *)", "Read"},
+			Deny:  []string{"Bash(rm *)"},
+		}
+		p := profiles.Profile{
+			Permissions: profiles.ProfilePermissions{
+				AddAllow: []string{"Write", "Read"}, // Read is dup
+				AddDeny:  []string{"Bash(sudo *)"},
+			},
+		}
+		result := profiles.MergePermissions(base, p)
+		assert.Equal(t, []string{"Bash(git *)", "Read", "Write"}, result.Allow)
+		assert.Equal(t, []string{"Bash(rm *)", "Bash(sudo *)"}, result.Deny)
+	})
+
+	t.Run("nil base returns adds", func(t *testing.T) {
+		p := profiles.Profile{
+			Permissions: profiles.ProfilePermissions{
+				AddAllow: []string{"Read"},
+			},
+		}
+		result := profiles.MergePermissions(config.Permissions{}, p)
+		assert.Equal(t, []string{"Read"}, result.Allow)
+		assert.Empty(t, result.Deny)
+	})
+
+	t.Run("empty profile returns base", func(t *testing.T) {
+		base := config.Permissions{Allow: []string{"Read"}}
+		result := profiles.MergePermissions(base, profiles.Profile{})
+		assert.Equal(t, []string{"Read"}, result.Allow)
+	})
+}
+
+func TestMergeClaudeMD(t *testing.T) {
+	t.Run("add and remove", func(t *testing.T) {
+		base := []string{"a.md", "b.md"}
+		p := profiles.Profile{
+			ClaudeMD: profiles.ProfileClaudeMD{
+				Add:    []string{"c.md"},
+				Remove: []string{"a.md"},
+			},
+		}
+		result := profiles.MergeClaudeMD(base, p)
+		assert.Equal(t, []string{"b.md", "c.md"}, result)
+	})
+
+	t.Run("no duplicates from add", func(t *testing.T) {
+		base := []string{"a.md", "b.md"}
+		p := profiles.Profile{
+			ClaudeMD: profiles.ProfileClaudeMD{
+				Add: []string{"b.md", "c.md"},
+			},
+		}
+		result := profiles.MergeClaudeMD(base, p)
+		assert.Equal(t, []string{"a.md", "b.md", "c.md"}, result)
+	})
+
+	t.Run("empty profile returns base", func(t *testing.T) {
+		base := []string{"a.md"}
+		result := profiles.MergeClaudeMD(base, profiles.Profile{})
+		assert.Equal(t, []string{"a.md"}, result)
+	})
+
+	t.Run("nil base with adds", func(t *testing.T) {
+		p := profiles.Profile{
+			ClaudeMD: profiles.ProfileClaudeMD{
+				Add: []string{"a.md"},
+			},
+		}
+		result := profiles.MergeClaudeMD(nil, p)
+		assert.Equal(t, []string{"a.md"}, result)
+	})
+}
+
+func TestMergeMCP(t *testing.T) {
+	t.Run("add and remove", func(t *testing.T) {
+		base := map[string]json.RawMessage{
+			"pg":    json.RawMessage(`{"command":"npx"}`),
+			"redis": json.RawMessage(`{"command":"redis-cli"}`),
+		}
+		p := profiles.Profile{
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{
+					"mongo": json.RawMessage(`{"command":"mongosh"}`),
+				},
+				Remove: []string{"redis"},
+			},
+		}
+		result := profiles.MergeMCP(base, p)
+		assert.Len(t, result, 2)
+		assert.Contains(t, result, "pg")
+		assert.Contains(t, result, "mongo")
+		assert.NotContains(t, result, "redis")
+	})
+
+	t.Run("add overrides existing", func(t *testing.T) {
+		base := map[string]json.RawMessage{
+			"pg": json.RawMessage(`{"command":"old"}`),
+		}
+		p := profiles.Profile{
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{
+					"pg": json.RawMessage(`{"command":"new"}`),
+				},
+			},
+		}
+		result := profiles.MergeMCP(base, p)
+		assert.JSONEq(t, `{"command":"new"}`, string(result["pg"]))
+	})
+
+	t.Run("nil base returns adds only", func(t *testing.T) {
+		p := profiles.Profile{
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{
+					"pg": json.RawMessage(`{"command":"npx"}`),
+				},
+			},
+		}
+		result := profiles.MergeMCP(nil, p)
+		assert.Len(t, result, 1)
+		assert.Contains(t, result, "pg")
+	})
+
+	t.Run("empty profile returns base copy", func(t *testing.T) {
+		base := map[string]json.RawMessage{
+			"pg": json.RawMessage(`{"command":"npx"}`),
+		}
+		result := profiles.MergeMCP(base, profiles.Profile{})
+		assert.Len(t, result, 1)
+	})
+}
+
+func TestMergeKeybindings(t *testing.T) {
+	t.Run("override existing and add new", func(t *testing.T) {
+		base := map[string]any{"ctrl+k": "clear", "ctrl+l": "redraw"}
+		p := profiles.Profile{
+			Keybindings: profiles.ProfileKeybindings{
+				Override: map[string]any{"ctrl+k": "new-clear", "ctrl+j": "jump"},
+			},
+		}
+		result := profiles.MergeKeybindings(base, p)
+		assert.Equal(t, "new-clear", result["ctrl+k"])
+		assert.Equal(t, "redraw", result["ctrl+l"])
+		assert.Equal(t, "jump", result["ctrl+j"])
+	})
+
+	t.Run("nil base returns overrides", func(t *testing.T) {
+		p := profiles.Profile{
+			Keybindings: profiles.ProfileKeybindings{
+				Override: map[string]any{"ctrl+k": "clear"},
+			},
+		}
+		result := profiles.MergeKeybindings(nil, p)
+		assert.Equal(t, "clear", result["ctrl+k"])
+	})
+
+	t.Run("empty profile returns base copy", func(t *testing.T) {
+		base := map[string]any{"ctrl+k": "clear"}
+		result := profiles.MergeKeybindings(base, profiles.Profile{})
+		assert.Equal(t, "clear", result["ctrl+k"])
+	})
+
+	t.Run("both nil returns nil", func(t *testing.T) {
+		result := profiles.MergeKeybindings(nil, profiles.Profile{})
+		assert.Nil(t, result)
+	})
+}
+
+func TestParseProfile_Permissions(t *testing.T) {
+	input := []byte(`permissions:
+  add_allow:
+    - Bash(git *)
+    - Read
+  add_deny:
+    - Bash(rm *)
+`)
+	p, err := profiles.ParseProfile(input)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Bash(git *)", "Read"}, p.Permissions.AddAllow)
+	assert.Equal(t, []string{"Bash(rm *)"}, p.Permissions.AddDeny)
+}
+
+func TestParseProfile_ClaudeMD(t *testing.T) {
+	input := []byte(`claude_md:
+  add:
+    - shared/coding-standards.md
+  remove:
+    - old/deprecated.md
+`)
+	p, err := profiles.ParseProfile(input)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shared/coding-standards.md"}, p.ClaudeMD.Add)
+	assert.Equal(t, []string{"old/deprecated.md"}, p.ClaudeMD.Remove)
+}
+
+func TestParseProfile_MCP(t *testing.T) {
+	input := []byte(`mcp:
+  add:
+    postgres:
+      command: npx
+      args:
+        - -y
+        - server-postgres
+  remove:
+    - old-server
+`)
+	p, err := profiles.ParseProfile(input)
+	require.NoError(t, err)
+	require.Contains(t, p.MCP.Add, "postgres")
+	var val map[string]any
+	require.NoError(t, json.Unmarshal(p.MCP.Add["postgres"], &val))
+	assert.Equal(t, "npx", val["command"])
+	assert.Equal(t, []string{"old-server"}, p.MCP.Remove)
+}
+
+func TestParseProfile_Keybindings(t *testing.T) {
+	input := []byte(`keybindings:
+  override:
+    ctrl+k: clear
+    ctrl+l: redraw
+`)
+	p, err := profiles.ParseProfile(input)
+	require.NoError(t, err)
+	assert.Equal(t, "clear", p.Keybindings.Override["ctrl+k"])
+	assert.Equal(t, "redraw", p.Keybindings.Override["ctrl+l"])
+}
+
+func TestMarshalProfile_Permissions(t *testing.T) {
+	original := profiles.Profile{
+		Permissions: profiles.ProfilePermissions{
+			AddAllow: []string{"Read", "Write"},
+			AddDeny:  []string{"Bash(rm *)"},
+		},
+	}
+	data, err := profiles.MarshalProfile(original)
+	require.NoError(t, err)
+
+	parsed, err := profiles.ParseProfile(data)
+	require.NoError(t, err)
+	assert.Equal(t, original.Permissions.AddAllow, parsed.Permissions.AddAllow)
+	assert.Equal(t, original.Permissions.AddDeny, parsed.Permissions.AddDeny)
+}
+
+func TestMarshalProfile_ClaudeMD(t *testing.T) {
+	original := profiles.Profile{
+		ClaudeMD: profiles.ProfileClaudeMD{
+			Add:    []string{"a.md", "b.md"},
+			Remove: []string{"c.md"},
+		},
+	}
+	data, err := profiles.MarshalProfile(original)
+	require.NoError(t, err)
+
+	parsed, err := profiles.ParseProfile(data)
+	require.NoError(t, err)
+	assert.Equal(t, original.ClaudeMD.Add, parsed.ClaudeMD.Add)
+	assert.Equal(t, original.ClaudeMD.Remove, parsed.ClaudeMD.Remove)
+}
+
+func TestMarshalProfile_MCP(t *testing.T) {
+	original := profiles.Profile{
+		MCP: profiles.ProfileMCP{
+			Add: map[string]json.RawMessage{
+				"pg": json.RawMessage(`{"command":"npx"}`),
+			},
+			Remove: []string{"old-server"},
+		},
+	}
+	data, err := profiles.MarshalProfile(original)
+	require.NoError(t, err)
+
+	parsed, err := profiles.ParseProfile(data)
+	require.NoError(t, err)
+	require.Contains(t, parsed.MCP.Add, "pg")
+	assert.JSONEq(t, `{"command":"npx"}`, string(parsed.MCP.Add["pg"]))
+	assert.Equal(t, []string{"old-server"}, parsed.MCP.Remove)
+}
+
+func TestMarshalProfile_Keybindings(t *testing.T) {
+	original := profiles.Profile{
+		Keybindings: profiles.ProfileKeybindings{
+			Override: map[string]any{"ctrl+k": "clear"},
+		},
+	}
+	data, err := profiles.MarshalProfile(original)
+	require.NoError(t, err)
+
+	parsed, err := profiles.ParseProfile(data)
+	require.NoError(t, err)
+	assert.Equal(t, "clear", parsed.Keybindings.Override["ctrl+k"])
 }

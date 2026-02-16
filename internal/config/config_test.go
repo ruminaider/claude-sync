@@ -297,6 +297,169 @@ hooks:
 	})
 }
 
+func TestParseConfig_Permissions(t *testing.T) {
+	t.Run("parse with permissions", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+permissions:
+  allow:
+    - Bash(git *)
+    - Read
+  deny:
+    - Bash(rm *)
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Bash(git *)", "Read"}, cfg.Permissions.Allow)
+		assert.Equal(t, []string{"Bash(rm *)"}, cfg.Permissions.Deny)
+	})
+
+	t.Run("parse without permissions returns empty", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assert.Empty(t, cfg.Permissions.Allow)
+		assert.Empty(t, cfg.Permissions.Deny)
+	})
+
+	t.Run("marshal round-trip", func(t *testing.T) {
+		cfg := config.Config{
+			Version: "1.0.0",
+			Pinned:  map[string]string{},
+			Permissions: config.Permissions{
+				Allow: []string{"Bash(git *)", "Read"},
+				Deny:  []string{"Bash(rm *)"},
+			},
+		}
+		data, err := config.Marshal(cfg)
+		require.NoError(t, err)
+
+		parsed, err := config.Parse(data)
+		require.NoError(t, err)
+		assert.Equal(t, cfg.Permissions.Allow, parsed.Permissions.Allow)
+		assert.Equal(t, cfg.Permissions.Deny, parsed.Permissions.Deny)
+	})
+}
+
+func TestParseConfig_ClaudeMD(t *testing.T) {
+	t.Run("parse with claude_md", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+claude_md:
+  include:
+    - shared/coding-standards.md
+    - shared/api-patterns.md
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"shared/coding-standards.md", "shared/api-patterns.md"}, cfg.ClaudeMD.Include)
+	})
+
+	t.Run("parse without claude_md returns empty", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assert.Empty(t, cfg.ClaudeMD.Include)
+	})
+
+	t.Run("marshal round-trip", func(t *testing.T) {
+		cfg := config.Config{
+			Version: "1.0.0",
+			Pinned:  map[string]string{},
+			ClaudeMD: config.ClaudeMDConfig{
+				Include: []string{"shared/coding-standards.md"},
+			},
+		}
+		data, err := config.Marshal(cfg)
+		require.NoError(t, err)
+
+		parsed, err := config.Parse(data)
+		require.NoError(t, err)
+		assert.Equal(t, cfg.ClaudeMD.Include, parsed.ClaudeMD.Include)
+	})
+}
+
+func TestParseConfig_MCP(t *testing.T) {
+	t.Run("parse with mcp", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+mcp:
+  postgres:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-postgres"
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		require.Contains(t, cfg.MCP, "postgres")
+
+		var val map[string]any
+		require.NoError(t, json.Unmarshal(cfg.MCP["postgres"], &val))
+		assert.Equal(t, "npx", val["command"])
+	})
+
+	t.Run("marshal round-trip", func(t *testing.T) {
+		mcpData, _ := json.Marshal(map[string]any{"command": "npx", "args": []string{"-y", "server"}})
+		cfg := config.Config{
+			Version: "1.0.0",
+			Pinned:  map[string]string{},
+			MCP: map[string]json.RawMessage{
+				"myserver": json.RawMessage(mcpData),
+			},
+		}
+		data, err := config.Marshal(cfg)
+		require.NoError(t, err)
+
+		parsed, err := config.Parse(data)
+		require.NoError(t, err)
+		require.Contains(t, parsed.MCP, "myserver")
+
+		var val map[string]any
+		require.NoError(t, json.Unmarshal(parsed.MCP["myserver"], &val))
+		assert.Equal(t, "npx", val["command"])
+	})
+}
+
+func TestParseConfig_Keybindings(t *testing.T) {
+	t.Run("parse with keybindings", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+keybindings:
+  ctrl+k: clear
+  ctrl+l: redraw
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assert.Equal(t, "clear", cfg.Keybindings["ctrl+k"])
+		assert.Equal(t, "redraw", cfg.Keybindings["ctrl+l"])
+	})
+
+	t.Run("marshal round-trip", func(t *testing.T) {
+		cfg := config.Config{
+			Version:     "1.0.0",
+			Pinned:      map[string]string{},
+			Keybindings: map[string]any{"ctrl+k": "clear"},
+		}
+		data, err := config.Marshal(cfg)
+		require.NoError(t, err)
+
+		parsed, err := config.Parse(data)
+		require.NoError(t, err)
+		assert.Equal(t, "clear", parsed.Keybindings["ctrl+k"])
+	})
+}
+
 func TestParseUserPreferences_WithSync(t *testing.T) {
 	input := []byte(`sync_mode: union
 sync:

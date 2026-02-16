@@ -9,15 +9,30 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+// Permissions holds tool-permission allow/deny lists.
+type Permissions struct {
+	Allow []string `yaml:"allow,omitempty"`
+	Deny  []string `yaml:"deny,omitempty"`
+}
+
+// ClaudeMDConfig holds CLAUDE.md fragment include paths.
+type ClaudeMDConfig struct {
+	Include []string `yaml:"include,omitempty"`
+}
+
 // ConfigV2 represents ~/.claude-sync/config.yaml with categorized plugins.
 type ConfigV2 struct {
-	Version  string            `yaml:"version"`
-	Upstream []string          `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
-	Pinned   map[string]string `yaml:"-"` // parsed from plugins.pinned (key -> version)
-	Forked   []string          `yaml:"-"` // parsed from plugins.forked
-	Excluded []string          `yaml:"-"` // plugins user excluded during init
-	Settings map[string]any                `yaml:"settings,omitempty"`
-	Hooks    map[string]json.RawMessage `yaml:"-"`
+	Version     string                     `yaml:"version"`
+	Upstream    []string                   `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
+	Pinned      map[string]string          `yaml:"-"` // parsed from plugins.pinned (key -> version)
+	Forked      []string                   `yaml:"-"` // parsed from plugins.forked
+	Excluded    []string                   `yaml:"-"` // plugins user excluded during init
+	Settings    map[string]any             `yaml:"settings,omitempty"`
+	Hooks       map[string]json.RawMessage `yaml:"-"`
+	Permissions Permissions                `yaml:"-"`
+	ClaudeMD    ClaudeMDConfig             `yaml:"-"`
+	MCP         map[string]json.RawMessage `yaml:"-"`
+	Keybindings map[string]any             `yaml:"-"`
 }
 
 // Config is a type alias for ConfigV2 to maintain backward compatibility.
@@ -105,6 +120,37 @@ func Parse(data []byte) (Config, error) {
 					cfg.Hooks[k] = ExpandHookCommand(v)
 				}
 			}
+		case "permissions":
+			var perms Permissions
+			if err := valNode.Decode(&perms); err != nil {
+				return Config{}, fmt.Errorf("parsing config permissions: %w", err)
+			}
+			cfg.Permissions = perms
+		case "claude_md":
+			var cmd ClaudeMDConfig
+			if err := valNode.Decode(&cmd); err != nil {
+				return Config{}, fmt.Errorf("parsing config claude_md: %w", err)
+			}
+			cfg.ClaudeMD = cmd
+		case "mcp":
+			var mcpRaw map[string]any
+			if err := valNode.Decode(&mcpRaw); err != nil {
+				return Config{}, fmt.Errorf("parsing config mcp: %w", err)
+			}
+			cfg.MCP = make(map[string]json.RawMessage, len(mcpRaw))
+			for k, v := range mcpRaw {
+				data, err := json.Marshal(v)
+				if err != nil {
+					return Config{}, fmt.Errorf("encoding mcp entry %q: %w", k, err)
+				}
+				cfg.MCP[k] = json.RawMessage(data)
+			}
+		case "keybindings":
+			var kb map[string]any
+			if err := valNode.Decode(&kb); err != nil {
+				return Config{}, fmt.Errorf("parsing config keybindings: %w", err)
+			}
+			cfg.Keybindings = kb
 		}
 	}
 
@@ -301,6 +347,60 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		)
 	}
 
+	// permissions
+	if len(cfg.Permissions.Allow) > 0 || len(cfg.Permissions.Deny) > 0 {
+		var permsNode yaml.Node
+		if err := permsNode.Encode(cfg.Permissions); err != nil {
+			return nil, fmt.Errorf("encoding permissions: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "permissions", Tag: "!!str"},
+			&permsNode,
+		)
+	}
+
+	// claude_md
+	if len(cfg.ClaudeMD.Include) > 0 {
+		var claudeMDNode yaml.Node
+		if err := claudeMDNode.Encode(cfg.ClaudeMD); err != nil {
+			return nil, fmt.Errorf("encoding claude_md: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "claude_md", Tag: "!!str"},
+			&claudeMDNode,
+		)
+	}
+
+	// mcp
+	if len(cfg.MCP) > 0 {
+		mcpMap := make(map[string]any, len(cfg.MCP))
+		for k, v := range cfg.MCP {
+			var val any
+			json.Unmarshal(v, &val)
+			mcpMap[k] = val
+		}
+		var mcpNode yaml.Node
+		if err := mcpNode.Encode(mcpMap); err != nil {
+			return nil, fmt.Errorf("encoding mcp: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "mcp", Tag: "!!str"},
+			&mcpNode,
+		)
+	}
+
+	// keybindings
+	if len(cfg.Keybindings) > 0 {
+		var kbNode yaml.Node
+		if err := kbNode.Encode(cfg.Keybindings); err != nil {
+			return nil, fmt.Errorf("encoding keybindings: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "keybindings", Tag: "!!str"},
+			&kbNode,
+		)
+	}
+
 	return yaml.Marshal(doc)
 }
 
@@ -330,8 +430,10 @@ func ExpandHookCommand(command string) json.RawMessage {
 type SyncCategory string
 
 const (
-	CategorySettings SyncCategory = "settings"
-	CategoryHooks    SyncCategory = "hooks"
+	CategorySettings    SyncCategory = "settings"
+	CategoryHooks       SyncCategory = "hooks"
+	CategoryPermissions SyncCategory = "permissions"
+	CategoryMCP         SyncCategory = "mcp"
 )
 
 // SyncPrefs holds per-machine sync opt-out preferences.
