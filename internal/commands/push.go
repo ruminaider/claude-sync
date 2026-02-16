@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/profiles"
@@ -15,13 +17,20 @@ import (
 )
 
 type PushScanResult struct {
-	AddedPlugins    []string
-	RemovedPlugins  []string
-	ChangedSettings map[string]csync.SettingChange
+	AddedPlugins       []string
+	RemovedPlugins     []string
+	ChangedSettings    map[string]csync.SettingChange
+	ChangedPermissions bool
+	ChangedClaudeMD    *claudemd.ReconcileResult
+	ChangedMCP         bool
+	ChangedKeybindings bool
 }
 
 func (r *PushScanResult) HasChanges() bool {
-	return len(r.AddedPlugins) > 0 || len(r.RemovedPlugins) > 0 || len(r.ChangedSettings) > 0
+	return len(r.AddedPlugins) > 0 || len(r.RemovedPlugins) > 0 ||
+		len(r.ChangedSettings) > 0 ||
+		r.ChangedPermissions || r.ChangedClaudeMD != nil ||
+		r.ChangedMCP || r.ChangedKeybindings
 }
 
 func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
@@ -83,21 +92,69 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		filtered = append(filtered, p)
 	}
 
-	return &PushScanResult{
+	result := &PushScanResult{
 		AddedPlugins:   filtered,
 		RemovedPlugins: diff.ToInstall,
-	}, nil
+	}
+
+	// Scan permissions.
+	settingsRaw, settErr := claudecode.ReadSettings(claudeDir)
+	if settErr == nil {
+		var currentPerms struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+		}
+		if permRaw, ok := settingsRaw["permissions"]; ok {
+			json.Unmarshal(permRaw, &currentPerms)
+		}
+		if !stringSlicesEqual(currentPerms.Allow, cfg.Permissions.Allow) ||
+			!stringSlicesEqual(currentPerms.Deny, cfg.Permissions.Deny) {
+			result.ChangedPermissions = true
+		}
+	}
+
+	// Scan CLAUDE.md.
+	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+	if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
+		reconcileResult, err := claudemd.Reconcile(syncDir, string(claudeMDData))
+		if err == nil && (len(reconcileResult.Updated) > 0 || len(reconcileResult.New) > 0 ||
+			len(reconcileResult.Deleted) > 0 || len(reconcileResult.Renamed) > 0) {
+			result.ChangedClaudeMD = reconcileResult
+		}
+	}
+
+	// Scan MCP.
+	currentMCP, mcpErr := claudecode.ReadMCPConfig(claudeDir)
+	if mcpErr == nil {
+		if !jsonMapsEqual(currentMCP, cfg.MCP) {
+			result.ChangedMCP = true
+		}
+	}
+
+	// Scan keybindings.
+	currentKB, kbErr := claudecode.ReadKeybindings(claudeDir)
+	if kbErr == nil {
+		if !anyMapsEqual(currentKB, cfg.Keybindings) {
+			result.ChangedKeybindings = true
+		}
+	}
+
+	return result, nil
 }
 
 // PushApplyOptions configures what PushApply does.
 type PushApplyOptions struct {
-	ClaudeDir      string
-	SyncDir        string
-	AddPlugins     []string
-	RemovePlugins  []string
-	ExcludePlugins []string // plugins to add to cfg.Excluded
-	ProfileTarget  string   // "" = base config, non-empty = profile name
-	Message        string
+	ClaudeDir         string
+	SyncDir           string
+	AddPlugins        []string
+	RemovePlugins     []string
+	ExcludePlugins    []string // plugins to add to cfg.Excluded
+	ProfileTarget     string   // "" = base config, non-empty = profile name
+	Message           string
+	UpdatePermissions bool
+	UpdateClaudeMD    bool
+	UpdateMCP         bool
+	UpdateKeybindings bool
 }
 
 func PushApply(opts PushApplyOptions) error {
@@ -187,6 +244,40 @@ func PushApply(opts PushApplyOptions) error {
 		sort.Strings(cfg.Excluded)
 	}
 
+	// Update permissions from current state.
+	if opts.UpdatePermissions {
+		settingsRaw, err := claudecode.ReadSettings(opts.ClaudeDir)
+		if err == nil {
+			var perms struct {
+				Allow []string `json:"allow"`
+				Deny  []string `json:"deny"`
+			}
+			if permRaw, ok := settingsRaw["permissions"]; ok {
+				json.Unmarshal(permRaw, &perms)
+			}
+			cfg.Permissions = config.Permissions{
+				Allow: perms.Allow,
+				Deny:  perms.Deny,
+			}
+		}
+	}
+
+	// Update MCP from current state.
+	if opts.UpdateMCP {
+		mcp, err := claudecode.ReadMCPConfig(opts.ClaudeDir)
+		if err == nil {
+			cfg.MCP = mcp
+		}
+	}
+
+	// Update keybindings from current state.
+	if opts.UpdateKeybindings {
+		kb, err := claudecode.ReadKeybindings(opts.ClaudeDir)
+		if err == nil {
+			cfg.Keybindings = kb
+		}
+	}
+
 	// Always write config (excluded list may change even for profile-targeted pushes).
 	newData, err := config.Marshal(cfg)
 	if err != nil {
@@ -208,6 +299,14 @@ func PushApply(opts PushApplyOptions) error {
 		profileRelPath := filepath.Join("profiles", opts.ProfileTarget+".yaml")
 		if err := git.Add(opts.SyncDir, profileRelPath); err != nil {
 			return fmt.Errorf("staging profile: %w", err)
+		}
+	}
+	if opts.UpdateClaudeMD {
+		claudeMdDir := filepath.Join(opts.SyncDir, "claude-md")
+		if _, err := os.Stat(claudeMdDir); err == nil {
+			if err := git.Add(opts.SyncDir, "claude-md"); err != nil {
+				return fmt.Errorf("staging claude-md: %w", err)
+			}
 		}
 	}
 	if err := git.Commit(opts.SyncDir, message); err != nil {
@@ -251,4 +350,54 @@ func shortNames(plugins []string) []string {
 		}
 	}
 	return names
+}
+
+// stringSlicesEqual compares two string slices regardless of order.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aSet := make(map[string]int, len(a))
+	for _, s := range a {
+		aSet[s]++
+	}
+	for _, s := range b {
+		aSet[s]--
+	}
+	for _, count := range aSet {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// jsonMapsEqual compares two json.RawMessage maps by key set and value bytes.
+func jsonMapsEqual(a, b map[string]json.RawMessage) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok {
+			return false
+		}
+		if string(va) != string(vb) {
+			return false
+		}
+	}
+	return true
+}
+
+// anyMapsEqual compares two map[string]any maps by JSON serialization.
+func anyMapsEqual(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	aJSON, _ := json.Marshal(a)
+	bJSON, _ := json.Marshal(b)
+	return string(aJSON) == string(bJSON)
 }

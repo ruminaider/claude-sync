@@ -14,6 +14,8 @@ import (
 var pushMessage string
 var pushAll bool
 var pushRemote string
+var pushAutoFlag bool
+var pushQuietFlag bool
 
 var pushCmd = &cobra.Command{
 	Use:   "push",
@@ -54,6 +56,26 @@ var pushCmd = &cobra.Command{
 				return nil
 			}
 			fmt.Println("Nothing to push. Everything matches config.")
+			return nil
+		}
+
+		if pushAutoFlag {
+			if err := commands.PushApply(commands.PushApplyOptions{
+				ClaudeDir:         claudeDir,
+				SyncDir:           syncDir,
+				AddPlugins:        scan.AddedPlugins,
+				RemovePlugins:     scan.RemovedPlugins,
+				UpdatePermissions: scan.ChangedPermissions,
+				UpdateClaudeMD:    scan.ChangedClaudeMD != nil,
+				UpdateMCP:         scan.ChangedMCP,
+				UpdateKeybindings: scan.ChangedKeybindings,
+				Message:           pushMessage,
+			}); err != nil {
+				return err
+			}
+			if !pushQuietFlag {
+				fmt.Println("Changes pushed successfully.")
+			}
 			return nil
 		}
 
@@ -171,4 +193,6 @@ func init() {
 	pushCmd.Flags().StringVarP(&pushMessage, "message", "m", "", "Commit message")
 	pushCmd.Flags().BoolVar(&pushAll, "all", false, "Push all changes without interactive selection")
 	pushCmd.Flags().StringVarP(&pushRemote, "remote", "r", "", "Git remote URL (used if no remote is configured)")
+	pushCmd.Flags().BoolVar(&pushAutoFlag, "auto", false, "Auto mode: push all changes without prompts")
+	pushCmd.Flags().BoolVarP(&pushQuietFlag, "quiet", "q", false, "Suppress output")
 }
