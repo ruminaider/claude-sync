@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -202,6 +203,36 @@ func TestStatusJSON(t *testing.T) {
 	require.Len(t, upstreamSynced, 1)
 	assert.Equal(t, "context7@claude-plugins-official", upstreamSynced[0].Key)
 	assert.Equal(t, "1.2.0", upstreamSynced[0].InstalledVersion)
+}
+
+func TestStatusShowsPending(t *testing.T) {
+	claudeDir, syncDir := setupV2StatusEnv(t)
+
+	// Write a pending-changes.yaml.
+	pending := approval.PendingChanges{
+		Commit: "abc123",
+		Permissions: &approval.PendingPermissions{
+			Allow: []string{"Bash(git *)"},
+		},
+	}
+	require.NoError(t, approval.WritePending(syncDir, pending))
+
+	result, err := commands.Status(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	require.NotNil(t, result.PendingChanges)
+	assert.Equal(t, "abc123", result.PendingChanges.Commit)
+	require.NotNil(t, result.PendingChanges.Permissions)
+	assert.Contains(t, result.PendingChanges.Permissions.Allow, "Bash(git *)")
+}
+
+func TestStatusNoPending(t *testing.T) {
+	claudeDir, syncDir := setupV2StatusEnv(t)
+
+	result, err := commands.Status(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.Nil(t, result.PendingChanges)
 }
 
 func TestStatusHasPendingChanges(t *testing.T) {
