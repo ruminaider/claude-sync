@@ -20,6 +20,11 @@ type ClaudeMDConfig struct {
 	Include []string `yaml:"include,omitempty"`
 }
 
+// MCPServerMeta stores metadata about an imported MCP server.
+type MCPServerMeta struct {
+	SourceProject string `yaml:"source_project,omitempty"`
+}
+
 // ConfigV2 represents ~/.claude-sync/config.yaml with categorized plugins.
 type ConfigV2 struct {
 	Version     string                     `yaml:"version"`
@@ -32,6 +37,7 @@ type ConfigV2 struct {
 	Permissions Permissions                `yaml:"-"`
 	ClaudeMD    ClaudeMDConfig             `yaml:"-"`
 	MCP         map[string]json.RawMessage `yaml:"-"`
+	MCPMeta     map[string]MCPServerMeta   `yaml:"-"`
 	Keybindings map[string]any             `yaml:"-"`
 }
 
@@ -145,6 +151,12 @@ func Parse(data []byte) (Config, error) {
 				}
 				cfg.MCP[k] = json.RawMessage(data)
 			}
+		case "mcp_metadata":
+			var meta map[string]MCPServerMeta
+			if err := valNode.Decode(&meta); err != nil {
+				return Config{}, fmt.Errorf("parsing config mcp_metadata: %w", err)
+			}
+			cfg.MCPMeta = meta
 		case "keybindings":
 			var kb map[string]any
 			if err := valNode.Decode(&kb); err != nil {
@@ -386,6 +398,18 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "mcp", Tag: "!!str"},
 			&mcpNode,
+		)
+	}
+
+	// mcp_metadata
+	if len(cfg.MCPMeta) > 0 {
+		var metaNode yaml.Node
+		if err := metaNode.Encode(cfg.MCPMeta); err != nil {
+			return nil, fmt.Errorf("encoding mcp_metadata: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "mcp_metadata", Tag: "!!str"},
+			&metaNode,
 		)
 	}
 

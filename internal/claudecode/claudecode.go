@@ -117,10 +117,9 @@ func WriteInstalledPlugins(claudeDir string, ip *InstalledPlugins) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
-// ReadMCPConfig reads ~/.claude/.mcp.json as a map of server configs.
+// ReadMCPConfigFile reads an .mcp.json file at the given path.
 // Returns empty map if file doesn't exist.
-func ReadMCPConfig(claudeDir string) (map[string]json.RawMessage, error) {
-	path := filepath.Join(claudeDir, ".mcp.json")
+func ReadMCPConfigFile(path string) (map[string]json.RawMessage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -147,8 +146,11 @@ func ReadMCPConfig(claudeDir string) (map[string]json.RawMessage, error) {
 	return wrapper.MCPServers, nil
 }
 
-// WriteMCPConfig writes the MCP server configs to ~/.claude/.mcp.json.
-func WriteMCPConfig(claudeDir string, mcp map[string]json.RawMessage) error {
+// WriteMCPConfigFile writes MCP server configs to the given path.
+func WriteMCPConfigFile(path string, mcp map[string]json.RawMessage) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating directory for MCP config: %w", err)
+	}
 	wrapper := map[string]any{
 		"mcpServers": mcp,
 	}
@@ -156,8 +158,18 @@ func WriteMCPConfig(claudeDir string, mcp map[string]json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("marshaling MCP config: %w", err)
 	}
-	path := filepath.Join(claudeDir, ".mcp.json")
 	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+// ReadMCPConfig reads ~/.claude/.mcp.json as a map of server configs.
+// Returns empty map if file doesn't exist.
+func ReadMCPConfig(claudeDir string) (map[string]json.RawMessage, error) {
+	return ReadMCPConfigFile(filepath.Join(claudeDir, ".mcp.json"))
+}
+
+// WriteMCPConfig writes the MCP server configs to ~/.claude/.mcp.json.
+func WriteMCPConfig(claudeDir string, mcp map[string]json.RawMessage) error {
+	return WriteMCPConfigFile(filepath.Join(claudeDir, ".mcp.json"), mcp)
 }
 
 // ReadKeybindings reads ~/.claude/keybindings.json.
