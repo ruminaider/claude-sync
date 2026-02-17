@@ -19,15 +19,16 @@ import (
 
 // InitScanResult holds what was found during scanning without writing anything.
 type InitScanResult struct {
-	PluginKeys     []string                   // all plugin keys
-	Upstream       []string                   // portable marketplace plugins
-	AutoForked     []string                   // non-portable plugins that would be forked
-	Settings       map[string]any             // syncable settings found
-	Hooks          map[string]json.RawMessage // hooks found (hookName -> raw JSON)
-	Permissions    config.Permissions         // permissions found
-	ClaudeMDContent string                    // raw content from ~/.claude/CLAUDE.md
-	MCP            map[string]json.RawMessage // MCP server configs found
-	Keybindings    map[string]any             // keybindings found
+	PluginKeys      []string                   // all plugin keys
+	Upstream        []string                   // portable marketplace plugins
+	AutoForked      []string                   // non-portable plugins that would be forked
+	Settings        map[string]any             // syncable settings found
+	Hooks           map[string]json.RawMessage // hooks found (hookName -> raw JSON)
+	Permissions     config.Permissions         // permissions found
+	ClaudeMDContent string                     // raw content from ~/.claude/CLAUDE.md
+	ClaudeMDSections []claudemd.Section        // pre-split sections for picker display
+	MCP             map[string]json.RawMessage // MCP server configs found
+	Keybindings     map[string]any             // keybindings found
 }
 
 // InitResult describes how plugins were categorized during init.
@@ -52,13 +53,14 @@ type InitOptions struct {
 	SyncDir           string
 	RemoteURL         string
 	IncludeSettings   bool                       // whether to write settings to config
+	SettingsFilter    []string                   // optional: specific keys to include (nil = all when IncludeSettings is true)
 	IncludeHooks      map[string]json.RawMessage // specific hooks to include (nil = all, empty = none)
 	IncludePlugins    []string                   // specific plugin keys to include (nil = all, empty = none)
 	Profiles          map[string]profiles.Profile // nil = no profiles, non-nil = write profile files
 	ActiveProfile     string                      // profile to activate on this machine (empty = none)
 	Permissions       config.Permissions          // permissions to include
 	ImportClaudeMD    bool                        // whether to import CLAUDE.md
-	ClaudeMDFragments []string                    // fragment names (set internally)
+	ClaudeMDFragments []string                    // fragment names to include (nil = all when ImportClaudeMD is true)
 	MCP               map[string]json.RawMessage  // MCP server configs to include
 	Keybindings       map[string]any              // keybindings to include
 }
@@ -159,6 +161,9 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
 	if data, err := os.ReadFile(claudeMDPath); err == nil {
 		result.ClaudeMDContent = string(data)
+		if result.ClaudeMDContent != "" {
+			result.ClaudeMDSections = claudemd.Split(result.ClaudeMDContent)
+		}
 	}
 
 	// Read MCP config
@@ -295,9 +300,21 @@ func Init(opts InitOptions) (*InitResult, error) {
 	// Apply settings filter.
 	var cfgSettings map[string]any
 	if opts.IncludeSettings {
-		cfgSettings = syncedSettings
-		for k := range syncedSettings {
-			result.IncludedSettings = append(result.IncludedSettings, k)
+		if opts.SettingsFilter == nil {
+			// nil = include all settings
+			cfgSettings = syncedSettings
+			for k := range syncedSettings {
+				result.IncludedSettings = append(result.IncludedSettings, k)
+			}
+		} else {
+			// non-nil = include only specified keys
+			cfgSettings = make(map[string]any)
+			for _, k := range opts.SettingsFilter {
+				if v, ok := syncedSettings[k]; ok {
+					cfgSettings[k] = v
+					result.IncludedSettings = append(result.IncludedSettings, k)
+				}
+			}
 		}
 		sort.Strings(result.IncludedSettings)
 	}
@@ -346,12 +363,21 @@ func Init(opts InitOptions) (*InitResult, error) {
 		claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
 		claudeMDData, readErr := os.ReadFile(claudeMDPath)
 		if readErr == nil {
+			// Always import all sections to disk (fragment files + manifest).
 			importResult, importErr := claudemd.ImportClaudeMD(syncDir, string(claudeMDData))
 			if importErr != nil {
 				return nil, fmt.Errorf("importing CLAUDE.md: %w", importErr)
 			}
-			cfg.ClaudeMD.Include = importResult.FragmentNames
-			result.ClaudeMDFragments = importResult.FragmentNames
+			// Determine which fragments to include in config.
+			if opts.ClaudeMDFragments == nil {
+				// nil = include all fragments
+				cfg.ClaudeMD.Include = importResult.FragmentNames
+				result.ClaudeMDFragments = importResult.FragmentNames
+			} else {
+				// non-nil = include only user-selected fragments
+				cfg.ClaudeMD.Include = opts.ClaudeMDFragments
+				result.ClaudeMDFragments = opts.ClaudeMDFragments
+			}
 			// Re-write config with updated ClaudeMD.Include.
 			cfgData, err = config.Marshal(cfg)
 			if err != nil {

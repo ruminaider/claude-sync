@@ -8,32 +8,50 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
 var (
-	initRemote       string
-	initSkipSettings bool
-	initSkipHooks    bool
-	initSkipPlugins  bool
-	initSkipProfiles bool
+	initRemote          string
+	initSkipSettings    bool
+	initSkipHooks       bool
+	initSkipPlugins     bool
+	initSkipProfiles    bool
+	initSkipClaudeMD    bool
+	initSkipPermissions bool
+	initSkipMCP         bool
+	initSkipKeybindings bool
 )
 
 type initStep int
 
 const (
-	stepConfigStyle     initStep = iota // ask simple vs profiles
+	stepConfigStyle         initStep = iota // ask simple vs profiles
 	stepPluginStrategy
 	stepPluginPicker
-	stepSettings
+	stepClaudeMDStrategy    // NEW: 3-option for CLAUDE.md sections
+	stepClaudeMDPicker      // NEW: per-fragment picker
+	stepSettingsStrategy    // RENAMED from stepSettings: 3-option for settings
+	stepSettingsPicker      // NEW: per-key picker
+	stepPermissionsStrategy // NEW: 3-option for permissions
+	stepPermissionsPicker   // NEW: per-rule picker
+	stepMCPStrategy         // NEW: 3-option for MCP servers
+	stepMCPPicker           // NEW: per-server picker
+	stepKeybindings         // NEW: yes/no for keybindings
 	stepHookStrategy
 	stepHookPicker
 	stepProfileName
 	stepProfilePlugins
+	stepProfileClaudeMD     // NEW
 	stepProfileSettings
+	stepProfilePermissions  // NEW
+	stepProfileMCP          // NEW
+	stepProfileKeybindings  // NEW
 	stepProfileHooks
 	stepProfileLoop
 	stepProfileActivate
@@ -109,7 +127,13 @@ var initCmd = &cobra.Command{
 		// Phase 2: Interactive prompts with go-back navigation.
 		var includePlugins []string                 // nil = all
 		includeSettings := true
-		var includeHooks map[string]json.RawMessage // nil = all
+		var settingsFilter []string                    // nil = all (when includeSettings is true)
+		var includeHooks map[string]json.RawMessage    // nil = all
+		importClaudeMD := scan.ClaudeMDContent != ""   // default: import if available
+		var includeClaudeMDFragments []string           // nil = all, []string{} = none
+		includePermissions := scan.Permissions          // default: include all
+		includeMCP := scan.MCP                          // nil/empty = none, map = selected; default: all
+		includeKeybindingsFlag := true                  // default: include
 
 		// Profile-related variables.
 		var useProfiles bool
@@ -123,7 +147,11 @@ var initCmd = &cobra.Command{
 
 		// Determine the starting step based on flags and data availability.
 		hasPlugins := len(scan.PluginKeys) > 0 && !initSkipPlugins
+		hasClaudeMD := scan.ClaudeMDContent != "" && !initSkipClaudeMD
 		hasSettings := len(scan.Settings) > 0 && !initSkipSettings
+		hasPermissions := (len(scan.Permissions.Allow) > 0 || len(scan.Permissions.Deny) > 0) && !initSkipPermissions
+		hasMCP := len(scan.MCP) > 0 && !initSkipMCP
+		hasKeybindings := len(scan.Keybindings) > 0 && !initSkipKeybindings
 		hasHooks := len(scan.Hooks) > 0 && !initSkipHooks
 
 		if initSkipSettings {
@@ -132,13 +160,89 @@ var initCmd = &cobra.Command{
 		if initSkipHooks {
 			includeHooks = map[string]json.RawMessage{} // empty = none
 		}
+		if initSkipClaudeMD {
+			importClaudeMD = false
+		}
+		if initSkipPermissions {
+			includePermissions = config.Permissions{}
+		}
+		if initSkipMCP {
+			includeMCP = nil
+		}
+		if initSkipKeybindings {
+			includeKeybindingsFlag = false
+		}
+
+		// nextBaseStep returns the next step in the base config chain after the given step.
+		nextBaseStep := func(after initStep) initStep {
+			order := []struct {
+				step    initStep
+				enabled bool
+			}{
+				{stepClaudeMDStrategy, hasClaudeMD},
+				{stepSettingsStrategy, hasSettings},
+				{stepPermissionsStrategy, hasPermissions},
+				{stepMCPStrategy, hasMCP},
+				{stepKeybindings, hasKeybindings},
+				{stepHookStrategy, hasHooks},
+			}
+			found := false
+			for _, entry := range order {
+				if entry.step == after {
+					found = true
+					continue
+				}
+				if found && entry.enabled {
+					return entry.step
+				}
+			}
+			return stepDone
+		}
+
+		// prevBaseStep returns the previous step in the base config chain before the given step.
+		prevBaseStep := func(before initStep) initStep {
+			order := []struct {
+				step    initStep
+				enabled bool
+			}{
+				{stepPluginStrategy, hasPlugins},
+				{stepClaudeMDStrategy, hasClaudeMD},
+				{stepSettingsStrategy, hasSettings},
+				{stepPermissionsStrategy, hasPermissions},
+				{stepMCPStrategy, hasMCP},
+				{stepKeybindings, hasKeybindings},
+				{stepHookStrategy, hasHooks},
+			}
+			prev := initStep(-1)
+			for _, entry := range order {
+				if entry.step == before {
+					break
+				}
+				if entry.enabled {
+					prev = entry.step
+				}
+			}
+			return prev
+		}
 
 		step := stepDone
 		if hasHooks {
 			step = stepHookStrategy
 		}
+		if hasKeybindings {
+			step = stepKeybindings
+		}
+		if hasMCP {
+			step = stepMCPStrategy
+		}
+		if hasPermissions {
+			step = stepPermissionsStrategy
+		}
 		if hasSettings {
-			step = stepSettings
+			step = stepSettingsStrategy
+		}
+		if hasClaudeMD {
+			step = stepClaudeMDStrategy
 		}
 		if hasPlugins {
 			step = stepPluginStrategy
@@ -213,22 +317,10 @@ var initCmd = &cobra.Command{
 				switch choice {
 				case "all":
 					includePlugins = nil // nil = all
-					if hasSettings {
-						step = stepSettings
-					} else if hasHooks {
-						step = stepHookStrategy
-					} else {
-						step = stepDone
-					}
+					step = nextBaseStep(stepPluginStrategy)
 				case "none":
 					includePlugins = []string{} // empty = none
-					if hasSettings {
-						step = stepSettings
-					} else if hasHooks {
-						step = stepHookStrategy
-					} else {
-						step = stepDone
-					}
+					step = nextBaseStep(stepPluginStrategy)
 				case "some":
 					step = stepPluginPicker
 				}
@@ -263,24 +355,372 @@ var initCmd = &cobra.Command{
 					return err
 				}
 				includePlugins = selected
-				if hasSettings {
-					step = stepSettings
-				} else if hasHooks {
-					step = stepHookStrategy
-				} else {
-					step = stepDone
+				step = nextBaseStep(stepPluginStrategy)
+
+			case stepClaudeMDStrategy:
+				// Build section display names.
+				sectionNames := make([]string, 0, len(scan.ClaudeMDSections))
+				for _, sec := range scan.ClaudeMDSections {
+					name := sec.Header
+					if name == "" {
+						name = "(preamble)"
+					}
+					sectionNames = append(sectionNames, name)
+				}
+				sectionSummary := strings.Join(sectionNames, ", ")
+				n := len(scan.ClaudeMDSections)
+
+				title := fmt.Sprintf("Include CLAUDE.md sections? (%d section(s): %s)", n, sectionSummary)
+				if useProfiles {
+					title = fmt.Sprintf("Base CLAUDE.md sections — %d section(s): %s", n, sectionSummary)
 				}
 
-			case stepSettings:
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(title).
+							Options(
+								huh.NewOption(fmt.Sprintf("Include all %d section(s)", n), "all"),
+								huh.NewOption("Choose which to include", "some"),
+								huh.NewOption("Don't include", "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						prev := prevBaseStep(stepClaudeMDStrategy)
+						if prev >= 0 {
+							step = prev
+							continue
+						}
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
+							continue
+						}
+						return err
+					}
+					return err
+				}
+
+				switch choice {
+				case "all":
+					importClaudeMD = true
+					includeClaudeMDFragments = nil // nil = all
+					step = nextBaseStep(stepClaudeMDStrategy)
+				case "none":
+					importClaudeMD = false
+					step = nextBaseStep(stepClaudeMDStrategy)
+				case "some":
+					step = stepClaudeMDPicker
+				}
+
+			case stepClaudeMDPicker:
+				// Build display items from sections.
+				displayItems := make([]string, 0, len(scan.ClaudeMDSections))
+				displayToFragment := make(map[string]string)
+				for _, sec := range scan.ClaudeMDSections {
+					display := sec.Header
+					if display == "" {
+						display = "(preamble)"
+					}
+					displayItems = append(displayItems, display)
+					displayToFragment[display] = claudemd.HeaderToFragmentName(sec.Header)
+				}
+
+				pickerTitle := "Select CLAUDE.md sections to include:"
+				if useProfiles {
+					pickerTitle = "Select base CLAUDE.md sections:"
+				}
+
+				selected, err := runPicker(pickerTitle, displayItems)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepClaudeMDStrategy
+						continue
+					}
+					return err
+				}
+				importClaudeMD = true
+				includeClaudeMDFragments = make([]string, 0, len(selected))
+				for _, display := range selected {
+					includeClaudeMDFragments = append(includeClaudeMDFragments, displayToFragment[display])
+				}
+				step = nextBaseStep(stepClaudeMDStrategy)
+
+			case stepSettingsStrategy:
+				keys := make([]string, 0, len(scan.Settings))
+				for k := range scan.Settings {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				n := len(keys)
+
+				title := fmt.Sprintf("Include settings? (%s)", strings.Join(keys, ", "))
+				if useProfiles {
+					title = fmt.Sprintf("Base settings — %s", strings.Join(keys, ", "))
+				}
+
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(title).
+							Options(
+								huh.NewOption(fmt.Sprintf("Include all %d setting(s)", n), "all"),
+								huh.NewOption("Choose which to include", "some"),
+								huh.NewOption("Don't include", "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						prev := prevBaseStep(stepSettingsStrategy)
+						if prev >= 0 {
+							step = prev
+							continue
+						}
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
+							continue
+						}
+						return err
+					}
+					return err
+				}
+
+				switch choice {
+				case "all":
+					includeSettings = true
+					settingsFilter = nil // nil = all
+					step = nextBaseStep(stepSettingsStrategy)
+				case "none":
+					includeSettings = false
+					step = nextBaseStep(stepSettingsStrategy)
+				case "some":
+					step = stepSettingsPicker
+				}
+
+			case stepSettingsPicker:
+				// Build display strings: "key: value"
 				keys := make([]string, 0, len(scan.Settings))
 				for k := range scan.Settings {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
 
-				settingsTitle := fmt.Sprintf("Include settings in sync? (%s)", strings.Join(keys, ", "))
+				displayItems := make([]string, 0, len(keys))
+				displayToKey := make(map[string]string)
+				for _, k := range keys {
+					display := fmt.Sprintf("%s: %v", k, scan.Settings[k])
+					displayItems = append(displayItems, display)
+					displayToKey[display] = k
+				}
+
+				pickerTitle := "Select settings to include:"
 				if useProfiles {
-					settingsTitle = fmt.Sprintf("Include settings in base config? (%s)", strings.Join(keys, ", "))
+					pickerTitle = "Select base settings:"
+				}
+
+				selected, err := runPicker(pickerTitle, displayItems)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepSettingsStrategy
+						continue
+					}
+					return err
+				}
+				includeSettings = true
+				settingsFilter = make([]string, 0, len(selected))
+				for _, display := range selected {
+					settingsFilter = append(settingsFilter, displayToKey[display])
+				}
+				step = nextBaseStep(stepSettingsStrategy)
+
+			case stepPermissionsStrategy:
+				allowCount := len(scan.Permissions.Allow)
+				denyCount := len(scan.Permissions.Deny)
+
+				title := fmt.Sprintf("Include permissions? (%d allow, %d deny rules)", allowCount, denyCount)
+				if useProfiles {
+					title = fmt.Sprintf("Base permissions — %d allow, %d deny rules", allowCount, denyCount)
+				}
+
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(title).
+							Options(
+								huh.NewOption("Include all", "all"),
+								huh.NewOption("Choose which to include", "some"),
+								huh.NewOption("Don't include", "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						prev := prevBaseStep(stepPermissionsStrategy)
+						if prev >= 0 {
+							step = prev
+							continue
+						}
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
+							continue
+						}
+						return err
+					}
+					return err
+				}
+
+				switch choice {
+				case "all":
+					includePermissions = scan.Permissions
+					step = nextBaseStep(stepPermissionsStrategy)
+				case "none":
+					includePermissions = config.Permissions{}
+					step = nextBaseStep(stepPermissionsStrategy)
+				case "some":
+					step = stepPermissionsPicker
+				}
+
+			case stepPermissionsPicker:
+				// Build two sections: Allow and Deny.
+				var sections []pickerSection
+				allowSet := make(map[string]bool)
+				if len(scan.Permissions.Allow) > 0 {
+					sections = append(sections, pickerSection{
+						Header: fmt.Sprintf("Allow (%d)", len(scan.Permissions.Allow)),
+						Items:  scan.Permissions.Allow,
+					})
+					for _, r := range scan.Permissions.Allow {
+						allowSet[r] = true
+					}
+				}
+				if len(scan.Permissions.Deny) > 0 {
+					sections = append(sections, pickerSection{
+						Header: fmt.Sprintf("Deny (%d)", len(scan.Permissions.Deny)),
+						Items:  scan.Permissions.Deny,
+					})
+				}
+
+				pickerTitle := "Select permission rules to include:"
+				if useProfiles {
+					pickerTitle = "Select base permission rules:"
+				}
+
+				selected, err := runPickerWithSections(pickerTitle, sections)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepPermissionsStrategy
+						continue
+					}
+					return err
+				}
+				// Separate selected items back into allow/deny.
+				var filteredAllow, filteredDeny []string
+				for _, item := range selected {
+					if allowSet[item] {
+						filteredAllow = append(filteredAllow, item)
+					} else {
+						filteredDeny = append(filteredDeny, item)
+					}
+				}
+				includePermissions = config.Permissions{Allow: filteredAllow, Deny: filteredDeny}
+				step = nextBaseStep(stepPermissionsStrategy)
+
+			case stepMCPStrategy:
+				mcpNames := make([]string, 0, len(scan.MCP))
+				for k := range scan.MCP {
+					mcpNames = append(mcpNames, k)
+				}
+				sort.Strings(mcpNames)
+				n := len(mcpNames)
+
+				title := fmt.Sprintf("Include MCP servers? (%s)", strings.Join(mcpNames, ", "))
+				if useProfiles {
+					title = fmt.Sprintf("Base MCP servers — %s", strings.Join(mcpNames, ", "))
+				}
+
+				var choice string
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewSelect[string]().
+							Title(title).
+							Options(
+								huh.NewOption(fmt.Sprintf("Include all %d server(s)", n), "all"),
+								huh.NewOption("Choose which to include", "some"),
+								huh.NewOption("Don't include", "none"),
+							).
+							Value(&choice),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						prev := prevBaseStep(stepMCPStrategy)
+						if prev >= 0 {
+							step = prev
+							continue
+						}
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
+							continue
+						}
+						return err
+					}
+					return err
+				}
+
+				switch choice {
+				case "all":
+					includeMCP = scan.MCP
+					step = nextBaseStep(stepMCPStrategy)
+				case "none":
+					includeMCP = nil
+					step = nextBaseStep(stepMCPStrategy)
+				case "some":
+					step = stepMCPPicker
+				}
+
+			case stepMCPPicker:
+				mcpNames := make([]string, 0, len(scan.MCP))
+				for k := range scan.MCP {
+					mcpNames = append(mcpNames, k)
+				}
+				sort.Strings(mcpNames)
+
+				pickerTitle := "Select MCP servers to include:"
+				if useProfiles {
+					pickerTitle = "Select base MCP servers:"
+				}
+
+				selected, err := runPicker(pickerTitle, mcpNames)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepMCPStrategy
+						continue
+					}
+					return err
+				}
+				includeMCP = make(map[string]json.RawMessage)
+				for _, name := range selected {
+					includeMCP[name] = scan.MCP[name]
+				}
+				step = nextBaseStep(stepMCPStrategy)
+
+			case stepKeybindings:
+				n := len(scan.Keybindings)
+				title := fmt.Sprintf("Include keybindings? (%d binding(s))", n)
+				if useProfiles {
+					title = fmt.Sprintf("Include keybindings in base config? (%d binding(s))", n)
 				}
 
 				var confirm bool
@@ -288,7 +728,7 @@ var initCmd = &cobra.Command{
 				err := huh.NewForm(
 					huh.NewGroup(
 						huh.NewConfirm().
-							Title(settingsTitle).
+							Title(title).
 							Affirmative("Yes").
 							Negative("No").
 							Value(&confirm),
@@ -296,23 +736,21 @@ var initCmd = &cobra.Command{
 				).Run()
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
-						if step == firstStep {
-							return err
+						prev := prevBaseStep(stepKeybindings)
+						if prev >= 0 {
+							step = prev
+							continue
 						}
-						if hasPlugins {
-							step = stepPluginStrategy
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
 							continue
 						}
 						return err
 					}
 					return err
 				}
-				includeSettings = confirm
-				if hasHooks {
-					step = stepHookStrategy
-				} else {
-					step = stepDone
-				}
+				includeKeybindingsFlag = confirm
+				step = nextBaseStep(stepKeybindings)
 
 			case stepHookStrategy:
 				// Build sorted hook names with commands for display.
@@ -359,17 +797,16 @@ var initCmd = &cobra.Command{
 				).Run()
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
-						if step == firstStep {
-							return err
+						prev := prevBaseStep(stepHookStrategy)
+						if prev >= 0 {
+							step = prev
+							continue
 						}
-						if hasSettings {
-							step = stepSettings
-						} else if hasPlugins {
-							step = stepPluginStrategy
-						} else {
-							return err
+						if firstStep == stepConfigStyle {
+							step = stepConfigStyle
+							continue
 						}
-						continue
+						return err
 					}
 					return err
 				}
@@ -442,14 +879,34 @@ var initCmd = &cobra.Command{
 		if useProfiles {
 			// Show a summary of base config before entering profile creation.
 			fmt.Println()
-			fmt.Printf("Base configured: %d plugin(s)", len(basePluginKeys))
-			if includeSettings && len(scan.Settings) > 0 {
-				settingKeys := make([]string, 0, len(scan.Settings))
-				for k := range scan.Settings {
-					settingKeys = append(settingKeys, k)
+			var summaryParts []string
+			summaryParts = append(summaryParts, fmt.Sprintf("%d plugin(s)", len(basePluginKeys)))
+			if importClaudeMD {
+				fragCount := len(scan.ClaudeMDSections)
+				if includeClaudeMDFragments != nil {
+					fragCount = len(includeClaudeMDFragments)
 				}
-				sort.Strings(settingKeys)
-				fmt.Printf(", settings: %s", strings.Join(settingKeys, ", "))
+				if fragCount > 0 {
+					summaryParts = append(summaryParts, fmt.Sprintf("%d CLAUDE.md fragment(s)", fragCount))
+				}
+			}
+			if includeSettings {
+				settingCount := len(scan.Settings)
+				if settingsFilter != nil {
+					settingCount = len(settingsFilter)
+				}
+				if settingCount > 0 {
+					summaryParts = append(summaryParts, fmt.Sprintf("%d setting(s)", settingCount))
+				}
+			}
+			if len(includePermissions.Allow) > 0 || len(includePermissions.Deny) > 0 {
+				summaryParts = append(summaryParts, fmt.Sprintf("%d allow + %d deny permissions", len(includePermissions.Allow), len(includePermissions.Deny)))
+			}
+			if len(includeMCP) > 0 {
+				summaryParts = append(summaryParts, fmt.Sprintf("%d MCP server(s)", len(includeMCP)))
+			}
+			if includeKeybindingsFlag && len(scan.Keybindings) > 0 {
+				summaryParts = append(summaryParts, fmt.Sprintf("%d keybinding(s)", len(scan.Keybindings)))
 			}
 			if includeHooks == nil || len(includeHooks) > 0 {
 				hookCount := len(scan.Hooks)
@@ -457,10 +914,10 @@ var initCmd = &cobra.Command{
 					hookCount = len(includeHooks)
 				}
 				if hookCount > 0 {
-					fmt.Printf(", %d hook(s)", hookCount)
+					summaryParts = append(summaryParts, fmt.Sprintf("%d hook(s)", hookCount))
 				}
 			}
-			fmt.Println()
+			fmt.Printf("Base configured: %s\n", strings.Join(summaryParts, ", "))
 
 			createdProfiles = make(map[string]profiles.Profile)
 			step = stepProfileName
@@ -616,12 +1073,94 @@ var initCmd = &cobra.Command{
 				}
 
 				currentProfile.Plugins = profiles.ProfilePlugins{Add: adds, Remove: removes}
+				step = stepProfileClaudeMD
+
+			case stepProfileClaudeMD:
+				// Check if base has CLAUDE.md. If not, skip to settings.
+				if !importClaudeMD || len(includeClaudeMDFragments) == 0 && includeClaudeMDFragments != nil {
+					step = stepProfileSettings
+					continue
+				}
+
+				// Determine base fragments.
+				baseFragments := includeClaudeMDFragments
+				if baseFragments == nil {
+					// nil = all; build from scan sections
+					baseFragments = make([]string, 0, len(scan.ClaudeMDSections))
+					for _, sec := range scan.ClaudeMDSections {
+						baseFragments = append(baseFragments, claudemd.HeaderToFragmentName(sec.Header))
+					}
+				}
+
+				// Build display items and sections.
+				displayItems := make([]string, 0, len(scan.ClaudeMDSections))
+				displayToFragment := make(map[string]string)
+				for _, sec := range scan.ClaudeMDSections {
+					display := sec.Header
+					if display == "" {
+						display = "(preamble)"
+					}
+					displayItems = append(displayItems, display)
+					displayToFragment[display] = claudemd.HeaderToFragmentName(sec.Header)
+				}
+
+				// Pre-select base fragments.
+				baseFragSet := make(map[string]bool, len(baseFragments))
+				for _, f := range baseFragments {
+					baseFragSet[f] = true
+				}
+				preSelected := make(map[string]bool, len(displayItems))
+				for _, display := range displayItems {
+					if baseFragSet[displayToFragment[display]] {
+						preSelected[display] = true
+					}
+				}
+
+				sections := []pickerSection{{
+					Header: fmt.Sprintf("CLAUDE.md sections (%d)", len(displayItems)),
+					Items:  displayItems,
+				}}
+
+				selected, err := runPickerWithPreSelected(
+					fmt.Sprintf("Select CLAUDE.md sections for %q:", currentProfileName),
+					sections,
+					preSelected,
+				)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepProfilePlugins
+						continue
+					}
+					return err
+				}
+
+				// Compute diff: adds and removes relative to base fragments.
+				selectedFrags := make(map[string]bool, len(selected))
+				for _, display := range selected {
+					selectedFrags[displayToFragment[display]] = true
+				}
+				var fragAdds, fragRemoves []string
+				for _, display := range selected {
+					frag := displayToFragment[display]
+					if !baseFragSet[frag] {
+						fragAdds = append(fragAdds, frag)
+					}
+				}
+				for _, f := range baseFragments {
+					if !selectedFrags[f] {
+						fragRemoves = append(fragRemoves, f)
+					}
+				}
+				if len(fragAdds) > 0 || len(fragRemoves) > 0 {
+					currentProfile.ClaudeMD = profiles.ProfileClaudeMD{Add: fragAdds, Remove: fragRemoves}
+				}
+
 				step = stepProfileSettings
 
 			case stepProfileSettings:
-				// Check if base has settings. If not, skip to hooks.
+				// Check if base has settings. If not, skip to permissions.
 				if !includeSettings || len(scan.Settings) == 0 {
-					step = stepProfileHooks
+					step = stepProfilePermissions
 					continue
 				}
 
@@ -666,6 +1205,223 @@ var initCmd = &cobra.Command{
 					}
 				}
 
+				step = stepProfilePermissions
+
+			case stepProfilePermissions:
+				// Check if base has permissions. If not, skip to MCP.
+				if len(includePermissions.Allow) == 0 && len(includePermissions.Deny) == 0 {
+					step = stepProfileMCP
+					continue
+				}
+
+				var addPerms bool
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewConfirm().
+							Title(fmt.Sprintf("Add extra permission rules for %q?", currentProfileName)).
+							Affirmative("Yes").
+							Negative("No").
+							Value(&addPerms),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepProfileSettings
+						continue
+					}
+					return err
+				}
+
+				if addPerms {
+					var allowInput string
+					var denyInput string
+					fmt.Println()
+					err := huh.NewForm(
+						huh.NewGroup(
+							huh.NewInput().
+								Title("Additional allow rules (comma-separated, or empty):").
+								Value(&allowInput),
+							huh.NewInput().
+								Title("Additional deny rules (comma-separated, or empty):").
+								Value(&denyInput),
+						),
+					).Run()
+					if err != nil {
+						if errors.Is(err, huh.ErrUserAborted) {
+							continue
+						}
+						return err
+					}
+
+					var addAllow, addDeny []string
+					for _, s := range strings.Split(allowInput, ",") {
+						s = strings.TrimSpace(s)
+						if s != "" {
+							addAllow = append(addAllow, s)
+						}
+					}
+					for _, s := range strings.Split(denyInput, ",") {
+						s = strings.TrimSpace(s)
+						if s != "" {
+							addDeny = append(addDeny, s)
+						}
+					}
+					if len(addAllow) > 0 || len(addDeny) > 0 {
+						currentProfile.Permissions = profiles.ProfilePermissions{AddAllow: addAllow, AddDeny: addDeny}
+					}
+				}
+
+				step = stepProfileMCP
+
+			case stepProfileMCP:
+				// Check if base has MCP servers. If not, skip to keybindings.
+				if len(includeMCP) == 0 {
+					step = stepProfileKeybindings
+					continue
+				}
+
+				// Build sections: base MCP servers and all available.
+				baseMCPNames := make([]string, 0, len(includeMCP))
+				for k := range includeMCP {
+					baseMCPNames = append(baseMCPNames, k)
+				}
+				sort.Strings(baseMCPNames)
+
+				// Build all MCP names (base + any from scan not in base).
+				allMCPNames := make([]string, 0, len(scan.MCP))
+				for k := range scan.MCP {
+					allMCPNames = append(allMCPNames, k)
+				}
+				sort.Strings(allMCPNames)
+
+				baseMCPSet := make(map[string]bool, len(baseMCPNames))
+				for _, n := range baseMCPNames {
+					baseMCPSet[n] = true
+				}
+
+				var baseItems, nonBaseItems []string
+				for _, n := range allMCPNames {
+					if baseMCPSet[n] {
+						baseItems = append(baseItems, n)
+					} else {
+						nonBaseItems = append(nonBaseItems, n)
+					}
+				}
+
+				var sections []pickerSection
+				if len(baseItems) > 0 {
+					sections = append(sections, pickerSection{
+						Header: fmt.Sprintf("Base (%d)", len(baseItems)),
+						Items:  baseItems,
+					})
+				}
+				if len(nonBaseItems) > 0 {
+					sections = append(sections, pickerSection{
+						Header: fmt.Sprintf("Not in base (%d)", len(nonBaseItems)),
+						Items:  nonBaseItems,
+					})
+				}
+
+				preSelected := make(map[string]bool, len(baseItems))
+				for _, n := range baseItems {
+					preSelected[n] = true
+				}
+
+				selected, err := runPickerWithPreSelected(
+					fmt.Sprintf("Select MCP servers for %q:", currentProfileName),
+					sections,
+					preSelected,
+				)
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepProfilePermissions
+						continue
+					}
+					return err
+				}
+
+				// Compute diff.
+				selectedSet := make(map[string]bool, len(selected))
+				for _, s := range selected {
+					selectedSet[s] = true
+				}
+				mcpAdd := make(map[string]json.RawMessage)
+				for _, s := range selected {
+					if !baseMCPSet[s] {
+						mcpAdd[s] = scan.MCP[s]
+					}
+				}
+				var mcpRemoves []string
+				for _, b := range baseMCPNames {
+					if !selectedSet[b] {
+						mcpRemoves = append(mcpRemoves, b)
+					}
+				}
+				if len(mcpAdd) > 0 || len(mcpRemoves) > 0 {
+					currentProfile.MCP = profiles.ProfileMCP{Add: mcpAdd, Remove: mcpRemoves}
+				}
+
+				step = stepProfileKeybindings
+
+			case stepProfileKeybindings:
+				// Check if base has keybindings. If not, skip to hooks.
+				if !includeKeybindingsFlag || len(scan.Keybindings) == 0 {
+					step = stepProfileHooks
+					continue
+				}
+
+				var overrideKB bool
+				fmt.Println()
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewConfirm().
+							Title(fmt.Sprintf("Override keybindings for %q?", currentProfileName)).
+							Affirmative("Yes").
+							Negative("No").
+							Value(&overrideKB),
+					),
+				).Run()
+				if err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						step = stepProfileMCP
+						continue
+					}
+					return err
+				}
+
+				if overrideKB {
+					// Allow comma-separated key=value overrides.
+					var overrideInput string
+					err := huh.NewForm(
+						huh.NewGroup(
+							huh.NewInput().
+								Title("Keybinding overrides (key=value, comma-separated):").
+								Value(&overrideInput),
+						),
+					).Run()
+					if err != nil {
+						if errors.Is(err, huh.ErrUserAborted) {
+							continue
+						}
+						return err
+					}
+					overrides := make(map[string]any)
+					for _, pair := range strings.Split(overrideInput, ",") {
+						pair = strings.TrimSpace(pair)
+						if pair == "" {
+							continue
+						}
+						parts := strings.SplitN(pair, "=", 2)
+						if len(parts) == 2 {
+							overrides[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+						}
+					}
+					if len(overrides) > 0 {
+						currentProfile.Keybindings = profiles.ProfileKeybindings{Override: overrides}
+					}
+				}
+
 				step = stepProfileHooks
 
 			case stepProfileHooks:
@@ -691,7 +1447,7 @@ var initCmd = &cobra.Command{
 				).Run()
 				if err != nil {
 					if errors.Is(err, huh.ErrUserAborted) {
-						step = stepProfileSettings
+						step = stepProfileKeybindings
 						continue
 					}
 					return err
@@ -807,19 +1563,28 @@ var initCmd = &cobra.Command{
 
 		// Phase 3: Run init with selections.
 		fmt.Println()
+
+		// Resolve keybindings: only include if user opted in.
+		var finalKeybindings map[string]any
+		if includeKeybindingsFlag {
+			finalKeybindings = scan.Keybindings
+		}
+
 		result, err := commands.Init(commands.InitOptions{
-			ClaudeDir:       claudeDir,
-			SyncDir:         syncDir,
-			RemoteURL:       initRemote,
-			IncludeSettings: includeSettings,
-			IncludeHooks:    includeHooks,
-			IncludePlugins:  includePlugins,
-			Profiles:        createdProfiles,
-			ActiveProfile:   activeProfile,
-			Permissions:     scan.Permissions,
-			ImportClaudeMD:  scan.ClaudeMDContent != "",
-			MCP:             scan.MCP,
-			Keybindings:     scan.Keybindings,
+			ClaudeDir:         claudeDir,
+			SyncDir:           syncDir,
+			RemoteURL:         initRemote,
+			IncludeSettings:   includeSettings,
+			SettingsFilter:    settingsFilter,
+			IncludeHooks:      includeHooks,
+			IncludePlugins:    includePlugins,
+			Profiles:          createdProfiles,
+			ActiveProfile:     activeProfile,
+			Permissions:       includePermissions,
+			ImportClaudeMD:    importClaudeMD,
+			ClaudeMDFragments: includeClaudeMDFragments,
+			MCP:               includeMCP,
+			Keybindings:       finalKeybindings,
 		})
 		if err != nil {
 			return err
@@ -890,4 +1655,8 @@ func init() {
 	initCmd.Flags().BoolVar(&initSkipSettings, "skip-settings", false, "Don't include settings in sync config")
 	initCmd.Flags().BoolVar(&initSkipHooks, "skip-hooks", false, "Don't include hooks in sync config")
 	initCmd.Flags().BoolVar(&initSkipProfiles, "skip-profiles", false, "Skip profile creation prompt")
+	initCmd.Flags().BoolVar(&initSkipClaudeMD, "skip-claude-md", false, "Don't include CLAUDE.md in sync config")
+	initCmd.Flags().BoolVar(&initSkipPermissions, "skip-permissions", false, "Don't include permissions in sync config")
+	initCmd.Flags().BoolVar(&initSkipMCP, "skip-mcp", false, "Don't include MCP servers in sync config")
+	initCmd.Flags().BoolVar(&initSkipKeybindings, "skip-keybindings", false, "Don't include keybindings in sync config")
 }
