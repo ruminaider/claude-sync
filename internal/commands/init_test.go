@@ -7,6 +7,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/profiles"
@@ -874,4 +875,167 @@ func TestInit_GitignoreHasPendingChanges(t *testing.T) {
 	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
 	require.NoError(t, err)
 	assert.Contains(t, string(gitignore), "pending-changes.yaml")
+}
+
+func TestInit_SettingsFilter(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"model": "opus", "statusLine": "fancy", "theme": "dark"}`), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		SettingsFilter:  []string{"model"},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"model"}, result.IncludedSettings)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+
+	_, hasModel := cfg.Settings["model"]
+	assert.True(t, hasModel)
+	_, hasStatusLine := cfg.Settings["statusLine"]
+	assert.False(t, hasStatusLine)
+	_, hasTheme := cfg.Settings["theme"]
+	assert.False(t, hasTheme)
+}
+
+func TestInit_ClaudeMDFragmentFilter(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	claudeMD := "## Git Commits\nNo co-authored-by\n\n## Color Schemes\nUse Catppuccin Mocha\n"
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte(claudeMD), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:         claudeDir,
+		SyncDir:           syncDir,
+		IncludeSettings:   true,
+		ImportClaudeMD:    true,
+		ClaudeMDFragments: []string{"git-commits"},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"git-commits"}, result.ClaudeMDFragments)
+
+	// Both fragment files should exist on disk (all are imported to disk).
+	_, err = os.Stat(filepath.Join(syncDir, "claude-md", "git-commits.md"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(syncDir, "claude-md", "color-schemes.md"))
+	assert.NoError(t, err)
+
+	// Only the selected fragment should be in config.yaml include list.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"git-commits"}, cfg.ClaudeMD.Include)
+}
+
+func TestInitScan_ClaudeMDSections(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	content := "# My Config\n\n## Section One\nSome content\n\n## Section Two\nMore content\n"
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte(content), 0644)
+
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+
+	assert.NotNil(t, scan.ClaudeMDSections)
+
+	expectedSections := claudemd.Split(content)
+	assert.Equal(t, len(expectedSections), len(scan.ClaudeMDSections))
+
+	for i, sec := range scan.ClaudeMDSections {
+		assert.Equal(t, expectedSections[i].Header, sec.Header)
+	}
+}
+
+func TestInit_PermissionsFiltered(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		Permissions:     config.Permissions{Allow: []string{"Read"}},
+	})
+	require.NoError(t, err)
+
+	assert.True(t, result.PermissionsIncluded)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Read"}, cfg.Permissions.Allow)
+	assert.Empty(t, cfg.Permissions.Deny)
+}
+
+func TestInit_MCPFiltered(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	plugins := `{"version": 2, "plugins": {}}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	// Only pass "context7" to Init, not "memory".
+	mcp := map[string]json.RawMessage{
+		"context7": json.RawMessage(`{"command":"npx","args":["-y","@context7/mcp"]}`),
+	}
+
+	result, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+		MCP:             mcp,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"context7"}, result.MCPIncluded)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.MCP, "context7")
+	_, hasMemory := cfg.MCP["memory"]
+	assert.False(t, hasMemory)
 }
