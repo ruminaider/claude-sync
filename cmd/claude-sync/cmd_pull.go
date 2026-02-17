@@ -67,6 +67,14 @@ var pullCmd = &cobra.Command{
 		if len(result.MCPApplied) > 0 {
 			fmt.Printf("✓ MCP servers applied: %s\n", strings.Join(result.MCPApplied, ", "))
 		}
+		for projectPath, names := range result.MCPProjectApplied {
+			fmt.Printf("✓ MCP servers applied to %s: %s\n", projectPath, strings.Join(names, ", "))
+		}
+		if len(result.MCPEnvWarnings) > 0 {
+			for _, w := range result.MCPEnvWarnings {
+				fmt.Fprintf(os.Stderr, "  Warning: %s\n", w)
+			}
+		}
 		if result.KeybindingsApplied {
 			fmt.Println("✓ Keybindings applied")
 		}
@@ -84,7 +92,7 @@ var pullCmd = &cobra.Command{
 
 		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
 			len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
-			len(result.MCPApplied) == 0 && !result.KeybindingsApplied
+			len(result.MCPApplied) == 0 && len(result.MCPProjectApplied) == 0 && !result.KeybindingsApplied
 		if len(result.Failed) > 0 {
 			fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
 		} else if nothingChanged {

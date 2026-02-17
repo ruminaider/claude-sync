@@ -34,6 +34,8 @@ type PullResult struct {
 	PermissionsApplied bool
 	ClaudeMDAssembled  bool
 	MCPApplied         []string
+	MCPEnvWarnings     []string // unresolved ${VAR} references
+	MCPProjectApplied  map[string][]string // project path -> server names written there
 	KeybindingsApplied bool
 	PendingHighRisk    []approval.Change
 }
@@ -44,6 +46,10 @@ type PullOptions struct {
 	SyncDir   string
 	Quiet     bool
 	Auto      bool // auto mode: safe changes auto-apply, high-risk deferred to pending
+	// MCPTargetResolver resolves the destination path for project-scoped MCP servers.
+	// Called with (serverName, suggestedProjectPath) and returns the confirmed path
+	// (empty string means write to global instead). If nil, uses suggested paths as-is.
+	MCPTargetResolver func(serverName, suggestedPath string) string
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -275,18 +281,69 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			if activeProfile != nil {
 				mcpServers = profiles.MergeMCP(mcpServers, *activeProfile)
 			}
+
+			// Resolve ${VAR} env var references before writing.
+			if len(mcpServers) > 0 {
+				mcpServers, result.MCPEnvWarnings = ResolveMCPEnvVars(mcpServers)
+			}
+
 			if !skipMCP && len(mcpServers) > 0 {
 				if !prefs.ShouldSkip(config.CategoryMCP) {
-					existing, _ := claudecode.ReadMCPConfig(claudeDir)
-					for k, v := range mcpServers {
-						existing[k] = v
-					}
-					if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
-						result.MCPApplied = make([]string, 0, len(mcpServers))
-						for k := range mcpServers {
-							result.MCPApplied = append(result.MCPApplied, k)
+					// Partition servers by destination using MCPMeta.
+					globalServers := make(map[string]json.RawMessage)
+					projectServers := make(map[string]map[string]json.RawMessage) // path -> servers
+
+					for name, raw := range mcpServers {
+						meta, hasMeta := cfg.MCPMeta[name]
+						if hasMeta && meta.SourceProject != "" {
+							targetPath := meta.SourceProject
+							if opts.MCPTargetResolver != nil {
+								targetPath = opts.MCPTargetResolver(name, targetPath)
+							}
+							if targetPath != "" {
+								if projectServers[targetPath] == nil {
+									projectServers[targetPath] = make(map[string]json.RawMessage)
+								}
+								projectServers[targetPath][name] = raw
+								continue
+							}
 						}
-						sort.Strings(result.MCPApplied)
+						globalServers[name] = raw
+					}
+
+					// Write global servers.
+					if len(globalServers) > 0 {
+						existing, _ := claudecode.ReadMCPConfig(claudeDir)
+						for k, v := range globalServers {
+							existing[k] = v
+						}
+						if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
+							result.MCPApplied = make([]string, 0, len(globalServers))
+							for k := range globalServers {
+								result.MCPApplied = append(result.MCPApplied, k)
+							}
+							sort.Strings(result.MCPApplied)
+						}
+					}
+
+					// Write project-scoped servers.
+					if len(projectServers) > 0 {
+						result.MCPProjectApplied = make(map[string][]string)
+						for projectPath, servers := range projectServers {
+							mcpPath := filepath.Join(projectPath, ".mcp.json")
+							existing, _ := claudecode.ReadMCPConfigFile(mcpPath)
+							for k, v := range servers {
+								existing[k] = v
+							}
+							if claudecode.WriteMCPConfigFile(mcpPath, existing) == nil {
+								names := make([]string, 0, len(servers))
+								for k := range servers {
+									names = append(names, k)
+								}
+								sort.Strings(names)
+								result.MCPProjectApplied[projectPath] = names
+							}
+						}
 					}
 				}
 			}
