@@ -240,6 +240,10 @@ func (o Overlay) viewTextInput() string {
 	var b strings.Builder
 	b.WriteString(OverlayTitleStyle.Render(o.title))
 	b.WriteString("\n\n")
+	if o.message != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render(o.message))
+		b.WriteString("\n\n")
+	}
 	b.WriteString(o.input.View())
 	b.WriteString("\n\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("Enter: submit  Esc: cancel"))
