@@ -35,6 +35,7 @@ const (
 	overlayDeleteConfirm                       // delete profile confirmation
 	overlaySaveSummary                         // save summary with confirm/cancel
 	overlayResetConfirm                        // reset all to defaults confirmation
+	overlayQuitConfirm                         // quit without saving confirmation
 )
 
 // Model is the root bubbletea model that composes all TUI child components.
@@ -202,6 +203,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusZone = FocusSidebar
 				return m, nil
 			}
+			if m.focusZone == FocusTabBar {
+				m.focusZone = FocusSidebar
+				return m, nil
+			}
+			// Esc on sidebar → quit confirmation.
+			m.overlay = NewConfirmOverlay("Quit", "Discard selections and exit?")
+			m.overlayCtx = overlayQuitConfirm
+			return m, nil
 		}
 	}
 
@@ -286,22 +295,33 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 	switch ctx {
 	case overlayConfigStyle:
 		if !msg.Confirmed {
-			// User cancelled: default to simple.
-			m.useProfiles = false
-			return m, nil
+			// User cancelled the first screen — quit.
+			m.quitting = true
+			return m, tea.Quit
 		}
 		if strings.HasPrefix(msg.Result, "Simple") {
 			m.useProfiles = false
 		} else {
 			m.useProfiles = true
 			// Show profile name text input.
-			m.overlay = NewTextInputOverlay("New profile name", "e.g. work, personal")
+			o := NewTextInputOverlay("New profile name", "e.g. work, personal")
+			o.message = "A Base config is created automatically.\nName your first profile:"
+			m.overlay = o
 			m.overlayCtx = overlayProfileName
 			return m, nil
 		}
 
 	case overlayProfileName:
 		if !msg.Confirmed || msg.Result == "" {
+			// If no profiles exist yet, go back to config style choice.
+			if len(m.profilePickers) == 0 {
+				m.overlay = NewChoiceOverlay("Configuration style", []string{
+					"Simple (single config)",
+					"With profiles (e.g., work, personal)",
+				})
+				m.overlayCtx = overlayConfigStyle
+				return m, nil
+			}
 			return m, nil
 		}
 		name := strings.TrimSpace(strings.ToLower(msg.Result))
@@ -331,6 +351,12 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 	case overlayResetConfirm:
 		if msg.Confirmed {
 			m.resetToDefaults()
+		}
+
+	case overlayQuitConfirm:
+		if msg.Confirmed {
+			m.quitting = true
+			return m, tea.Quit
 		}
 	}
 

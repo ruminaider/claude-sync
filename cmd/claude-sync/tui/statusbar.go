@@ -52,6 +52,7 @@ func (s StatusBar) View() string {
 		StatusBarKeyStyle.Render("Ctrl+S") + ": save",
 		StatusBarKeyStyle.Render("Tab") + ": profiles",
 		StatusBarKeyStyle.Render("/") + ": search",
+		StatusBarKeyStyle.Render("Esc") + ": quit",
 	}
 	rightPart := strings.Join(shortcuts, " \u00b7 ")
 
