@@ -78,8 +78,9 @@ type ResizeMsg struct{ Width, Height int }
 
 // OverlayCloseMsg is emitted when any overlay is dismissed.
 type OverlayCloseMsg struct {
-	Result    string // Text result (for text input or choice) or empty
-	Confirmed bool   // true = OK/Submit, false = Cancel/Esc
+	Result    string   // Text result (for text input or choice) or empty
+	Results   []string // Multiple results (for ProfileList overlay)
+	Confirmed bool     // true = OK/Submit, false = Cancel/Esc
 }
 
 // SaveRequestMsg is sent when the user presses Ctrl+S.

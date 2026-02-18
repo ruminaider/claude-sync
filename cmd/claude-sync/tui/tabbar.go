@@ -43,6 +43,13 @@ func (t *TabBar) AddTab(name string) {
 	t.active = len(t.tabs) - 1
 }
 
+// SetActive sets the active tab by index.
+func (t *TabBar) SetActive(i int) {
+	if i >= 0 && i < len(t.tabs) {
+		t.active = i
+	}
+}
+
 // RemoveTab removes a profile tab by name. The Base tab cannot be removed.
 // If the removed tab was active, focus moves to the previous tab.
 func (t *TabBar) RemoveTab(name string) {

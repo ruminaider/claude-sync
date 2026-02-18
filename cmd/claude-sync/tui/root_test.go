@@ -771,29 +771,53 @@ func TestProfileCreationFlow_ViewHasSidebarAndTabBar(t *testing.T) {
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = result.(Model)
 
-	// Should now show profile name text input overlay.
+	// Should now show profile list overlay (batch input).
 	require.True(t, m.overlay.Active())
-	require.Equal(t, overlayProfileName, m.overlayCtx)
+	require.Equal(t, overlayProfileNames, m.overlayCtx)
+	require.Equal(t, OverlayProfileList, m.overlay.overlayType)
 
-	// Type "personal" and submit.
+	// Type "work" into first field.
+	for _, ch := range "work" {
+		result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = result.(Model)
+	}
+	// Hit Enter to add second row.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+	require.Len(t, m.overlay.inputs, 2)
+
+	// Type "personal" into second field.
 	for _, ch := range "personal" {
 		result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
 		m = result.(Model)
 	}
+
+	// Navigate Down to Done button.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	require.Equal(t, len(m.overlay.inputs), m.overlay.activeLine)
+
+	// Press Enter on Done.
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = result.(Model)
 
 	// Overlay should be dismissed.
 	assert.False(t, m.overlay.Active(), "overlay should be closed after profile creation")
 	assert.True(t, m.useProfiles, "useProfiles should be true")
-	assert.Equal(t, "personal", m.activeTab)
+	// After batch creation, active tab should be "Base" (not last profile).
+	assert.Equal(t, "Base", m.activeTab)
 
-	// Render the view.
+	// Verify tab bar contains all expected tabs.
+	assert.Equal(t, []string{"Base", "work", "personal"}, m.tabBar.tabs)
+
+	// Verify profiles were created.
+	assert.Contains(t, m.profilePickers, "work")
+	assert.Contains(t, m.profilePickers, "personal")
+	assert.Contains(t, m.profilePreviews, "work")
+	assert.Contains(t, m.profilePreviews, "personal")
+
+	// Render the view and verify basic structure.
 	view := m.View()
-
-	// The view should contain the tab bar with "Base" and "personal".
-	assert.Contains(t, view, "Base", "view should contain Base tab")
-	assert.Contains(t, view, "personal", "view should contain personal tab")
 
 	// The view should contain sidebar section names.
 	assert.Contains(t, view, "Plugins", "view should contain Plugins in sidebar")
