@@ -318,33 +318,20 @@ func Composite(background string, overlay string, totalWidth, totalHeight int) s
 		startCol = 0
 	}
 
-	// Overlay each line onto the background.
+	// Blank out the entire background so nothing bleeds through.
+	for i := range bgLines {
+		bgLines[i] = strings.Repeat(" ", totalWidth)
+	}
+
+	// Place the overlay centered on the blank backdrop.
 	for i, overlayLine := range overlayLines {
 		row := startRow + i
 		if row >= len(bgLines) {
 			break
 		}
 
-		bgLine := bgLines[row]
-		bgRunes := []rune(bgLine)
-
-		// Build the composited line: background left + overlay + background right.
-		leftPad := ""
-		if startCol > 0 {
-			if startCol <= len(bgRunes) {
-				leftPad = string(bgRunes[:startCol])
-			} else {
-				leftPad = string(bgRunes) + strings.Repeat(" ", startCol-len(bgRunes))
-			}
-		}
-
-		overlayEnd := startCol + ansi.StringWidth(overlayLine)
-		rightPad := ""
-		if overlayEnd < len(bgRunes) {
-			rightPad = string(bgRunes[overlayEnd:])
-		}
-
-		bgLines[row] = leftPad + overlayLine + rightPad
+		leftPad := strings.Repeat(" ", startCol)
+		bgLines[row] = leftPad + overlayLine
 	}
 
 	return strings.Join(bgLines[:totalHeight], "\n")

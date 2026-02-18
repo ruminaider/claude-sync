@@ -17,13 +17,12 @@ func TestComposite(t *testing.T) {
 
 	// Overlay should be centered vertically (rows 1-2 of 0-3)
 	// and horizontally (col 1 of 0-3)
-	// Row 0 should be background
-	assert.Equal(t, "AAAA", lines[0])
-	// Rows 1-2 should contain overlay
+	// All background content should be blanked out
+	assert.Equal(t, "    ", lines[0])
+	// Rows 1-2 should contain overlay centered
 	assert.Contains(t, lines[1], "XX")
 	assert.Contains(t, lines[2], "XX")
-	// Row 3 should be background
-	assert.Equal(t, "DDDD", lines[3])
+	assert.Equal(t, "    ", lines[3])
 }
 
 func TestCompositeEmpty(t *testing.T) {

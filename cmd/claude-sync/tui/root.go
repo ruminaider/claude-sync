@@ -226,10 +226,6 @@ func (m Model) View() string {
 	if !m.ready {
 		return "Loading..."
 	}
-	if m.width < 80 || m.height < 24 {
-		return "Please resize terminal (minimum 80x24)"
-	}
-
 	// Compute dimensions.
 	tabBarHeight := 0
 	if m.useProfiles {
