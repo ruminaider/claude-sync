@@ -226,6 +226,15 @@ func (m Model) View() string {
 	if !m.ready {
 		return "Loading..."
 	}
+	// When overlay is active, skip rendering the full background — the overlay
+	// blanks the viewport anyway. This avoids expensive picker/preview renders
+	// on every keystroke in text input overlays.
+	if m.overlay.Active() {
+		blank := strings.Repeat(strings.Repeat(" ", m.width)+"\n", m.height-1)
+		blank += strings.Repeat(" ", m.width)
+		return Composite(blank, m.overlay.View(), m.width, m.height)
+	}
+
 	// Compute dimensions.
 	tabBarHeight := 0
 	if m.useProfiles {
@@ -249,24 +258,19 @@ func (m Model) View() string {
 	statusView := m.statusBar.View()
 
 	// Compose.
-	frame := tabBarView + mainArea + "\n" + statusView
-
-	// Overlay on top.
-	if m.overlay.Active() {
-		frame = Composite(frame, m.overlay.View(), m.width, m.height)
-	}
-
-	return frame
+	return tabBarView + mainArea + "\n" + statusView
 }
 
 // --- Update helpers ---
 
 func (m Model) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasActive := m.overlay.Active()
 	var cmd tea.Cmd
 	m.overlay, cmd = m.overlay.Update(msg)
 
-	if cmd != nil {
-		// Check if this produced an OverlayCloseMsg.
+	// When the overlay just closed, the cmd is an OverlayCloseMsg producer.
+	// Handle it directly instead of sending through the event loop.
+	if wasActive && !m.overlay.Active() && cmd != nil {
 		if closeMsg := extractOverlayClose(cmd); closeMsg != nil {
 			return m.handleOverlayClose(*closeMsg)
 		}
@@ -437,24 +441,11 @@ func (m Model) updatePreview(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) 
 
 // --- View helpers ---
 
-func (m Model) currentContentView(height int) string {
-	contentWidth := m.width - SidebarWidth - 2 // account for border
-	if contentWidth < 10 {
-		contentWidth = 10
-	}
-
+func (m Model) currentContentView(_ int) string {
 	if m.activeSection == SectionClaudeMD {
-		preview := m.currentPreview()
-		preview.SetSize(contentWidth, height)
-		m.setCurrentPreview(preview)
-		return preview.View()
+		return m.currentPreview().View()
 	}
-
-	picker := m.currentPicker()
-	picker.SetHeight(height)
-	picker.SetWidth(contentWidth)
-	m.setCurrentPicker(picker)
-	return picker.View()
+	return m.currentPicker().View()
 }
 
 // currentPicker returns the picker for the current tab and section.
