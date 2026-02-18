@@ -136,10 +136,9 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		}
 	}
 
-	// Initialize sidebar counts.
+	// Initialize sidebar and tab bar.
+	m.sidebar = NewSidebar()
 	m.syncSidebarCounts()
-
-	// Initialize tab bar (just Base for now).
 	m.tabBar = NewTabBar(nil)
 
 	// Initialize status bar.
