@@ -18,6 +18,7 @@ const (
 	OverlayTextInput                     // Single-line text input
 	OverlaySummary                       // Multi-line summary with confirm/cancel
 	OverlayChoice                        // List of choices with cursor
+	OverlayProfileList                   // Batch profile name inputs with Done button
 )
 
 // Overlay renders a centered modal box on top of existing content.
@@ -28,7 +29,9 @@ type Overlay struct {
 	choices     []string // choice list (for Choice)
 	cursor      int      // selected choice index (Choice), or button index (Confirm/Summary: 0=Cancel, 1=OK)
 	input       textinput.Model
-	width       int // overlay box width
+	inputs      []textinput.Model // profile name inputs (for ProfileList)
+	activeLine  int               // focused input index; len(inputs) = Done button
+	width       int               // overlay box width
 	active      bool
 }
 
@@ -80,6 +83,23 @@ func NewChoiceOverlay(title string, choices []string) Overlay {
 	}
 }
 
+// NewProfileListOverlay creates a batch profile name input overlay.
+func NewProfileListOverlay() Overlay {
+	ti := textinput.New()
+	ti.Placeholder = "e.g. work"
+	ti.Focus()
+	ti.CharLimit = 64
+	ti.Width = 30
+	return Overlay{
+		overlayType: OverlayProfileList,
+		title:       "Profile names",
+		message:     "Base config is created automatically.\nAdd your profiles:",
+		inputs:      []textinput.Model{ti},
+		activeLine:  0,
+		active:      true,
+	}
+}
+
 // Active returns whether the overlay is currently shown.
 func (o Overlay) Active() bool {
 	return o.active
@@ -100,6 +120,8 @@ func (o Overlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		return o.updateSummary(msg)
 	case OverlayChoice:
 		return o.updateChoice(msg)
+	case OverlayProfileList:
+		return o.updateProfileList(msg)
 	}
 	return o, nil
 }
@@ -204,6 +226,98 @@ func (o Overlay) updateChoice(msg tea.Msg) (Overlay, tea.Cmd) {
 	return o, nil
 }
 
+func (o Overlay) updateProfileList(msg tea.Msg) (Overlay, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			o.active = false
+			return o, func() tea.Msg {
+				return OverlayCloseMsg{Confirmed: false}
+			}
+
+		case "up":
+			if o.activeLine > 0 {
+				// Blur current input (if on an input row).
+				if o.activeLine < len(o.inputs) {
+					o.inputs[o.activeLine].Blur()
+				}
+				o.activeLine--
+				o.inputs[o.activeLine].Focus()
+			}
+			return o, nil
+
+		case "down":
+			if o.activeLine < len(o.inputs) {
+				// Moving down from an input row.
+				o.inputs[o.activeLine].Blur()
+				o.activeLine++
+				if o.activeLine < len(o.inputs) {
+					o.inputs[o.activeLine].Focus()
+				}
+			}
+			return o, nil
+
+		case "enter":
+			if o.activeLine == len(o.inputs) {
+				// On Done button — validate and submit.
+				var valid []string
+				seen := make(map[string]bool)
+				for _, inp := range o.inputs {
+					name := strings.TrimSpace(strings.ToLower(inp.Value()))
+					if name == "" || name == "base" || seen[name] {
+						continue
+					}
+					seen[name] = true
+					valid = append(valid, name)
+				}
+				if len(valid) == 0 {
+					return o, nil // stay on overlay
+				}
+				o.active = false
+				return o, func() tea.Msg {
+					return OverlayCloseMsg{Results: valid, Confirmed: true}
+				}
+			}
+			// On an input row with non-empty value — insert new row below.
+			if strings.TrimSpace(o.inputs[o.activeLine].Value()) != "" {
+				o.inputs[o.activeLine].Blur()
+				newInput := textinput.New()
+				newInput.Placeholder = "e.g. personal"
+				newInput.CharLimit = 64
+				newInput.Width = o.inputs[o.activeLine].Width
+				newInput.Focus()
+				// Insert after activeLine.
+				idx := o.activeLine + 1
+				o.inputs = append(o.inputs, textinput.Model{})
+				copy(o.inputs[idx+1:], o.inputs[idx:])
+				o.inputs[idx] = newInput
+				o.activeLine = idx
+			}
+			return o, nil
+
+		case "backspace":
+			if o.activeLine < len(o.inputs) && o.inputs[o.activeLine].Value() == "" && len(o.inputs) > 1 {
+				// Remove empty input row.
+				o.inputs = append(o.inputs[:o.activeLine], o.inputs[o.activeLine+1:]...)
+				if o.activeLine >= len(o.inputs) {
+					o.activeLine = len(o.inputs) - 1
+				}
+				o.inputs[o.activeLine].Focus()
+				return o, nil
+			}
+		}
+	}
+
+	// Delegate to the active input for text entry.
+	if o.activeLine < len(o.inputs) {
+		var cmd tea.Cmd
+		o.inputs[o.activeLine], cmd = o.inputs[o.activeLine].Update(msg)
+		return o, cmd
+	}
+	return o, nil
+}
+
 // View renders the overlay box. It does not composite over a background;
 // that is the caller's responsibility using Composite().
 func (o Overlay) View() string {
@@ -221,6 +335,8 @@ func (o Overlay) View() string {
 		content = o.viewSummary()
 	case OverlayChoice:
 		content = o.viewChoice()
+	case OverlayProfileList:
+		content = o.viewProfileList()
 	}
 
 	return OverlayStyle.Render(content)
@@ -272,6 +388,40 @@ func (o Overlay) viewChoice() string {
 		}
 		b.WriteString("\n")
 	}
+	return b.String()
+}
+
+func (o Overlay) viewProfileList() string {
+	var b strings.Builder
+	b.WriteString(OverlayTitleStyle.Render(o.title))
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render(o.message))
+	b.WriteString("\n\n")
+
+	for i, inp := range o.inputs {
+		if i == o.activeLine {
+			b.WriteString("> ")
+		} else {
+			b.WriteString("  ")
+		}
+		b.WriteString(inp.View())
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("Enter: add  ⌫ empty: remove"))
+	b.WriteString("\n\n")
+
+	// Done button.
+	var doneBtn string
+	if o.activeLine == len(o.inputs) {
+		doneBtn = OverlayButtonActiveStyle.Render("Done")
+	} else {
+		doneBtn = OverlayButtonInactiveStyle.Render("Done")
+	}
+	// Center the button.
+	b.WriteString("        " + doneBtn)
+
 	return b.String()
 }
 
@@ -344,12 +494,17 @@ func Composite(background string, overlay string, totalWidth, totalHeight int) s
 // SetWidth sets the overlay box width hint. Currently used for rendering hints.
 func (o *Overlay) SetWidth(w int) {
 	o.width = w
-	if o.overlayType == OverlayTextInput {
-		inputWidth := w - 6 // account for overlay padding and border
-		if inputWidth < 20 {
-			inputWidth = 20
-		}
+	inputWidth := w - 6 // account for overlay padding and border
+	if inputWidth < 20 {
+		inputWidth = 20
+	}
+	switch o.overlayType {
+	case OverlayTextInput:
 		o.input.Width = inputWidth
+	case OverlayProfileList:
+		for i := range o.inputs {
+			o.inputs[i].Width = inputWidth
+		}
 	}
 }
 

@@ -31,7 +31,8 @@ type overlayContext int
 const (
 	overlayNone          overlayContext = iota
 	overlayConfigStyle                         // initial "Simple vs Profiles" choice
-	overlayProfileName                         // text input for new profile name
+	overlayProfileName                         // text input for new profile name (single, from [+] tab)
+	overlayProfileNames                        // batch profile naming screen
 	overlayDeleteConfirm                       // delete profile confirmation
 	overlaySaveSummary                         // save summary with confirm/cancel
 	overlayResetConfirm                        // reset all to defaults confirmation
@@ -302,13 +303,30 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 			m.useProfiles = false
 		} else {
 			m.useProfiles = true
-			// Show profile name text input.
-			o := NewTextInputOverlay("New profile name", "e.g. work, personal")
-			o.message = "A Base config is created automatically.\nName your first profile:"
-			m.overlay = o
-			m.overlayCtx = overlayProfileName
+			m.overlay = NewProfileListOverlay()
+			m.overlayCtx = overlayProfileNames
 			return m, nil
 		}
+
+	case overlayProfileNames:
+		if !msg.Confirmed || len(msg.Results) == 0 {
+			// Go back to config style choice.
+			m.overlay = NewChoiceOverlay("Configuration style", []string{
+				"Simple (single config)",
+				"With profiles (e.g., work, personal)",
+			})
+			m.overlayCtx = overlayConfigStyle
+			m.useProfiles = false
+			return m, nil
+		}
+		for _, name := range msg.Results {
+			m.createProfile(name)
+		}
+		// Switch to Base tab so user configures base first.
+		m.activeTab = "Base"
+		m.tabBar.SetActive(0)
+		m.syncSidebarCounts()
+		m.syncStatusBar()
 
 	case overlayProfileName:
 		if !msg.Confirmed || msg.Result == "" {
