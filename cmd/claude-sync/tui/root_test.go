@@ -2,8 +2,10 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -748,6 +750,58 @@ func TestDeselectPicker(t *testing.T) {
 	assert.Equal(t, 0, m.pickers[SectionPlugins].SelectedCount())
 	// Total should remain unchanged
 	assert.Equal(t, 2, m.pickers[SectionPlugins].TotalCount())
+}
+
+func TestProfileCreationFlow_ViewHasSidebarAndTabBar(t *testing.T) {
+	scan := fullScan()
+	// Create model WITH the config style overlay (skipProfiles=false).
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{})
+
+	// Simulate WindowSizeMsg.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	// At this point the config style overlay should be active.
+	require.True(t, m.overlay.Active())
+	require.Equal(t, overlayConfigStyle, m.overlayCtx)
+
+	// Simulate user choosing "With profiles" (second option, enter).
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	// Should now show profile name text input overlay.
+	require.True(t, m.overlay.Active())
+	require.Equal(t, overlayProfileName, m.overlayCtx)
+
+	// Type "personal" and submit.
+	for _, ch := range "personal" {
+		result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = result.(Model)
+	}
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	// Overlay should be dismissed.
+	assert.False(t, m.overlay.Active(), "overlay should be closed after profile creation")
+	assert.True(t, m.useProfiles, "useProfiles should be true")
+	assert.Equal(t, "personal", m.activeTab)
+
+	// Render the view.
+	view := m.View()
+
+	// The view should contain the tab bar with "Base" and "personal".
+	assert.Contains(t, view, "Base", "view should contain Base tab")
+	assert.Contains(t, view, "personal", "view should contain personal tab")
+
+	// The view should contain sidebar section names.
+	assert.Contains(t, view, "Plugins", "view should contain Plugins in sidebar")
+	assert.Contains(t, view, "Settings", "view should contain Settings in sidebar")
+
+	// Sanity: view should have multiple lines.
+	lines := strings.Split(view, "\n")
+	assert.Greater(t, len(lines), 10, "view should have many lines")
 }
 
 func TestDeselectPicker_HeadersUnaffected(t *testing.T) {
