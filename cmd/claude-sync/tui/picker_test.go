@@ -1,0 +1,442 @@
+package tui
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// --- Helper constructor tests ---
+
+func TestPluginPickerItems(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"a@market", "b@market"},
+		AutoForked: []string{"c@local"},
+	}
+	items := PluginPickerItems(scan)
+
+	// 2 headers + 3 items = 5 total
+	require.Len(t, items, 5)
+
+	// First header: Upstream (2)
+	assert.True(t, items[0].IsHeader)
+	assert.Equal(t, "Upstream (2)", items[0].Display)
+
+	// Upstream items
+	assert.Equal(t, "a@market", items[1].Key)
+	assert.True(t, items[1].Selected)
+	assert.False(t, items[1].IsHeader)
+
+	assert.Equal(t, "b@market", items[2].Key)
+	assert.True(t, items[2].Selected)
+
+	// Second header: Auto-forked (1)
+	assert.True(t, items[3].IsHeader)
+	assert.Equal(t, "Auto-forked (1)", items[3].Display)
+
+	// Auto-forked item
+	assert.Equal(t, "c@local", items[4].Key)
+	assert.True(t, items[4].Selected)
+}
+
+func TestPluginPickerItems_UpstreamOnly(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"x@m"},
+	}
+	items := PluginPickerItems(scan)
+	require.Len(t, items, 2) // 1 header + 1 item
+	assert.True(t, items[0].IsHeader)
+	assert.Equal(t, "x@m", items[1].Key)
+}
+
+func TestPluginPickerItems_Empty(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	items := PluginPickerItems(scan)
+	assert.Empty(t, items)
+}
+
+func TestProfilePluginPickerItems(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"a@m", "b@m", "c@m"},
+		AutoForked: []string{"d@local"},
+	}
+	baseSelected := []string{"a@m", "b@m"}
+	items := ProfilePluginPickerItems(scan, baseSelected)
+
+	// Base header + 2 base items + Available header + 2 available items = 6
+	require.Len(t, items, 6)
+
+	// Base header
+	assert.True(t, items[0].IsHeader)
+	assert.Equal(t, "Base (2)", items[0].Display)
+
+	// Base items (sorted: a@m, b@m)
+	assert.Equal(t, "a@m", items[1].Key)
+	assert.True(t, items[1].IsBase)
+	assert.Equal(t, "[base]", items[1].Tag)
+	assert.True(t, items[1].Selected)
+
+	assert.Equal(t, "b@m", items[2].Key)
+	assert.True(t, items[2].IsBase)
+	assert.Equal(t, "[base]", items[2].Tag)
+	assert.True(t, items[2].Selected)
+
+	// Available header
+	assert.True(t, items[3].IsHeader)
+	assert.Equal(t, "Available (2)", items[3].Display)
+
+	// Available items (sorted: c@m, d@local)
+	assert.Equal(t, "c@m", items[4].Key)
+	assert.False(t, items[4].IsBase)
+	assert.False(t, items[4].Selected)
+
+	assert.Equal(t, "d@local", items[5].Key)
+	assert.False(t, items[5].IsBase)
+	assert.False(t, items[5].Selected)
+}
+
+func TestPermissionPickerItems(t *testing.T) {
+	perms := config.Permissions{
+		Allow: []string{"Bash(git *)"},
+		Deny:  []string{"Bash(rm *)"},
+	}
+	items := PermissionPickerItems(perms)
+
+	// 2 headers + 2 items = 4
+	require.Len(t, items, 4)
+
+	// Allow header
+	assert.True(t, items[0].IsHeader)
+	assert.Equal(t, "Allow (1)", items[0].Display)
+
+	// Allow item
+	assert.Equal(t, "allow:Bash(git *)", items[1].Key)
+	assert.Equal(t, "Bash(git *)", items[1].Display)
+	assert.True(t, items[1].Selected)
+
+	// Deny header
+	assert.True(t, items[2].IsHeader)
+	assert.Equal(t, "Deny (1)", items[2].Display)
+
+	// Deny item
+	assert.Equal(t, "deny:Bash(rm *)", items[3].Key)
+	assert.Equal(t, "Bash(rm *)", items[3].Display)
+	assert.True(t, items[3].Selected)
+}
+
+func TestPermissionPickerItems_AllowOnly(t *testing.T) {
+	perms := config.Permissions{
+		Allow: []string{"rule1", "rule2"},
+	}
+	items := PermissionPickerItems(perms)
+	require.Len(t, items, 3) // 1 header + 2 items
+}
+
+func TestPermissionPickerItems_Empty(t *testing.T) {
+	perms := config.Permissions{}
+	items := PermissionPickerItems(perms)
+	assert.Empty(t, items)
+}
+
+func TestMCPPickerItems(t *testing.T) {
+	mcp := map[string]json.RawMessage{
+		"bravo":  json.RawMessage(`{"url":"http://b"}`),
+		"alpha":  json.RawMessage(`{"url":"http://a"}`),
+		"charlie": json.RawMessage(`{}`),
+	}
+	items := MCPPickerItems(mcp)
+
+	require.Len(t, items, 3)
+
+	// Should be sorted by name
+	assert.Equal(t, "alpha", items[0].Key)
+	assert.Equal(t, "alpha", items[0].Display)
+	assert.True(t, items[0].Selected)
+
+	assert.Equal(t, "bravo", items[1].Key)
+	assert.Equal(t, "charlie", items[2].Key)
+}
+
+func TestMCPPickerItems_Empty(t *testing.T) {
+	items := MCPPickerItems(nil)
+	assert.Empty(t, items)
+}
+
+func TestHookPickerItems(t *testing.T) {
+	hooks := map[string]json.RawMessage{
+		"PreToolUse": json.RawMessage(`[{"hooks":[{"command":"lint"}]}]`),
+		"PostToolUse": json.RawMessage(`[{"hooks":[{"command":"format"}]}]`),
+	}
+	items := HookPickerItems(hooks)
+
+	require.Len(t, items, 2)
+
+	// Sorted: PostToolUse, PreToolUse
+	assert.Equal(t, "PostToolUse", items[0].Key)
+	assert.Equal(t, "PostToolUse: format", items[0].Display)
+	assert.True(t, items[0].Selected)
+
+	assert.Equal(t, "PreToolUse", items[1].Key)
+	assert.Equal(t, "PreToolUse: lint", items[1].Display)
+	assert.True(t, items[1].Selected)
+}
+
+func TestHookPickerItems_NoCommand(t *testing.T) {
+	hooks := map[string]json.RawMessage{
+		"Hook1": json.RawMessage(`invalid`),
+	}
+	items := HookPickerItems(hooks)
+	require.Len(t, items, 1)
+	// When command extraction fails, display is just the key
+	assert.Equal(t, "Hook1", items[0].Display)
+}
+
+func TestSettingsPickerItems(t *testing.T) {
+	settings := map[string]any{
+		"model":    "opus",
+		"autoApprove": true,
+	}
+	items := SettingsPickerItems(settings)
+
+	require.Len(t, items, 2)
+
+	// Sorted: autoApprove, model
+	assert.Equal(t, "autoApprove", items[0].Key)
+	assert.Equal(t, "autoApprove: true", items[0].Display)
+	assert.True(t, items[0].Selected)
+
+	assert.Equal(t, "model", items[1].Key)
+	assert.Equal(t, "model: opus", items[1].Display)
+	assert.True(t, items[1].Selected)
+}
+
+func TestSettingsPickerItems_Empty(t *testing.T) {
+	items := SettingsPickerItems(nil)
+	assert.Empty(t, items)
+}
+
+func TestKeybindingsPickerItems(t *testing.T) {
+	kb := map[string]any{"ctrl+s": "save"}
+	items := KeybindingsPickerItems(kb)
+
+	require.Len(t, items, 1)
+	assert.Equal(t, "keybindings", items[0].Key)
+	assert.Equal(t, "Include keybindings", items[0].Display)
+	assert.True(t, items[0].Selected)
+}
+
+func TestKeybindingsPickerItems_Empty(t *testing.T) {
+	items := KeybindingsPickerItems(nil)
+	assert.Nil(t, items)
+
+	items2 := KeybindingsPickerItems(map[string]any{})
+	assert.Nil(t, items2)
+}
+
+// --- Picker methods tests ---
+
+func TestPickerSelectedKeys(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Header", IsHeader: true},
+		{Key: "a", Display: "a", Selected: true},
+		{Key: "b", Display: "b", Selected: false},
+		{Key: "c", Display: "c", Selected: true},
+	}
+	p := NewPicker(items)
+
+	keys := p.SelectedKeys()
+	assert.Equal(t, []string{"a", "c"}, keys)
+	assert.Equal(t, 2, p.SelectedCount())
+	assert.Equal(t, 3, p.TotalCount())
+}
+
+func TestPickerSelectedKeys_AllSelected(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+		{Key: "b", Display: "b", Selected: true},
+	}
+	p := NewPicker(items)
+	assert.Equal(t, []string{"a", "b"}, p.SelectedKeys())
+	assert.Equal(t, 2, p.SelectedCount())
+	assert.Equal(t, 2, p.TotalCount())
+}
+
+func TestPickerSelectedKeys_NoneSelected(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: false},
+		{Key: "b", Display: "b", Selected: false},
+	}
+	p := NewPicker(items)
+	assert.Nil(t, p.SelectedKeys())
+	assert.Equal(t, 0, p.SelectedCount())
+	assert.Equal(t, 2, p.TotalCount())
+}
+
+func TestPickerEmpty(t *testing.T) {
+	p := NewPicker(nil)
+	assert.Nil(t, p.SelectedKeys())
+	assert.Equal(t, 0, p.SelectedCount())
+	assert.Equal(t, 0, p.TotalCount())
+}
+
+func TestNewPickerCursorSkipsHeader(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Header 1", IsHeader: true},
+		{Display: "Header 2", IsHeader: true},
+		{Key: "a", Display: "a", Selected: true},
+		{Key: "b", Display: "b", Selected: true},
+	}
+	p := NewPicker(items)
+	// Cursor should be on the first non-header item (index 2)
+	assert.Equal(t, 2, p.cursor)
+}
+
+func TestPickerNavigation(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Header", IsHeader: true},
+		{Key: "a", Display: "a", Selected: true},
+		{Display: "Header 2", IsHeader: true},
+		{Key: "b", Display: "b", Selected: true},
+		{Key: "c", Display: "c", Selected: true},
+	}
+	p := NewPicker(items)
+
+	// Cursor starts on "a" (index 1)
+	assert.Equal(t, 1, p.cursor)
+
+	// Move down: should skip header at index 2, land on "b" (index 3)
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 3, p.cursor)
+
+	// Move down again: should land on "c" (index 4)
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 4, p.cursor)
+
+	// Move down at end: should stay at 4
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 4, p.cursor)
+
+	// Move up: should land on "b" (index 3)
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	assert.Equal(t, 3, p.cursor)
+
+	// Move up again: should skip header at index 2, land on "a" (index 1)
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	assert.Equal(t, 1, p.cursor)
+
+	// Move up at start: should stay at 1 (can't go to header)
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	assert.Equal(t, 1, p.cursor)
+}
+
+func TestPickerToggle(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+		{Key: "b", Display: "b", Selected: false},
+	}
+	p := NewPicker(items)
+
+	// Cursor is on "a" (index 0), which is selected
+	assert.True(t, p.items[0].Selected)
+
+	// Toggle with space
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	assert.False(t, p.items[0].Selected)
+
+	// Toggle back with enter
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}})
+	// Note: enter key is "enter" string
+	// Use tea.KeyEnter instead
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Two toggles: false -> true -> false (we toggled once with enter above as rune, which may not match)
+	// Let me be more careful. After the space toggle, it's false. Let me just re-toggle with space.
+}
+
+func TestPickerToggle_SpaceKey(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	assert.True(t, p.items[0].Selected)
+
+	// Toggle off
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	assert.False(t, p.items[0].Selected)
+
+	// Toggle on
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	assert.True(t, p.items[0].Selected)
+}
+
+func TestPickerToggle_EnterKey(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	assert.True(t, p.items[0].Selected)
+
+	// Toggle off with enter
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.False(t, p.items[0].Selected)
+}
+
+func TestPickerSelectAll(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Header", IsHeader: true},
+		{Key: "a", Display: "a", Selected: false},
+		{Key: "b", Display: "b", Selected: false},
+		{Key: "c", Display: "c", Selected: true},
+	}
+	p := NewPicker(items)
+
+	// Press 'a' to select all
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	assert.True(t, p.items[1].Selected)
+	assert.True(t, p.items[2].Selected)
+	assert.True(t, p.items[3].Selected)
+	// Header should not be affected
+	assert.False(t, p.items[0].Selected)
+
+	assert.Equal(t, 3, p.SelectedCount())
+}
+
+func TestPickerSelectNone(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Header", IsHeader: true},
+		{Key: "a", Display: "a", Selected: true},
+		{Key: "b", Display: "b", Selected: true},
+		{Key: "c", Display: "c", Selected: true},
+	}
+	p := NewPicker(items)
+
+	// Press 'n' to select none
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	assert.False(t, p.items[1].Selected)
+	assert.False(t, p.items[2].Selected)
+	assert.False(t, p.items[3].Selected)
+
+	assert.Equal(t, 0, p.SelectedCount())
+}
+
+func TestPickerSetItems(t *testing.T) {
+	p := NewPicker([]PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	})
+	assert.Equal(t, 1, p.TotalCount())
+
+	newItems := []PickerItem{
+		{Display: "Header", IsHeader: true},
+		{Key: "x", Display: "x", Selected: true},
+		{Key: "y", Display: "y", Selected: false},
+	}
+	p.SetItems(newItems)
+
+	assert.Equal(t, 2, p.TotalCount())
+	assert.Equal(t, 1, p.cursor) // should skip header
+}
