@@ -16,28 +16,30 @@ import (
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
+	"github.com/ruminaider/claude-sync/internal/project"
 	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
 
 type PullResult struct {
-	ToInstall          []string
-	ToRemove           []string
-	Synced             []string
-	Untracked          []string
-	EffectiveDesired   []string
-	Installed          []string
-	Failed             []string
-	SettingsApplied    []string
-	HooksApplied       []string
-	SkippedCategories  []string
-	ActiveProfile      string // active profile applied (empty = base only)
-	PermissionsApplied bool
-	ClaudeMDAssembled  bool
-	MCPApplied         []string
-	MCPEnvWarnings     []string // unresolved ${VAR} references
-	MCPProjectApplied  map[string][]string // project path -> server names written there
-	KeybindingsApplied bool
-	PendingHighRisk    []approval.Change
+	ToInstall              []string
+	ToRemove               []string
+	Synced                 []string
+	Untracked              []string
+	EffectiveDesired       []string
+	Installed              []string
+	Failed                 []string
+	SettingsApplied        []string
+	HooksApplied           []string
+	SkippedCategories      []string
+	ActiveProfile          string // active profile applied (empty = base only)
+	PermissionsApplied     bool
+	ClaudeMDAssembled      bool
+	MCPApplied             []string
+	MCPEnvWarnings         []string // unresolved ${VAR} references
+	MCPProjectApplied      map[string][]string // project path -> server names written there
+	KeybindingsApplied     bool
+	PendingHighRisk        []approval.Change
+	ProjectSettingsApplied bool
 }
 
 // PullOptions configures pull behavior.
@@ -50,6 +52,7 @@ type PullOptions struct {
 	// Called with (serverName, suggestedProjectPath) and returns the confirmed path
 	// (empty string means write to global instead). If nil, uses suggested paths as-is.
 	MCPTargetResolver func(serverName, suggestedPath string) string
+	ProjectDir        string // if set, apply project settings after global pull
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -403,6 +406,27 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 					_ = approval.WritePending(syncDir, pending)
 					result.PendingHighRisk = classified.HighRisk
 				}
+			}
+		}
+	}
+
+	// Apply project settings if in a project directory.
+	projectDir := opts.ProjectDir
+	if projectDir == "" {
+		// Auto-detect from CWD
+		if cwd, err := os.Getwd(); err == nil {
+			projectDir, _ = project.FindProjectRoot(cwd)
+		}
+	}
+	if projectDir != "" {
+		pcfg, pErr := project.ReadProjectConfig(projectDir)
+		if pErr == nil && !pcfg.Declined {
+			// Re-parse config for project resolution (need the raw Config struct)
+			cfgData2, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+			cfg2, _ := config.Parse(cfgData2)
+			resolved := ResolveWithProfile(cfg2, syncDir, pcfg.Profile)
+			if applyErr := ApplyProjectSettings(projectDir, resolved, pcfg); applyErr == nil {
+				result.ProjectSettingsApplied = true
 			}
 		}
 	}

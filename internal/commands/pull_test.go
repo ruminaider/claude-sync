@@ -14,6 +14,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
+	"github.com/ruminaider/claude-sync/internal/project"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -879,4 +880,51 @@ func TestAppendUniqueStrings(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPull_AppliesProjectSettings(t *testing.T) {
+	claudeDir, syncDir := setupStatusEnv(t)
+	projectDir := t.TempDir()
+	os.MkdirAll(filepath.Join(projectDir, ".claude"), 0755)
+
+	// Write global config with hooks and permissions
+	cfg := config.Config{
+		Version: "1.0.0",
+		Hooks: map[string]json.RawMessage{
+			"PreToolUse": json.RawMessage(`[{"matcher":"^Bash$","hooks":[{"type":"command","command":"python3 validator.py"}]}]`),
+		},
+		Permissions: config.Permissions{
+			Allow: []string{"Read", "Edit"},
+		},
+	}
+	cfgData, _ := config.MarshalV2(cfg)
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644)
+
+	// Write project config with permission overrides
+	project.WriteProjectConfig(projectDir, project.ProjectConfig{
+		Version:       "1.0.0",
+		ProjectedKeys: []string{"hooks", "permissions"},
+		Overrides: project.ProjectOverrides{
+			Permissions: project.ProjectPermissionOverrides{
+				AddAllow: []string{"mcp__evvy_db__query"},
+			},
+		},
+	})
+
+	result, err := commands.PullWithOptions(commands.PullOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		ProjectDir: projectDir,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.ProjectSettingsApplied)
+
+	// Verify settings.local.json has hooks + permissions with override
+	slj, err := os.ReadFile(filepath.Join(projectDir, ".claude", "settings.local.json"))
+	require.NoError(t, err)
+	var settings map[string]json.RawMessage
+	json.Unmarshal(slj, &settings)
+	assert.Contains(t, string(settings["hooks"]), "PreToolUse")
+	assert.Contains(t, string(settings["permissions"]), "mcp__evvy_db__query")
+	assert.Contains(t, string(settings["permissions"]), "Read")
 }
