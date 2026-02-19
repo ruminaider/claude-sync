@@ -104,10 +104,11 @@ func SearchMCPConfigs() tea.Cmd {
 		globalMCP := filepath.Join(home, ".claude", ".mcp.json")
 		var rawPaths []string
 
-		// Try fd first.
+		// Try fd first. -H is needed because .mcp.json is a hidden file.
 		if fdPath, err := exec.LookPath("fd"); err == nil {
 			out, err := exec.Command(
 				fdPath,
+				"-H",
 				"-t", "f",
 				"-d", "4",
 				".mcp.json",
