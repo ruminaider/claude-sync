@@ -1407,3 +1407,125 @@ func TestRenderHelper_NoWrap(t *testing.T) {
 	lineCount := strings.Count(result, "\n")
 	assert.Equal(t, 3, lineCount, "helper must produce exactly 3 newlines (3 lines) even at narrow width")
 }
+
+// --- MCP discovery tests ---
+
+func TestMCPAlwaysNavigable(t *testing.T) {
+	// Scan with NO global MCP servers.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+	}
+	m := testModel(scan)
+
+	// MCP should be navigable even with 0 servers.
+	for _, entry := range m.sidebar.sections {
+		if entry.Section == SectionMCP {
+			assert.True(t, entry.Available, "MCP section should be available even with 0 servers")
+			return
+		}
+	}
+	t.Fatal("MCP section not found in sidebar")
+}
+
+func TestMCPSearchDoneMsg(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"global-server": json.RawMessage(`{"url":"http://g"}`)},
+	}
+	m := testModel(scan)
+
+	// Simulate MCP search returning discovered servers.
+	msg := MCPSearchDoneMsg{
+		Servers: map[string]json.RawMessage{
+			"project-server": json.RawMessage(`{"url":"http://p"}`),
+			"global-server":  json.RawMessage(`{"url":"http://g2"}`), // duplicate
+		},
+		Sources: map[string]string{
+			"project-server": "~/Repos/myproject",
+			"global-server":  "~/Repos/other",
+		},
+	}
+	m = m.handleMCPSearchDone(msg)
+
+	// Discovered server should be in the map.
+	assert.Contains(t, m.discoveredMCP, "project-server")
+	assert.Equal(t, "~/Repos/myproject", m.mcpSources["project-server"])
+
+	// Global server should NOT be in discovered (it's in scanResult).
+	assert.NotContains(t, m.discoveredMCP, "global-server")
+
+	// Picker should now have 2 items + search action.
+	p := m.pickers[SectionMCP]
+	assert.Equal(t, 2, p.TotalCount(), "picker should have global + discovered server")
+
+	// Sidebar count should reflect the new total.
+	for _, entry := range m.sidebar.sections {
+		if entry.Section == SectionMCP {
+			assert.Equal(t, 2, entry.Total)
+			assert.Equal(t, 2, entry.Selected)
+			return
+		}
+	}
+}
+
+func TestBuildInitOptions_WithDiscoveredMCP(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"global": json.RawMessage(`{"url":"http://g"}`)},
+	}
+	m := testModel(scan)
+
+	// Add discovered MCP server.
+	m.discoveredMCP["project-mcp"] = json.RawMessage(`{"url":"http://p"}`)
+	m.mcpSources["project-mcp"] = "~/Repos/proj"
+
+	// Add to picker.
+	p := m.pickers[SectionMCP]
+	p.AddItems([]PickerItem{
+		{Key: "project-mcp", Display: "project-mcp", Selected: true, Tag: "[~/Repos/proj]"},
+	})
+	m.pickers[SectionMCP] = p
+
+	opts := m.buildInitOptions()
+
+	// Both global and discovered should be in the final MCP map.
+	require.NotEmpty(t, opts.MCP)
+	assert.Contains(t, opts.MCP, "global")
+	assert.Contains(t, opts.MCP, "project-mcp")
+}
+
+func TestMCPSearchDoneMsg_Empty(t *testing.T) {
+	scan := &commands.InitScanResult{Upstream: []string{"a@m"}}
+	m := testModel(scan)
+	originalCount := m.pickers[SectionMCP].TotalCount()
+
+	// Empty search results should be a no-op.
+	m = m.handleMCPSearchDone(MCPSearchDoneMsg{})
+	assert.Equal(t, originalCount, m.pickers[SectionMCP].TotalCount())
+}
+
+func TestMCPPickerHasSearchAction(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"s1": json.RawMessage(`{}`)},
+	}
+	m := testModel(scan)
+
+	p := m.pickers[SectionMCP]
+	assert.True(t, p.hasSearchAction, "MCP picker should have search action enabled")
+}
+
+func TestResetToDefaults_ClearsDiscoveredMCP(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	// Simulate discovered MCP.
+	m.discoveredMCP["found"] = json.RawMessage(`{}`)
+	m.mcpSources["found"] = "~/test"
+
+	m.resetToDefaults()
+
+	assert.Empty(t, m.discoveredMCP, "discovered MCP should be cleared on reset")
+	assert.Empty(t, m.mcpSources, "MCP sources should be cleared on reset")
+	assert.True(t, m.pickers[SectionMCP].hasSearchAction, "search action should be preserved on reset")
+}

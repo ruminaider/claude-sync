@@ -18,10 +18,11 @@ type SidebarEntry struct {
 
 // Sidebar renders the left-hand section navigation.
 type Sidebar struct {
-	sections []SidebarEntry
-	active   int  // index into sections
-	height   int  // available vertical space
-	focused  bool // true when sidebar has keyboard focus
+	sections        []SidebarEntry
+	active          int  // index into sections
+	height          int  // available vertical space
+	focused         bool // true when sidebar has keyboard focus
+	alwaysAvailable map[Section]bool
 }
 
 // NewSidebar creates a sidebar with entries for all sections.
@@ -64,13 +65,21 @@ func (s Sidebar) ActiveSection() Section {
 	return SectionPlugins
 }
 
+// SetAlwaysAvailable marks a section as navigable regardless of item count.
+func (s *Sidebar) SetAlwaysAvailable(section Section) {
+	if s.alwaysAvailable == nil {
+		s.alwaysAvailable = make(map[Section]bool)
+	}
+	s.alwaysAvailable[section] = true
+}
+
 // UpdateCounts sets the selected/total counts for a section.
 func (s *Sidebar) UpdateCounts(section Section, selected, total int) {
 	for i := range s.sections {
 		if s.sections[i].Section == section {
 			s.sections[i].Selected = selected
 			s.sections[i].Total = total
-			s.sections[i].Available = total > 0
+			s.sections[i].Available = total > 0 || s.alwaysAvailable[section]
 			return
 		}
 	}

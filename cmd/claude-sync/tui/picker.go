@@ -26,13 +26,14 @@ type PickerItem struct {
 // Picker is an enhanced multi-select list used for Plugins, Permissions, MCP,
 // Hooks, Settings, and Keybindings sections.
 type Picker struct {
-	items     []PickerItem
-	cursor    int // index of the highlighted row
-	height    int // viewport height (number of visible rows)
-	width     int
-	offset    int  // scroll offset for long lists
-	selectAll bool // track whether all selectable items are selected
-	focused   bool // true when this picker has keyboard focus
+	items           []PickerItem
+	cursor          int  // index of the highlighted row
+	height          int  // viewport height (number of visible rows)
+	width           int
+	offset          int  // scroll offset for long lists
+	selectAll       bool // track whether all selectable items are selected
+	focused         bool // true when this picker has keyboard focus
+	hasSearchAction bool // when true, a [+ Search projects] row is appended
 }
 
 // NewPicker creates a Picker with the given items. The cursor is placed on the
@@ -262,6 +263,18 @@ func KeybindingsPickerItems(kb map[string]any) []PickerItem {
 
 // --- Methods ---
 
+// SetSearchAction enables or disables the virtual [+ Search projects] row.
+func (p *Picker) SetSearchAction(enabled bool) {
+	p.hasSearchAction = enabled
+}
+
+// AddItems appends new items to the picker and marks them as selected.
+func (p *Picker) AddItems(items []PickerItem) {
+	p.items = append(p.items, items...)
+	p.syncSelectAll()
+	p.clampScroll()
+}
+
 // SelectedKeys returns the keys of all selected (non-header) items.
 func (p Picker) SelectedKeys() []string {
 	var keys []string
@@ -336,7 +349,18 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 			p.moveCursor(-1)
 		case "down", "j":
 			p.moveCursor(+1)
-		case " ", "enter":
+		case " ":
+			// Space on the search action row is a no-op.
+			if !(p.hasSearchAction && p.cursor == len(p.items)) {
+				p.toggleCurrent()
+			}
+		case "enter":
+			// Enter on the search action row emits SearchRequestMsg.
+			if p.hasSearchAction && p.cursor == len(p.items) {
+				return p, func() tea.Msg {
+					return SearchRequestMsg{}
+				}
+			}
 			p.toggleCurrent()
 		case "a":
 			p.doSelectAll()
@@ -357,14 +381,19 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 
 // View renders the picker list with scrolling support.
 func (p Picker) View() string {
-	if len(p.items) == 0 {
+	totalRows := len(p.items)
+	if p.hasSearchAction {
+		totalRows++ // virtual search action row
+	}
+
+	if totalRows == 0 {
 		return ContentPaneStyle.Render("(no items)")
 	}
 
 	// Reserve lines for scroll indicators so total output stays within p.height.
 	visibleItems := p.height
 	hasAbove := p.offset > 0
-	hasBelow := p.offset+p.height < len(p.items)
+	hasBelow := p.offset+p.height < totalRows
 	if hasAbove {
 		visibleItems--
 	}
@@ -382,13 +411,31 @@ func (p Picker) View() string {
 	}
 
 	end := p.offset + visibleItems
-	if end > len(p.items) {
-		end = len(p.items)
+	if end > totalRows {
+		end = totalRows
 	}
 
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 
 	for i := p.offset; i < end; i++ {
+		// Virtual search action row at the end.
+		if i == len(p.items) && p.hasSearchAction {
+			cursor := "  "
+			if p.focused && p.cursor == i {
+				cursor = "> "
+			}
+			actionText := "[+ Search projects]"
+			if p.focused && p.cursor == i {
+				actionText = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render(actionText)
+			} else if p.focused {
+				actionText = lipgloss.NewStyle().Foreground(colorBlue).Render(actionText)
+			} else {
+				actionText = dimStyle.Render(actionText)
+			}
+			b.WriteString(cursor + actionText + "\n")
+			continue
+		}
+
 		it := p.items[i]
 
 		if it.IsHeader {
@@ -447,7 +494,7 @@ func (p Picker) View() string {
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
 	}
 
-	if end < len(p.items) {
+	if end < totalRows {
 		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↓ more") + "\n")
 	}
 
@@ -459,9 +506,20 @@ func (p Picker) View() string {
 // moveCursor advances the cursor in the given direction (+1 or -1), skipping
 // header items. It also adjusts the scroll offset to keep the cursor visible.
 func (p *Picker) moveCursor(dir int) {
+	maxIndex := len(p.items) - 1
+	if p.hasSearchAction {
+		maxIndex = len(p.items) // virtual row at index len(items)
+	}
+
 	next := p.cursor + dir
-	for next >= 0 && next < len(p.items) {
-		if !p.items[next].IsHeader {
+	for next >= 0 && next <= maxIndex {
+		// The virtual search action row is always selectable.
+		if next == len(p.items) && p.hasSearchAction {
+			p.cursor = next
+			p.clampScroll()
+			return
+		}
+		if next < len(p.items) && !p.items[next].IsHeader {
 			p.cursor = next
 			p.clampScroll()
 			return
@@ -516,10 +574,15 @@ func (p *Picker) clampScroll() {
 	if p.height <= 0 {
 		return
 	}
+	totalRows := len(p.items)
+	if p.hasSearchAction {
+		totalRows++
+	}
+
 	// When items overflow, scroll indicators take up to 2 lines.
 	// Use reduced height so the cursor stays within visible items.
 	effectiveHeight := p.height
-	if len(p.items) > p.height {
+	if totalRows > p.height {
 		effectiveHeight -= 2
 	}
 	if effectiveHeight < 1 {
@@ -534,7 +597,7 @@ func (p *Picker) clampScroll() {
 		p.offset = p.cursor - effectiveHeight + 1
 	}
 	// Don't allow offset past the end.
-	maxOffset := len(p.items) - effectiveHeight
+	maxOffset := totalRows - effectiveHeight
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
