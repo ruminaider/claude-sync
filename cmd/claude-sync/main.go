@@ -48,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(rejectCmd)
 	rootCmd.AddCommand(autoCommitCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(conflictsCmd)
 }
 
 func main() {

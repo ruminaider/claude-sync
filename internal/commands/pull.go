@@ -38,8 +38,9 @@ type PullResult struct {
 	MCPEnvWarnings         []string // unresolved ${VAR} references
 	MCPProjectApplied      map[string][]string // project path -> server names written there
 	KeybindingsApplied     bool
-	PendingHighRisk        []approval.Change
-	ProjectSettingsApplied bool
+	PendingHighRisk            []approval.Change
+	ProjectSettingsApplied     bool
+	ProjectUnmanagedDetected   bool // CWD has settings.local.json but no .claude-sync.yaml
 }
 
 // PullOptions configures pull behavior.
@@ -425,8 +426,19 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			cfgData2, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 			cfg2, _ := config.Parse(cfgData2)
 			resolved := ResolveWithProfile(cfg2, syncDir, pcfg.Profile)
-			if applyErr := ApplyProjectSettings(projectDir, resolved, pcfg); applyErr == nil {
+			if applyErr := ApplyProjectSettings(projectDir, resolved, pcfg, syncDir); applyErr == nil {
 				result.ProjectSettingsApplied = true
+			}
+		}
+	} else {
+		// Detect unmanaged projects (settings.local.json exists but no .claude-sync.yaml).
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			settingsPath := filepath.Join(cwd, ".claude", "settings.local.json")
+			configPath := filepath.Join(cwd, ".claude", project.ConfigFileName)
+			if _, statErr := os.Stat(settingsPath); statErr == nil {
+				if _, statErr2 := os.Stat(configPath); os.IsNotExist(statErr2) {
+					result.ProjectUnmanagedDetected = true
+				}
 			}
 		}
 	}

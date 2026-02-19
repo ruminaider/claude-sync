@@ -158,6 +158,10 @@ type PushApplyOptions struct {
 }
 
 func PushApply(opts PushApplyOptions) error {
+	if HasPendingConflicts(opts.SyncDir) {
+		return fmt.Errorf("pending conflicts must be resolved before pushing — run 'claude-sync conflicts' to review")
+	}
+
 	cfgPath := filepath.Join(opts.SyncDir, "config.yaml")
 	cfgData, err := os.ReadFile(cfgPath)
 	if err != nil {
