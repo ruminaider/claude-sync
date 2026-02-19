@@ -30,6 +30,7 @@ var versionCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(initAliasCmd)
 	rootCmd.AddCommand(joinAliasCmd)
 	rootCmd.AddCommand(statusCmd)

@@ -145,3 +145,80 @@ func TestProjectInit_GitignoreCreated(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(gitignore), ".claude/.claude-sync.yaml")
 }
+
+func TestProjectPush_CapturesNewPermissions(t *testing.T) {
+	projectDir, syncDir := setupProjectTestEnv(t)
+
+	// Setup global config with base permissions
+	cfg := config.Config{
+		Version: "1.0.0",
+		Permissions: config.Permissions{
+			Allow: []string{"Read", "Edit"},
+		},
+	}
+	data, _ := config.MarshalV2(cfg)
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), data, 0644)
+
+	// Init project first
+	_, err := commands.ProjectInit(commands.ProjectInitOptions{
+		ProjectDir:    projectDir,
+		SyncDir:       syncDir,
+		ProjectedKeys: []string{"permissions"},
+	})
+	require.NoError(t, err)
+
+	// Simulate "Always allow" click: add new permission to settings.local.json
+	slj, _ := os.ReadFile(filepath.Join(projectDir, ".claude", "settings.local.json"))
+	var settings map[string]json.RawMessage
+	json.Unmarshal(slj, &settings)
+	var perms struct {
+		Allow []string `json:"allow"`
+	}
+	json.Unmarshal(settings["permissions"], &perms)
+	perms.Allow = append(perms.Allow, "Bash(curl:*)")
+	permData, _ := json.Marshal(map[string]any{"allow": perms.Allow})
+	settings["permissions"] = permData
+	newData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(projectDir, ".claude", "settings.local.json"), newData, 0644)
+
+	// Push should detect the new permission
+	result, err := commands.ProjectPush(commands.ProjectPushOptions{
+		ProjectDir: projectDir,
+		SyncDir:    syncDir,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.NewPermissions)
+
+	// Verify override was saved
+	pcfg, _ := project.ReadProjectConfig(projectDir)
+	assert.Contains(t, pcfg.Overrides.Permissions.AddAllow, "Bash(curl:*)")
+}
+
+func TestProjectPush_NoDrift(t *testing.T) {
+	projectDir, syncDir := setupProjectTestEnv(t)
+
+	cfg := config.Config{
+		Version: "1.0.0",
+		Permissions: config.Permissions{
+			Allow: []string{"Read", "Edit"},
+		},
+	}
+	data, _ := config.MarshalV2(cfg)
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), data, 0644)
+
+	_, err := commands.ProjectInit(commands.ProjectInitOptions{
+		ProjectDir:    projectDir,
+		SyncDir:       syncDir,
+		ProjectedKeys: []string{"permissions"},
+	})
+	require.NoError(t, err)
+
+	// Push with no changes
+	result, err := commands.ProjectPush(commands.ProjectPushOptions{
+		ProjectDir: projectDir,
+		SyncDir:    syncDir,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.NewPermissions)
+	assert.Equal(t, 0, result.NewHooks)
+}

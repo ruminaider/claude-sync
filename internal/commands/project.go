@@ -269,3 +269,136 @@ func containsLine(s, target string) bool {
 	}
 	return false
 }
+
+// ProjectPushOptions configures project push behavior.
+type ProjectPushOptions struct {
+	ProjectDir string
+	SyncDir    string
+}
+
+// ProjectPushResult describes what drift was captured.
+type ProjectPushResult struct {
+	NewPermissions int
+	NewHooks       int
+}
+
+// ProjectPush detects new permissions/hooks in settings.local.json that aren't
+// in the resolved config or existing overrides, and saves them to project overrides.
+func ProjectPush(opts ProjectPushOptions) (*ProjectPushResult, error) {
+	pcfg, err := project.ReadProjectConfig(opts.ProjectDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse global config
+	cfgData, err := os.ReadFile(filepath.Join(opts.SyncDir, "config.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+	cfg, err := config.Parse(cfgData)
+	if err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	resolved := ResolveWithProfile(cfg, opts.SyncDir, pcfg.Profile)
+
+	// Read current settings.local.json
+	settingsPath := filepath.Join(opts.ProjectDir, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading settings.local.json: %w", err)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parsing settings.local.json: %w", err)
+	}
+
+	var newPerms, newHooks int
+
+	// Diff permissions
+	newPerms = diffNewPermissions(&pcfg, settings, resolved.Permissions)
+
+	// Diff hooks
+	newHooks = diffNewHooks(&pcfg, settings, resolved.Hooks)
+
+	// Save updated overrides
+	if newPerms > 0 || newHooks > 0 {
+		if err := project.WriteProjectConfig(opts.ProjectDir, pcfg); err != nil {
+			return nil, fmt.Errorf("writing project config: %w", err)
+		}
+	}
+
+	return &ProjectPushResult{
+		NewPermissions: newPerms,
+		NewHooks:       newHooks,
+	}, nil
+}
+
+// diffNewPermissions finds permissions in settings.local.json that aren't
+// in the resolved config or existing overrides. Adds them to pcfg overrides.
+func diffNewPermissions(pcfg *project.ProjectConfig, settings map[string]json.RawMessage, resolvedPerms config.Permissions) int {
+	permRaw, ok := settings["permissions"]
+	if !ok {
+		return 0
+	}
+	var perms struct {
+		Allow []string `json:"allow"`
+	}
+	if json.Unmarshal(permRaw, &perms) != nil {
+		return 0
+	}
+
+	// Build set of all known permissions (resolved + existing overrides)
+	known := make(map[string]bool)
+	for _, p := range resolvedPerms.Allow {
+		known[p] = true
+	}
+	for _, p := range pcfg.Overrides.Permissions.AddAllow {
+		known[p] = true
+	}
+
+	var added int
+	for _, p := range perms.Allow {
+		if !known[p] {
+			pcfg.Overrides.Permissions.AddAllow = append(pcfg.Overrides.Permissions.AddAllow, p)
+			added++
+		}
+	}
+	return added
+}
+
+// diffNewHooks finds hooks in settings.local.json that aren't
+// in the resolved config or existing overrides.
+func diffNewHooks(pcfg *project.ProjectConfig, settings map[string]json.RawMessage, resolvedHooks map[string]json.RawMessage) int {
+	hooksRaw, ok := settings["hooks"]
+	if !ok {
+		return 0
+	}
+	var hooks map[string]json.RawMessage
+	if json.Unmarshal(hooksRaw, &hooks) != nil {
+		return 0
+	}
+
+	// Build set of all known hook names
+	known := make(map[string]bool)
+	for name := range resolvedHooks {
+		known[name] = true
+	}
+	if pcfg.Overrides.Hooks.Add != nil {
+		for name := range pcfg.Overrides.Hooks.Add {
+			known[name] = true
+		}
+	}
+
+	var added int
+	for name, raw := range hooks {
+		if !known[name] {
+			if pcfg.Overrides.Hooks.Add == nil {
+				pcfg.Overrides.Hooks.Add = make(map[string]json.RawMessage)
+			}
+			pcfg.Overrides.Hooks.Add[name] = raw
+			added++
+		}
+	}
+	return added
+}
