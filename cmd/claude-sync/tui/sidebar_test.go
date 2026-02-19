@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -142,4 +144,30 @@ func TestSidebarSetHeight(t *testing.T) {
 	s := NewSidebar()
 	s.SetHeight(30)
 	assert.Equal(t, 30, s.height)
+}
+
+func TestSidebarViewLineWidths(t *testing.T) {
+	s := NewSidebar()
+	s.SetHeight(20)
+	s.UpdateCounts(SectionPlugins, 29, 29)
+	s.UpdateCounts(SectionSettings, 9, 9)
+	s.UpdateCounts(SectionClaudeMD, 3, 5)
+	s.UpdateCounts(SectionPermissions, 173, 173)
+	s.UpdateCounts(SectionMCP, 4, 4)
+	s.UpdateCounts(SectionKeybindings, 0, 0)
+	s.UpdateCounts(SectionHooks, 3, 3)
+
+	view := s.View()
+	lines := strings.Split(view, "\n")
+
+	// Each section should be exactly 1 line (no wrapping).
+	// 7 sections + 13 padding lines = 20 lines total (matching Height(20)).
+	assert.Equal(t, 20, len(lines), "sidebar should have exactly height(20) lines")
+
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		if w > SidebarWidth+1 { // +1 for the right border char
+			t.Errorf("Line %d exceeds SidebarWidth (%d): visual_width=%d", i, SidebarWidth, w)
+		}
+	}
 }

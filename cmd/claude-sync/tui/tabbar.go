@@ -50,6 +50,22 @@ func (t *TabBar) SetActive(i int) {
 	}
 }
 
+// CycleNext advances to the next tab, wrapping around.
+func (t *TabBar) CycleNext() {
+	if len(t.tabs) <= 1 {
+		return
+	}
+	t.active = (t.active + 1) % len(t.tabs)
+}
+
+// CyclePrev moves to the previous tab, wrapping around.
+func (t *TabBar) CyclePrev() {
+	if len(t.tabs) <= 1 {
+		return
+	}
+	t.active = (t.active - 1 + len(t.tabs)) % len(t.tabs)
+}
+
 // RemoveTab removes a profile tab by name. The Base tab cannot be removed.
 // If the removed tab was active, focus moves to the previous tab.
 func (t *TabBar) RemoveTab(name string) {

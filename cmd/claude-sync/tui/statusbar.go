@@ -47,12 +47,32 @@ func (s StatusBar) View() string {
 
 	leftPart := fmt.Sprintf("%s \u00b7 %s", left, context)
 
-	// Right side: keyboard shortcuts.
-	shortcuts := []string{
-		StatusBarKeyStyle.Render("Ctrl+S") + ": save",
-		StatusBarKeyStyle.Render("Tab") + ": profiles",
-		StatusBarKeyStyle.Render("/") + ": search",
-		StatusBarKeyStyle.Render("Esc") + ": quit",
+	// Right side: keyboard shortcuts — tier by available width.
+	// Breakpoints chosen so the bar never wraps at the given width,
+	// even with the longest left part ("173/173 Permissions selected · Base config" ≈ 42 chars).
+	var shortcuts []string
+	switch {
+	case s.width >= 110:
+		// Full format (~66 visible chars right side).
+		shortcuts = []string{
+			StatusBarKeyStyle.Render("Ctrl+S") + ": save",
+			StatusBarKeyStyle.Render("Tab") + ": profiles",
+			StatusBarKeyStyle.Render("/") + ": search",
+			StatusBarKeyStyle.Render("?") + ": help",
+			StatusBarKeyStyle.Render("Esc") + ": quit",
+		}
+	case s.width >= 80:
+		// Compact format (~27 visible chars right side). Fits at 80+.
+		shortcuts = []string{
+			StatusBarKeyStyle.Render("^S") + " save",
+			StatusBarKeyStyle.Render("?") + " help",
+			StatusBarKeyStyle.Render("Esc") + " quit",
+		}
+	default:
+		// Minimal format for sub-80 terminals.
+		shortcuts = []string{
+			StatusBarKeyStyle.Render("Esc") + " quit",
+		}
 	}
 	rightPart := strings.Join(shortcuts, " \u00b7 ")
 

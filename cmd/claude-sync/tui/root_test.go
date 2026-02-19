@@ -2,10 +2,12 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -823,9 +825,122 @@ func TestProfileCreationFlow_ViewHasSidebarAndTabBar(t *testing.T) {
 	assert.Contains(t, view, "Plugins", "view should contain Plugins in sidebar")
 	assert.Contains(t, view, "Settings", "view should contain Settings in sidebar")
 
-	// Sanity: view should have multiple lines.
+	// View should have exactly m.height lines (no overflow).
 	lines := strings.Split(view, "\n")
-	assert.Greater(t, len(lines), 10, "view should have many lines")
+	t.Logf("View total lines: %d, expected: %d", len(lines), 40)
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		t.Logf("Line %2d: width=%3d %q", i, w, line)
+	}
+	assert.Equal(t, 40, len(lines), "view line count must equal terminal height")
+
+	// First line should contain tab names (tab bar).
+	firstLine := lines[0]
+	assert.Contains(t, firstLine, "Base", "first line should contain Base tab")
+}
+
+func TestFullFlowThenNavigation(t *testing.T) {
+	scan := fullScan()
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{})
+
+	// WindowSizeMsg.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	// Choose "With profiles" (down + enter).
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	// Type "dev" + Enter to add second row.
+	for _, ch := range "dev" {
+		result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = result.(Model)
+	}
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	// Type "staging" in second row.
+	for _, ch := range "staging" {
+		result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = result.(Model)
+	}
+
+	// Down to Done, Enter.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = result.(Model)
+
+	// --- Post-overlay state assertions ---
+	require.False(t, m.overlay.Active(), "overlay should be closed")
+	require.True(t, m.useProfiles)
+	require.Equal(t, "Base", m.activeTab)
+	require.Equal(t, FocusSidebar, m.focusZone)
+	require.Equal(t, []string{"Base", "dev", "staging"}, m.tabBar.tabs)
+
+	// --- Tab forward: Base → dev → staging → Base ---
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "dev", m.activeTab)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "staging", m.activeTab)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "Base", m.activeTab, "should wrap back to Base")
+
+	// --- Shift+Tab backward: Base → staging → dev → Base ---
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.Equal(t, "staging", m.activeTab)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.Equal(t, "dev", m.activeTab)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.Equal(t, "Base", m.activeTab)
+
+	// --- Right arrow: sidebar → content ---
+	assert.Equal(t, FocusSidebar, m.focusZone)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = result.(Model)
+	assert.Equal(t, FocusContent, m.focusZone, "right should move to content")
+
+	// --- Left arrow: content → sidebar ---
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = result.(Model)
+	assert.Equal(t, FocusSidebar, m.focusZone, "left should return to sidebar")
+
+	// --- Tab works from content zone too ---
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = result.(Model)
+	assert.Equal(t, FocusContent, m.focusZone)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "dev", m.activeTab, "Tab should work from content zone")
+
+	// --- Sidebar up/down still works after tab cycling ---
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = result.(Model)
+	assert.Equal(t, FocusSidebar, m.focusZone)
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	assert.Equal(t, SectionSettings, m.activeSection, "sidebar navigation should work")
+
+	// --- Verify view renders correctly ---
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 40, len(lines), "view line count must match terminal height")
+	// First line should have both sidebar and tab bar content.
+	assert.Contains(t, lines[0], "Base", "tab bar should be on first line")
 }
 
 func TestDeselectPicker_HeadersUnaffected(t *testing.T) {
@@ -844,4 +959,451 @@ func TestDeselectPicker_HeadersUnaffected(t *testing.T) {
 			assert.False(t, item.Selected) // headers don't have Selected = true
 		}
 	}
+}
+
+// --- Navigation tests ---
+
+func testModelWithProfiles(t *testing.T) Model {
+	t.Helper()
+	scan := fullScan()
+	m := testModel(scan)
+
+	m.createProfile("work")
+	m.createProfile("personal")
+	m.activeTab = "Base"
+	m.tabBar.SetActive(0)
+
+	// Simulate window size.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	return result.(Model)
+}
+
+func TestTabCyclesProfiles(t *testing.T) {
+	m := testModelWithProfiles(t)
+	assert.Equal(t, "Base", m.activeTab)
+
+	// Tab → work
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "work", m.activeTab)
+
+	// Tab → personal
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "personal", m.activeTab)
+
+	// Tab → wraps to Base
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "Base", m.activeTab)
+}
+
+func TestShiftTabCyclesProfilesBackward(t *testing.T) {
+	m := testModelWithProfiles(t)
+	assert.Equal(t, "Base", m.activeTab)
+
+	// Shift+Tab → wraps to personal
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.Equal(t, "personal", m.activeTab)
+
+	// Shift+Tab → work
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.Equal(t, "work", m.activeTab)
+
+	// Shift+Tab → Base
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.Equal(t, "Base", m.activeTab)
+}
+
+func TestLeftFromContentGoesToSidebar(t *testing.T) {
+	m := testModelWithProfiles(t)
+	m.focusZone = FocusContent
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = result.(Model)
+	assert.Equal(t, FocusSidebar, m.focusZone)
+}
+
+func TestEscFromContentGoesToSidebar(t *testing.T) {
+	m := testModelWithProfiles(t)
+	m.focusZone = FocusContent
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = result.(Model)
+	assert.Equal(t, FocusSidebar, m.focusZone)
+}
+
+func TestGlobalPlusOpensOverlay(t *testing.T) {
+	m := testModelWithProfiles(t)
+	m.focusZone = FocusSidebar
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'+'}})
+	m = result.(Model)
+	assert.True(t, m.overlay.Active())
+	assert.Equal(t, overlayProfileName, m.overlayCtx)
+}
+
+func TestGlobalCtrlDDeletesProfile(t *testing.T) {
+	m := testModelWithProfiles(t)
+	// Switch to "work" tab first.
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "work", m.activeTab)
+
+	// Ctrl+D should open delete confirmation.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = result.(Model)
+	assert.True(t, m.overlay.Active())
+	assert.Equal(t, overlayDeleteConfirm, m.overlayCtx)
+	assert.Equal(t, "work", m.pendingDeleteTab)
+}
+
+func TestGlobalCtrlDIgnoredOnBase(t *testing.T) {
+	m := testModelWithProfiles(t)
+	assert.Equal(t, "Base", m.activeTab)
+
+	// Ctrl+D on Base should do nothing.
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = result.(Model)
+	assert.False(t, m.overlay.Active())
+}
+
+func TestTabBarInRightPane(t *testing.T) {
+	m := testModelWithProfiles(t)
+	view := m.View()
+
+	lines := strings.Split(view, "\n")
+	require.True(t, len(lines) > 0)
+
+	// First line should contain sidebar content AND tab bar content.
+	// The tab bar should NOT span from column 0.
+	firstLine := lines[0]
+	assert.Contains(t, firstLine, "Base", "first line should contain Base tab")
+
+	// The sidebar portion of the first line should contain "Plugins" (first section).
+	assert.Contains(t, firstLine, "Plugins", "first line should also contain sidebar section")
+}
+
+// --- Help overlay tests ---
+
+func TestHelpOverlayOpensOnQuestionMark(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	// Press ? from sidebar.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = result.(Model)
+
+	assert.True(t, m.overlay.Active(), "help overlay should be active")
+	assert.Equal(t, overlayHelp, m.overlayCtx)
+	assert.Equal(t, OverlayHelp, m.overlay.overlayType)
+}
+
+func TestHelpOverlayOpensOnH_Sidebar(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	assert.Equal(t, FocusSidebar, m.focusZone)
+
+	// Press h from sidebar should open help.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = result.(Model)
+
+	assert.True(t, m.overlay.Active(), "h from sidebar should open help")
+	assert.Equal(t, overlayHelp, m.overlayCtx)
+}
+
+func TestHKeyInContentDoesNotOpenHelp(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	// Move to content zone.
+	m.focusZone = FocusContent
+
+	// Press h from content should NOT open help (it should go to sidebar via picker/left).
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = result.(Model)
+
+	assert.False(t, m.overlay.Active(), "h from content should not open help")
+}
+
+func TestHelpOverlayClosesOnEsc(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	// Open help.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = result.(Model)
+	require.True(t, m.overlay.Active())
+
+	// Esc closes help.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = result.(Model)
+
+	assert.False(t, m.overlay.Active(), "Esc should close help")
+	assert.Equal(t, overlayNone, m.overlayCtx)
+}
+
+func TestHelpOverlayScrolls(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	// Use a small height to force scrolling.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m = result.(Model)
+
+	// Open help.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = result.(Model)
+	require.True(t, m.overlay.Active())
+
+	// Initial scroll offset should be 0.
+	assert.Equal(t, 0, m.overlay.scrollOffset)
+
+	// Scroll down.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = result.(Model)
+	assert.Equal(t, 1, m.overlay.scrollOffset, "down should increment scrollOffset")
+
+	// Scroll back up.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = result.(Model)
+	assert.Equal(t, 0, m.overlay.scrollOffset, "up should decrement scrollOffset")
+
+	// Can't scroll above 0.
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = result.(Model)
+	assert.Equal(t, 0, m.overlay.scrollOffset, "should clamp at 0")
+}
+
+// --- Helper text tests ---
+
+func TestHelperTextPerSection(t *testing.T) {
+	for _, sec := range AllSections {
+		line1, line2 := helperText(sec, false)
+		assert.NotEmpty(t, line1, "section %s should have line1", sec)
+		assert.NotEmpty(t, line2, "section %s should have line2", sec)
+	}
+}
+
+func TestHelperTextProfileVsBase(t *testing.T) {
+	for _, sec := range AllSections {
+		baseLine1, _ := helperText(sec, false)
+		profLine1, _ := helperText(sec, true)
+		assert.NotEqual(t, baseLine1, profLine1,
+			"section %s: profile text should differ from base text", sec)
+	}
+}
+
+func TestViewLineCountWithHelper(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	// Set window size.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = result.(Model)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 40, len(lines), "view line count must equal terminal height")
+}
+
+func TestStatusBarContainsHelpShortcut(t *testing.T) {
+	sb := NewStatusBar()
+	sb.SetWidth(120)
+	sb.Update(SelectionSummary{Selected: 2, Total: 5, Section: SectionPlugins}, "Base")
+	view := sb.View()
+	assert.Contains(t, view, "help", "status bar should show ?: help")
+}
+
+// --- Responsive breakpoint tests ---
+
+func TestStatusBarTier_Full(t *testing.T) {
+	sb := NewStatusBar()
+	sb.SetWidth(120)
+	sb.Update(SelectionSummary{Selected: 2, Total: 5, Section: SectionPlugins}, "Base")
+	view := sb.View()
+	// Full tier (>= 110) includes "Ctrl+S" and all shortcuts.
+	assert.Contains(t, view, "Ctrl+S", "full tier should use Ctrl+S")
+	assert.Contains(t, view, "profiles", "full tier should show profiles shortcut")
+	assert.Contains(t, view, "search", "full tier should show search shortcut")
+}
+
+func TestStatusBarTier_Compact(t *testing.T) {
+	sb := NewStatusBar()
+	sb.SetWidth(85)
+	sb.Update(SelectionSummary{Selected: 2, Total: 5, Section: SectionPlugins}, "Base")
+	view := sb.View()
+	// Compact tier (>= 80, < 110) shows only essential shortcuts.
+	assert.Contains(t, view, "save", "compact tier should show save")
+	assert.Contains(t, view, "help", "compact tier should show help")
+	assert.Contains(t, view, "quit", "compact tier should show quit")
+	assert.NotContains(t, view, "Ctrl+S", "compact tier should NOT use Ctrl+S")
+	assert.NotContains(t, view, "profiles", "compact tier should NOT show profiles")
+	assert.NotContains(t, view, "search", "compact tier should NOT show search")
+}
+
+func TestStatusBarTier_Minimal(t *testing.T) {
+	sb := NewStatusBar()
+	sb.SetWidth(60)
+	sb.Update(SelectionSummary{Selected: 2, Total: 5, Section: SectionPlugins}, "Base")
+	view := sb.View()
+	// Minimal tier (< 80) shows only quit.
+	assert.Contains(t, view, "quit", "minimal tier should show quit")
+	assert.NotContains(t, view, "save", "minimal tier should NOT show save")
+	assert.NotContains(t, view, "profiles", "minimal tier should NOT show profiles")
+}
+
+func TestHelperLines_Full(t *testing.T) {
+	assert.Equal(t, 3, helperLines(30), "height 30 should give 3 helper lines")
+	assert.Equal(t, 3, helperLines(28), "height 28 should give 3 helper lines")
+}
+
+func TestHelperLines_Compact(t *testing.T) {
+	assert.Equal(t, 2, helperLines(27), "height 27 should give 2 helper lines")
+	assert.Equal(t, 2, helperLines(24), "height 24 should give 2 helper lines")
+}
+
+func TestHelperLines_Hidden(t *testing.T) {
+	assert.Equal(t, 0, helperLines(23), "height 23 should give 0 helper lines")
+	assert.Equal(t, 0, helperLines(15), "height 15 should give 0 helper lines")
+}
+
+func TestViewLineCount_SmallTerminal(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	// 80x24: compact helper (2 lines), abbreviated status bar.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = result.(Model)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 24, len(lines), "view line count must equal terminal height at 80x24")
+}
+
+func TestViewLineCount_TinyTerminal(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	// 60x20: no helper, minimal status bar.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	m = result.(Model)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 20, len(lines), "view line count must equal terminal height at 60x20")
+}
+
+func TestViewLineCount_LargeTerminal(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	// 120x40: full helper, full status bar.
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = result.(Model)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 40, len(lines), "view line count must equal terminal height at 120x40")
+}
+
+func TestRenderHelper_Compact(t *testing.T) {
+	result := renderHelper(SectionPlugins, false, 60, 2)
+	// Should contain description but NOT shortcuts line.
+	assert.Contains(t, result, "Choose which Claude plugins to sync")
+	assert.NotContains(t, result, "Space: toggle")
+	// Should contain separator.
+	assert.Contains(t, result, "─")
+}
+
+func TestRenderHelper_Hidden(t *testing.T) {
+	result := renderHelper(SectionPlugins, false, 60, 0)
+	assert.Equal(t, "", result, "0 lines should produce empty string")
+}
+
+// TestViewLineCount_ManyPermissions verifies that sections with many items
+// (which fill the picker viewport and trigger scroll indicators) still produce
+// the correct total line count. This catches the trailing-newline overflow bug
+// where ContentPaneStyle.Render added an extra blank line.
+func TestViewLineCount_ManyPermissions(t *testing.T) {
+	scan := fullScan()
+	// Add many permission rules to fill the viewport.
+	scan.Permissions.Allow = make([]string, 30)
+	for i := range scan.Permissions.Allow {
+		scan.Permissions.Allow[i] = fmt.Sprintf("Bash(cmd%d *)", i)
+	}
+	m := testModel(scan)
+
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = result.(Model)
+
+	// Switch to permissions section.
+	m.activeSection = SectionPermissions
+	m.syncSidebarCounts()
+	m.syncStatusBar()
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 30, len(lines), "view line count must equal terminal height even with many permissions")
+}
+
+// TestViewLineCount_ClaudeMD verifies the CLAUDE.md preview section doesn't
+// overflow due to the divider trailing newline.
+func TestViewLineCount_ClaudeMD(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = result.(Model)
+
+	// Switch to CLAUDE.md section.
+	m.activeSection = SectionClaudeMD
+	m.syncSidebarCounts()
+	m.syncStatusBar()
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 30, len(lines), "view line count must equal terminal height on CLAUDE.md section")
+}
+
+// TestViewLineCount_ClaudeMD_Narrow verifies the CLAUDE.md section on a narrow
+// terminal. The CLAUDE.md helper has the longest shortcuts line ("Space: toggle
+// · a: all · n: none · →: preview content") which previously wrapped when
+// Width(width) was applied, adding an extra line and clipping the tab bar.
+func TestViewLineCount_ClaudeMD_Narrow(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+
+	// 70 cols: contentWidth = 70 - 22 - 2 = 46, which is less than
+	// the CLAUDE.md shortcuts line length (~54 chars).
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 70, Height: 30})
+	m = result.(Model)
+
+	m.activeSection = SectionClaudeMD
+	m.syncSidebarCounts()
+	m.syncStatusBar()
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	assert.Equal(t, 30, len(lines), "view line count must equal terminal height on narrow CLAUDE.md")
+}
+
+// TestRenderHelper_NoWrap verifies that helper text doesn't wrap to extra lines
+// even when the text is longer than the available width.
+func TestRenderHelper_NoWrap(t *testing.T) {
+	// CLAUDE.md has the longest line2. Render at a narrow width.
+	result := renderHelper(SectionClaudeMD, false, 30, 3)
+	lineCount := strings.Count(result, "\n")
+	assert.Equal(t, 3, lineCount, "helper must produce exactly 3 newlines (3 lines) even at narrow width")
 }

@@ -14,25 +14,29 @@ import (
 type OverlayType int
 
 const (
-	OverlayConfirm   OverlayType = iota // Yes/No confirmation
-	OverlayTextInput                     // Single-line text input
-	OverlaySummary                       // Multi-line summary with confirm/cancel
-	OverlayChoice                        // List of choices with cursor
-	OverlayProfileList                   // Batch profile name inputs with Done button
+	OverlayConfirm     OverlayType = iota // Yes/No confirmation
+	OverlayTextInput                      // Single-line text input
+	OverlaySummary                        // Multi-line summary with confirm/cancel
+	OverlayChoice                         // List of choices with cursor
+	OverlayProfileList                    // Batch profile name inputs with Done button
+	OverlayHelp                           // Scrollable help modal
 )
 
 // Overlay renders a centered modal box on top of existing content.
 type Overlay struct {
-	overlayType OverlayType
-	title       string
-	message     string   // body text (for Confirm, Summary)
-	choices     []string // choice list (for Choice)
-	cursor      int      // selected choice index (Choice), or button index (Confirm/Summary: 0=Cancel, 1=OK)
-	input       textinput.Model
-	inputs      []textinput.Model // profile name inputs (for ProfileList)
-	activeLine  int               // focused input index; len(inputs) = Done button
-	width       int               // overlay box width
-	active      bool
+	overlayType  OverlayType
+	title        string
+	message      string   // body text (for Confirm, Summary)
+	choices      []string // choice list (for Choice)
+	cursor       int      // selected choice index (Choice), or button index (Confirm/Summary: 0=Cancel, 1=OK)
+	input        textinput.Model
+	inputs       []textinput.Model // profile name inputs (for ProfileList)
+	activeLine   int               // focused input index; len(inputs) = Done button
+	width        int               // overlay box width
+	active       bool
+	scrollOffset int      // scroll position (for Help)
+	scrollLines  []string // pre-rendered content lines (for Help)
+	height       int      // available overlay height (for Help)
 }
 
 // NewConfirmOverlay creates a confirmation dialog with Cancel/OK buttons.
@@ -87,6 +91,7 @@ func NewChoiceOverlay(title string, choices []string) Overlay {
 func NewProfileListOverlay() Overlay {
 	ti := textinput.New()
 	ti.Placeholder = "e.g. work"
+	ti.Prompt = ""
 	ti.Focus()
 	ti.CharLimit = 64
 	ti.Width = 30
@@ -122,6 +127,8 @@ func (o Overlay) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		return o.updateChoice(msg)
 	case OverlayProfileList:
 		return o.updateProfileList(msg)
+	case OverlayHelp:
+		return o.updateHelp(msg)
 	}
 	return o, nil
 }
@@ -284,6 +291,7 @@ func (o Overlay) updateProfileList(msg tea.Msg) (Overlay, tea.Cmd) {
 				o.inputs[o.activeLine].Blur()
 				newInput := textinput.New()
 				newInput.Placeholder = "e.g. personal"
+				newInput.Prompt = ""
 				newInput.CharLimit = 64
 				newInput.Width = o.inputs[o.activeLine].Width
 				newInput.Focus()
@@ -337,6 +345,8 @@ func (o Overlay) View() string {
 		content = o.viewChoice()
 	case OverlayProfileList:
 		content = o.viewProfileList()
+	case OverlayHelp:
+		content = o.viewHelp()
 	}
 
 	return OverlayStyle.Render(content)
@@ -398,12 +408,16 @@ func (o Overlay) viewProfileList() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render(o.message))
 	b.WriteString("\n\n")
 
+	arrow := lipgloss.NewStyle().Foreground(colorMauve).Render("> ")
+	noArrow := "  "
+	bullet := lipgloss.NewStyle().Foreground(colorOverlay0).Render("· ")
 	for i, inp := range o.inputs {
 		if i == o.activeLine {
-			b.WriteString("> ")
+			b.WriteString(arrow)
 		} else {
-			b.WriteString("  ")
+			b.WriteString(noArrow)
 		}
+		b.WriteString(bullet)
 		b.WriteString(inp.View())
 		b.WriteString("\n")
 	}
@@ -423,6 +437,135 @@ func (o Overlay) viewProfileList() string {
 	b.WriteString("        " + doneBtn)
 
 	return b.String()
+}
+
+// NewHelpOverlay creates a scrollable help modal.
+func NewHelpOverlay() Overlay {
+	o := Overlay{
+		overlayType: OverlayHelp,
+		title:       "Help",
+		active:      true,
+	}
+	o.scrollLines = buildHelpLines()
+	return o
+}
+
+// SetHeight sets the overlay visible height hint (used for scrollable overlays).
+func (o *Overlay) SetHeight(h int) {
+	o.height = h
+}
+
+// buildHelpLines returns the pre-rendered help content as individual lines.
+func buildHelpLines() []string {
+	lines := []string{
+		"Keyboard Shortcuts",
+		"",
+		"Navigation",
+		"  ↑/↓ j/k      Move cursor",
+		"  ←/→ h/l      Switch panes",
+		"  Tab/S-Tab     Cycle profiles",
+		"  Esc           Back / Quit",
+		"",
+		"Selection",
+		"  Space/Enter   Toggle item",
+		"  a             Select all",
+		"  n             Select none",
+		"",
+		"Profiles",
+		"  +             Add profile",
+		"  Ctrl+D        Delete profile",
+		"",
+		"Global",
+		"  Ctrl+S        Save & initialize",
+		"  Ctrl+R        Reset to defaults",
+		"  /             Search",
+		"  ?             This help",
+		"",
+		"───────────────────────────────────",
+		"",
+		"How It Works",
+		"",
+		"1. Use the sidebar to pick a config section",
+		"2. Press → or Enter to customize items",
+		"3. Space toggles items on/off",
+		"4. Tab/Shift+Tab switches profiles",
+		"5. Each profile inherits from Base",
+		"6. Ctrl+S saves your configuration",
+	}
+	return lines
+}
+
+func (o Overlay) updateHelp(msg tea.Msg) (Overlay, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "?", "h", "q":
+			o.active = false
+			return o, func() tea.Msg {
+				return OverlayCloseMsg{Confirmed: false}
+			}
+		case "up", "k":
+			if o.scrollOffset > 0 {
+				o.scrollOffset--
+			}
+		case "down", "j":
+			maxOffset := len(o.scrollLines) - o.visibleHeight()
+			if maxOffset < 0 {
+				maxOffset = 0
+			}
+			if o.scrollOffset < maxOffset {
+				o.scrollOffset++
+			}
+		}
+	}
+	return o, nil
+}
+
+func (o Overlay) viewHelp() string {
+	var b strings.Builder
+	b.WriteString(OverlayTitleStyle.Render(o.title))
+	b.WriteString("\n\n")
+
+	visible := o.visibleHeight()
+	total := len(o.scrollLines)
+
+	// Show "↑ more" indicator when scrolled down.
+	if o.scrollOffset > 0 {
+		b.WriteString(OverlayScrollHintStyle.Render("↑ more"))
+		b.WriteString("\n")
+	}
+
+	// Determine visible slice.
+	end := o.scrollOffset + visible
+	if end > total {
+		end = total
+	}
+	for i := o.scrollOffset; i < end; i++ {
+		b.WriteString(o.scrollLines[i])
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	// Show "↓ more" indicator when more content below.
+	if end < total {
+		b.WriteString("\n")
+		b.WriteString(OverlayScrollHintStyle.Render("↓ more"))
+	}
+
+	return b.String()
+}
+
+// visibleHeight returns how many content lines can be shown in the overlay.
+// It accounts for the title (1 line), blank line after title (1 line),
+// and the overlay padding (2 lines top/bottom from OverlayStyle).
+func (o Overlay) visibleHeight() int {
+	// height is the total overlay area; subtract title + gap + padding.
+	h := o.height - 6 // 2 padding top/bottom + 1 title + 1 gap
+	if h < 5 {
+		h = 5
+	}
+	return h
 }
 
 // renderButtons draws two side-by-side buttons with the cursor on one.

@@ -144,6 +144,50 @@ func TestTabBarDeleteKeyOnBase(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
+func TestTabBarCycleNext(t *testing.T) {
+	tb := NewTabBar([]string{"work", "personal"})
+	assert.Equal(t, "Base", tb.ActiveTab())
+
+	tb.CycleNext()
+	assert.Equal(t, "work", tb.ActiveTab())
+
+	tb.CycleNext()
+	assert.Equal(t, "personal", tb.ActiveTab())
+
+	// Wraps around to Base.
+	tb.CycleNext()
+	assert.Equal(t, "Base", tb.ActiveTab())
+}
+
+func TestTabBarCyclePrev(t *testing.T) {
+	tb := NewTabBar([]string{"work", "personal"})
+	assert.Equal(t, "Base", tb.ActiveTab())
+
+	// Wraps around to last tab.
+	tb.CyclePrev()
+	assert.Equal(t, "personal", tb.ActiveTab())
+
+	tb.CyclePrev()
+	assert.Equal(t, "work", tb.ActiveTab())
+
+	tb.CyclePrev()
+	assert.Equal(t, "Base", tb.ActiveTab())
+}
+
+func TestTabBarCycleNext_SingleTab(t *testing.T) {
+	tb := NewTabBar(nil) // only Base
+	assert.Equal(t, "Base", tb.ActiveTab())
+
+	tb.CycleNext()
+	assert.Equal(t, "Base", tb.ActiveTab()) // no change with single tab
+}
+
+func TestTabBarCyclePrev_SingleTab(t *testing.T) {
+	tb := NewTabBar(nil) // only Base
+	tb.CyclePrev()
+	assert.Equal(t, "Base", tb.ActiveTab()) // no change with single tab
+}
+
 func TestTabBarActiveTabEmpty(t *testing.T) {
 	tb := TabBar{tabs: nil, active: 0}
 	assert.Equal(t, "", tb.ActiveTab())

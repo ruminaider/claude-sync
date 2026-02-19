@@ -6,7 +6,7 @@ import (
 )
 
 // SidebarWidth is the fixed width of the sidebar navigation pane.
-const SidebarWidth = 18
+const SidebarWidth = 22
 
 // Catppuccin Mocha palette.
 var flavor = catppuccin.Mocha
@@ -54,6 +54,7 @@ var (
 	// ActiveSidebarStyle is used for the currently selected sidebar item.
 	ActiveSidebarStyle = lipgloss.NewStyle().
 				Foreground(colorBlue).
+				Background(colorSurface1).
 				Bold(true).
 				PaddingLeft(1)
 
@@ -140,6 +141,21 @@ var (
 	OverlayChoiceCursorStyle = lipgloss.NewStyle().
 					Foreground(colorBlue).
 					Bold(true)
+
+	// OverlayScrollHintStyle is used for scroll indicators in overlays.
+	OverlayScrollHintStyle = lipgloss.NewStyle().
+				Foreground(colorOverlay0)
+)
+
+// Helper text styles (contextual guide above content pane).
+var (
+	// HelperTextStyle is used for the dim helper text lines above content.
+	HelperTextStyle = lipgloss.NewStyle().
+			Foreground(colorOverlay0)
+
+	// HelperSeparatorStyle is used for the thin line between helper and content.
+	HelperSeparatorStyle = lipgloss.NewStyle().
+				Foreground(colorSurface1)
 )
 
 // Tab bar container style.

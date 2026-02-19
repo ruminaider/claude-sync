@@ -32,6 +32,7 @@ type Picker struct {
 	width     int
 	offset    int  // scroll offset for long lists
 	selectAll bool // track whether all selectable items are selected
+	focused   bool // true when this picker has keyboard focus
 }
 
 // NewPicker creates a Picker with the given items. The cursor is placed on the
@@ -305,6 +306,11 @@ func (p *Picker) SetWidth(w int) {
 	p.width = w
 }
 
+// SetFocused sets whether this picker currently has keyboard focus.
+func (p *Picker) SetFocused(f bool) {
+	p.focused = f
+}
+
 // SetItems replaces all items (for tab/section switch) and resets the cursor.
 func (p *Picker) SetItems(items []PickerItem) {
 	p.items = items
@@ -336,6 +342,10 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 			p.doSelectAll()
 		case "n":
 			p.doSelectNone()
+		case "left", "h":
+			return p, func() tea.Msg {
+				return FocusChangeMsg{Zone: FocusSidebar}
+			}
 		case "esc":
 			return p, func() tea.Msg {
 				return FocusChangeMsg{Zone: FocusSidebar}
@@ -351,63 +361,97 @@ func (p Picker) View() string {
 		return ContentPaneStyle.Render("(no items)")
 	}
 
+	// Reserve lines for scroll indicators so total output stays within p.height.
+	visibleItems := p.height
+	hasAbove := p.offset > 0
+	hasBelow := p.offset+p.height < len(p.items)
+	if hasAbove {
+		visibleItems--
+	}
+	if hasBelow {
+		visibleItems--
+	}
+	if visibleItems < 1 {
+		visibleItems = 1
+	}
+
 	var b strings.Builder
-	end := p.offset + p.height
+
+	if hasAbove {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↑ more") + "\n")
+	}
+
+	end := p.offset + visibleItems
 	if end > len(p.items) {
 		end = len(p.items)
 	}
+
+	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 
 	for i := p.offset; i < end; i++ {
 		it := p.items[i]
 
 		if it.IsHeader {
 			line := fmt.Sprintf("── %s ──", it.Display)
-			b.WriteString(HeaderStyle.Render(line))
+			if p.focused {
+				b.WriteString(HeaderStyle.Render(line))
+			} else {
+				b.WriteString(dimStyle.Render(line))
+			}
 			b.WriteString("\n")
 			continue
 		}
 
-		// Cursor indicator.
+		// Cursor indicator: only show when focused.
 		cursor := "  "
-		if i == p.cursor {
+		if p.focused && i == p.cursor {
 			cursor = "> "
 		}
 
 		// Checkbox.
 		var checkbox string
-		if it.Selected {
-			checkbox = SelectedStyle.Render("[x]")
+		if p.focused {
+			if it.Selected {
+				checkbox = SelectedStyle.Render("[x]")
+			} else {
+				checkbox = UnselectedStyle.Render("[ ]")
+			}
 		} else {
-			checkbox = UnselectedStyle.Render("[ ]")
+			if it.Selected {
+				checkbox = dimStyle.Render("[x]")
+			} else {
+				checkbox = dimStyle.Render("[ ]")
+			}
 		}
 
 		// Display text.
 		var display string
-		if i == p.cursor {
+		if p.focused && i == p.cursor {
 			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(it.Display)
-		} else {
+		} else if p.focused {
 			display = it.Display
+		} else {
+			display = dimStyle.Render(it.Display)
 		}
 
 		// Tag (e.g. [base]).
 		tag := ""
 		if it.Tag != "" {
-			tag = "  " + BaseTagStyle.Render(it.Tag)
+			if p.focused {
+				tag = "  " + BaseTagStyle.Render(it.Tag)
+			} else {
+				tag = "  " + dimStyle.Render(it.Tag)
+			}
 		}
 
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
 	}
 
-	// Show scroll indicators if content overflows.
-	if p.offset > 0 {
-		// There is content above.
-		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↑ more") + "\n")
-	}
 	if end < len(p.items) {
 		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↓ more") + "\n")
 	}
 
-	return ContentPaneStyle.Render(b.String())
+	return ContentPaneStyle.Render(strings.TrimRight(b.String(), "\n"))
 }
 
 // --- Internal helpers ---
@@ -472,16 +516,25 @@ func (p *Picker) clampScroll() {
 	if p.height <= 0 {
 		return
 	}
+	// When items overflow, scroll indicators take up to 2 lines.
+	// Use reduced height so the cursor stays within visible items.
+	effectiveHeight := p.height
+	if len(p.items) > p.height {
+		effectiveHeight -= 2
+	}
+	if effectiveHeight < 1 {
+		effectiveHeight = 1
+	}
 	// Cursor above viewport: scroll up.
 	if p.cursor < p.offset {
 		p.offset = p.cursor
 	}
 	// Cursor below viewport: scroll down.
-	if p.cursor >= p.offset+p.height {
-		p.offset = p.cursor - p.height + 1
+	if p.cursor >= p.offset+effectiveHeight {
+		p.offset = p.cursor - effectiveHeight + 1
 	}
 	// Don't allow offset past the end.
-	maxOffset := len(p.items) - p.height
+	maxOffset := len(p.items) - effectiveHeight
 	if maxOffset < 0 {
 		maxOffset = 0
 	}

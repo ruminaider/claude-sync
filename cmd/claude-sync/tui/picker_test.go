@@ -424,6 +424,36 @@ func TestPickerSelectNone(t *testing.T) {
 	assert.Equal(t, 0, p.SelectedCount())
 }
 
+func TestPickerLeftKeyGoesToSidebar(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+
+	var cmd tea.Cmd
+	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	focusMsg, ok := msg.(FocusChangeMsg)
+	assert.True(t, ok)
+	assert.Equal(t, FocusSidebar, focusMsg.Zone)
+}
+
+func TestPickerHKeyGoesToSidebar(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+
+	var cmd tea.Cmd
+	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	focusMsg, ok := msg.(FocusChangeMsg)
+	assert.True(t, ok)
+	assert.Equal(t, FocusSidebar, focusMsg.Zone)
+}
+
 func TestPickerSetItems(t *testing.T) {
 	p := NewPicker([]PickerItem{
 		{Key: "a", Display: "a", Selected: true},
