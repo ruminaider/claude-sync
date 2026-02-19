@@ -470,3 +470,117 @@ func TestPickerSetItems(t *testing.T) {
 	assert.Equal(t, 2, p.TotalCount())
 	assert.Equal(t, 1, p.cursor) // should skip header
 }
+
+// --- Search action tests ---
+
+func TestPickerSearchAction_Renders(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.focused = true
+	p.SetHeight(10)
+
+	view := p.View()
+	assert.Contains(t, view, "[+ Search projects]", "search action should be rendered")
+}
+
+func TestPickerSearchAction_CursorCanReach(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.SetHeight(10)
+
+	// Cursor starts on "a" (index 0)
+	assert.Equal(t, 0, p.cursor)
+
+	// Move down to search action row (index 1 = len(items))
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 1, p.cursor, "cursor should reach the search action row")
+
+	// Move down again: should stay at search action row
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 1, p.cursor, "cursor should stay at search action row")
+
+	// Move back up
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	assert.Equal(t, 0, p.cursor, "cursor should go back to item a")
+}
+
+func TestPickerSearchAction_EnterEmitsSearchRequest(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.SetHeight(10)
+
+	// Move to search action row
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 1, p.cursor)
+
+	// Press Enter
+	var cmd tea.Cmd
+	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, ok := msg.(SearchRequestMsg)
+	assert.True(t, ok, "Enter on search action should emit SearchRequestMsg")
+}
+
+func TestPickerSearchAction_SpaceIsNoOp(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.SetHeight(10)
+
+	// Move to search action row
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 1, p.cursor)
+
+	// Press Space — should not toggle anything or crash
+	p, cmd := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	assert.Nil(t, cmd, "Space on search action should produce no command")
+	assert.True(t, p.items[0].Selected, "item a should still be selected")
+}
+
+func TestPickerAddItems(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	assert.Equal(t, 1, p.TotalCount())
+	assert.Equal(t, 1, p.SelectedCount())
+
+	newItems := []PickerItem{
+		{Key: "b", Display: "b", Selected: true},
+		{Key: "c", Display: "c", Selected: true},
+	}
+	p.AddItems(newItems)
+
+	assert.Equal(t, 3, p.TotalCount())
+	assert.Equal(t, 3, p.SelectedCount())
+	assert.Equal(t, []string{"a", "b", "c"}, p.SelectedKeys())
+}
+
+func TestPickerSearchAction_WithHeaders(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Global", IsHeader: true},
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.SetHeight(10)
+
+	// Cursor starts on "a" (index 1, skipping header)
+	assert.Equal(t, 1, p.cursor)
+
+	// Move down: should reach search action row (index 2 = len(items))
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	assert.Equal(t, 2, p.cursor, "cursor should reach search action row past items")
+}

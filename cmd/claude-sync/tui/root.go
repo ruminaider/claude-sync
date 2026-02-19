@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -76,6 +77,10 @@ type Model struct {
 	quitting      bool
 	skipFlags     SkipFlags
 
+	// Discovered MCP servers from project-level .mcp.json files.
+	discoveredMCP map[string]json.RawMessage // server name → config
+	mcpSources    map[string]string          // server name → shortened source path
+
 	// Result -- set on save, read by cmd_init.go after TUI exits.
 	Result *commands.InitOptions
 }
@@ -94,13 +99,17 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		activeSection:   SectionPlugins,
 		focusZone:       FocusSidebar,
 		skipFlags:       skip,
+		discoveredMCP:   make(map[string]json.RawMessage),
+		mcpSources:      make(map[string]string),
 	}
 
 	// Build pickers for each section from scan data.
 	m.pickers[SectionPlugins] = NewPicker(PluginPickerItems(scan))
 	m.pickers[SectionSettings] = NewPicker(SettingsPickerItems(scan.Settings))
 	m.pickers[SectionPermissions] = NewPicker(PermissionPickerItems(scan.Permissions))
-	m.pickers[SectionMCP] = NewPicker(MCPPickerItems(scan.MCP))
+	mcpPicker := NewPicker(MCPPickerItems(scan.MCP))
+	mcpPicker.SetSearchAction(true)
+	m.pickers[SectionMCP] = mcpPicker
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(scan.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(scan.Keybindings))
 
@@ -140,6 +149,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 
 	// Initialize sidebar and tab bar.
 	m.sidebar = NewSidebar()
+	m.sidebar.SetAlwaysAvailable(SectionMCP)
 	m.syncSidebarCounts()
 	m.tabBar = NewTabBar(nil)
 
@@ -175,6 +185,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SearchDoneMsg:
 		return m.handleSearchDone(msg), nil
+
+	case MCPSearchDoneMsg:
+		return m.handleMCPSearchDone(msg), nil
 	}
 
 	// When overlay is active, route ALL messages to the overlay.
@@ -468,6 +481,9 @@ func (m Model) updatePicker(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) {
 		*cmds = append(*cmds, cmd)
 		if focusMsg := extractFocusChange(cmd); focusMsg != nil {
 			m.focusZone = focusMsg.Zone
+		}
+		if extractSearchRequest(cmd) && m.activeSection == SectionMCP {
+			return m, SearchMCPConfigs()
 		}
 	}
 
@@ -781,7 +797,11 @@ func (m *Model) createProfile(name string) {
 		} else {
 			// Copy base picker items.
 			items := copyPickerItems(basePicker)
-			pm[sec] = NewPicker(items)
+			p := NewPicker(items)
+			if basePicker.hasSearchAction {
+				p.SetSearchAction(true)
+			}
+			pm[sec] = p
 		}
 	}
 	m.profilePickers[name] = pm
@@ -848,9 +868,15 @@ func (m *Model) resetToDefaults() {
 	m.pickers[SectionPlugins] = NewPicker(PluginPickerItems(m.scanResult))
 	m.pickers[SectionSettings] = NewPicker(SettingsPickerItems(m.scanResult.Settings))
 	m.pickers[SectionPermissions] = NewPicker(PermissionPickerItems(m.scanResult.Permissions))
-	m.pickers[SectionMCP] = NewPicker(MCPPickerItems(m.scanResult.MCP))
+	mcpPicker := NewPicker(MCPPickerItems(m.scanResult.MCP))
+	mcpPicker.SetSearchAction(true)
+	m.pickers[SectionMCP] = mcpPicker
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(m.scanResult.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(m.scanResult.Keybindings))
+
+	// Clear discovered MCP servers on reset.
+	m.discoveredMCP = make(map[string]json.RawMessage)
+	m.mcpSources = make(map[string]string)
 
 	previewSections := ClaudeMDPreviewSections(m.scanResult.ClaudeMDSections, "~/.claude/CLAUDE.md")
 	m.preview = NewPreview(previewSections)
@@ -975,12 +1001,14 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 		}
 	}
 
-	// MCP: map values from scanResult. Empty map = none.
+	// MCP: map values from scanResult and discoveredMCP. Empty map = none.
 	mcpKeys := m.pickers[SectionMCP].SelectedKeys()
 	if len(mcpKeys) > 0 {
 		mcp := make(map[string]json.RawMessage)
 		for _, k := range mcpKeys {
 			if raw, ok := m.scanResult.MCP[k]; ok {
+				mcp[k] = raw
+			} else if raw, ok := m.discoveredMCP[k]; ok {
 				mcp[k] = raw
 			}
 		}
@@ -1118,6 +1146,8 @@ func (m Model) buildProfiles() map[string]profiles.Profile {
 			if !baseMCPSet[k] {
 				if raw, ok := m.scanResult.MCP[k]; ok {
 					mcpAdd[k] = raw
+				} else if raw, ok := m.discoveredMCP[k]; ok {
+					mcpAdd[k] = raw
 				}
 			}
 		}
@@ -1201,6 +1231,77 @@ func (m Model) handleSearchDone(msg SearchDoneMsg) Model {
 	m.syncSidebarCounts()
 	m.syncStatusBar()
 	return m
+}
+
+func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
+	if len(msg.Servers) == 0 {
+		return m
+	}
+
+	// Store discovered servers and sources.
+	for name, cfg := range msg.Servers {
+		// Skip servers already in the global scan or already discovered.
+		if _, exists := m.scanResult.MCP[name]; exists {
+			continue
+		}
+		if _, exists := m.discoveredMCP[name]; exists {
+			continue
+		}
+		m.discoveredMCP[name] = cfg
+		m.mcpSources[name] = msg.Sources[name]
+	}
+
+	// Build new picker items for the discovered servers.
+	var newItems []PickerItem
+	for name := range msg.Servers {
+		if _, exists := m.scanResult.MCP[name]; exists {
+			continue
+		}
+		// Only add items not already in the picker.
+		tag := ""
+		if src, ok := m.mcpSources[name]; ok {
+			tag = "[" + src + "]"
+		}
+		newItems = append(newItems, PickerItem{
+			Key:      name,
+			Display:  name,
+			Selected: true,
+			Tag:      tag,
+		})
+	}
+
+	if len(newItems) == 0 {
+		return m
+	}
+
+	// Sort for deterministic order.
+	sortPickerItems(newItems)
+
+	// Add to base MCP picker.
+	if p, ok := m.pickers[SectionMCP]; ok {
+		p.AddItems(newItems)
+		m.pickers[SectionMCP] = p
+	}
+
+	// Add to profile MCP pickers.
+	for name, pm := range m.profilePickers {
+		if p, ok := pm[SectionMCP]; ok {
+			p.AddItems(newItems)
+			pm[SectionMCP] = p
+		}
+		m.profilePickers[name] = pm
+	}
+
+	m.syncSidebarCounts()
+	m.syncStatusBar()
+	return m
+}
+
+// sortPickerItems sorts items by Key for deterministic order.
+func sortPickerItems(items []PickerItem) {
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Key < items[j].Key
+	})
 }
 
 // --- Utility functions ---
