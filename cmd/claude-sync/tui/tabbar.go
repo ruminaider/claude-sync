@@ -14,6 +14,7 @@ type TabBar struct {
 	tabs   []string // tab names; tabs[0] is always "Base"
 	active int      // index of the selected tab
 	width  int      // available horizontal space
+	onPlus bool     // true when the [+] button is focused
 }
 
 // NewTabBar creates a tab bar with the Base tab and optional profile tabs.
@@ -41,29 +42,50 @@ func (t TabBar) ActiveTab() string {
 func (t *TabBar) AddTab(name string) {
 	t.tabs = append(t.tabs, name)
 	t.active = len(t.tabs) - 1
+	t.onPlus = false
 }
 
-// SetActive sets the active tab by index.
+// SetActive sets the active tab by index and clears the [+] focus.
 func (t *TabBar) SetActive(i int) {
 	if i >= 0 && i < len(t.tabs) {
 		t.active = i
+		t.onPlus = false
 	}
 }
 
-// CycleNext advances to the next tab, wrapping around.
+// OnPlus returns true when the [+] button is focused.
+func (t TabBar) OnPlus() bool {
+	return t.onPlus
+}
+
+// CycleNext advances to the next tab, including the [+] button, wrapping around.
+// Order: Base → work → … → [+] → Base → …
 func (t *TabBar) CycleNext() {
-	if len(t.tabs) <= 1 {
+	if t.onPlus {
+		t.onPlus = false
+		t.active = 0
 		return
 	}
-	t.active = (t.active + 1) % len(t.tabs)
+	if t.active == len(t.tabs)-1 {
+		t.onPlus = true
+		return
+	}
+	t.active++
 }
 
-// CyclePrev moves to the previous tab, wrapping around.
+// CyclePrev moves to the previous tab, including the [+] button, wrapping around.
+// Order: Base → [+] → … → work → Base → …
 func (t *TabBar) CyclePrev() {
-	if len(t.tabs) <= 1 {
+	if t.onPlus {
+		t.onPlus = false
 		return
 	}
-	t.active = (t.active - 1 + len(t.tabs)) % len(t.tabs)
+	if t.active == 0 {
+		t.onPlus = true
+		t.active = len(t.tabs) - 1
+		return
+	}
+	t.active--
 }
 
 // RemoveTab removes a profile tab by name. The Base tab cannot be removed.
@@ -109,8 +131,11 @@ func (t TabBar) Update(msg tea.Msg) (TabBar, tea.Cmd) {
 				}
 			}
 		case "enter":
-			// Enter on current position: if cursor would be on [+], create new profile.
-			// Otherwise it is a no-op (tab already active).
+			if t.onPlus {
+				return t, func() tea.Msg {
+					return NewProfileRequestMsg{}
+				}
+			}
 		case "+":
 			return t, func() tea.Msg {
 				return NewProfileRequestMsg{}
@@ -133,15 +158,19 @@ func (t TabBar) View() string {
 	var parts []string
 	for i, name := range t.tabs {
 		var style lipgloss.Style
-		if i == t.active {
+		if !t.onPlus && i == t.active {
 			style = ActiveTabStyle
 		} else {
 			style = InactiveTabStyle
 		}
 		parts = append(parts, style.Render(name))
 	}
-	// The [+] button is always last.
-	parts = append(parts, PlusTabStyle.Render("+"))
+	// The [+] button is always last, highlighted when focused.
+	if t.onPlus {
+		parts = append(parts, ActiveTabStyle.Render("+"))
+	} else {
+		parts = append(parts, PlusTabStyle.Render("+"))
+	}
 
 	row := strings.Join(parts, " ")
 

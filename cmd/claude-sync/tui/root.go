@@ -208,33 +208,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "tab":
-			// Cycle to next profile tab.
-			if m.useProfiles {
-				m.tabBar.CycleNext()
+			// Cycle to next tab (includes [+] stop).
+			m.tabBar.CycleNext()
+			if !m.tabBar.OnPlus() {
 				m.activeTab = m.tabBar.ActiveTab()
 				m.syncSidebarCounts()
-				m.syncStatusBar()
-				return m, nil
 			}
+			m.syncStatusBar()
+			return m, nil
 		case "shift+tab":
-			// Cycle to previous profile tab.
-			if m.useProfiles {
-				m.tabBar.CyclePrev()
+			// Cycle to previous tab (includes [+] stop).
+			m.tabBar.CyclePrev()
+			if !m.tabBar.OnPlus() {
 				m.activeTab = m.tabBar.ActiveTab()
 				m.syncSidebarCounts()
-				m.syncStatusBar()
-				return m, nil
 			}
-		case "+":
-			// Global: add new profile.
-			if m.useProfiles {
+			m.syncStatusBar()
+			return m, nil
+		case "enter":
+			// When [+] is focused, open new profile overlay.
+			if m.tabBar.OnPlus() {
 				m.overlay = NewTextInputOverlay("New profile name", "e.g. work, personal")
 				m.overlayCtx = overlayProfileName
 				return m, nil
 			}
+		case "+":
+			// Global: add new profile.
+			m.overlay = NewTextInputOverlay("New profile name", "e.g. work, personal")
+			m.overlayCtx = overlayProfileName
+			return m, nil
 		case "ctrl+d":
 			// Global: delete current profile (not Base).
-			if m.useProfiles && m.activeTab != "Base" {
+			if m.activeTab != "Base" {
 				m.pendingDeleteTab = m.activeTab
 				m.overlay = NewConfirmOverlay("Delete profile",
 					fmt.Sprintf("Delete profile %q?", m.activeTab))
@@ -308,11 +313,8 @@ func (m Model) View() string {
 	// Right pane: optional tab bar + helper text + content.
 	hLines := helperLines(m.height)
 	contentHeight := mainHeight - hLines
-	tabBarView := ""
-	if m.useProfiles {
-		tabBarView = m.tabBar.View() + "\n"
-		contentHeight = mainHeight - 1 - hLines // tab bar takes 1 line
-	}
+	tabBarView := m.tabBar.View() + "\n"
+	contentHeight = mainHeight - 1 - hLines // tab bar takes 1 line
 
 	// Contextual helper text.
 	isProfile := m.activeTab != "Base"
@@ -393,15 +395,6 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 
 	case overlayProfileName:
 		if !msg.Confirmed || msg.Result == "" {
-			// If no profiles exist yet, go back to config style choice.
-			if len(m.profilePickers) == 0 {
-				m.overlay = NewChoiceOverlay("Configuration style", []string{
-					"Simple (single config)",
-					"With profiles (e.g., work, personal)",
-				})
-				m.overlayCtx = overlayConfigStyle
-				return m, nil
-			}
 			return m, nil
 		}
 		name := strings.TrimSpace(strings.ToLower(msg.Result))
@@ -701,11 +694,7 @@ func (m *Model) distributeSize() {
 	m.tabBar.SetWidth(contentWidth)
 
 	// Content height = main height minus tab bar minus helper text.
-	tabBarHeight := 0
-	if m.useProfiles {
-		tabBarHeight = 1
-	}
-	contentHeight := mainHeight - tabBarHeight - helperLines(m.height)
+	contentHeight := mainHeight - 1 - helperLines(m.height)
 
 	m.statusBar.SetWidth(m.width)
 
