@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
@@ -72,7 +74,7 @@ func ProjectInit(opts ProjectInitOptions) (*ProjectInitResult, error) {
 	}
 
 	// 5. Apply projected keys to settings.local.json
-	if err := ApplyProjectSettings(opts.ProjectDir, resolved, pcfg); err != nil {
+	if err := ApplyProjectSettings(opts.ProjectDir, resolved, pcfg, opts.SyncDir); err != nil {
 		return nil, fmt.Errorf("failed to apply project settings: %w", err)
 	}
 
@@ -188,8 +190,9 @@ func importHookOverrides(overrides *project.ProjectOverrides, existing map[strin
 }
 
 // ApplyProjectSettings writes managed keys to settings.local.json.
-// Unmanaged keys are preserved.
-func ApplyProjectSettings(projectDir string, resolved ResolvedConfig, pcfg project.ProjectConfig) error {
+// Unmanaged keys are preserved. syncDir is the claude-sync config directory,
+// needed for assembling CLAUDE.md fragments.
+func ApplyProjectSettings(projectDir string, resolved ResolvedConfig, pcfg project.ProjectConfig, syncDir string) error {
 	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
 
 	// Read existing settings (preserve unmanaged keys)
@@ -228,6 +231,44 @@ func ApplyProjectSettings(projectDir string, resolved ResolvedConfig, pcfg proje
 			}
 			data, _ := json.Marshal(p)
 			settings["permissions"] = data
+		case "claude_md":
+			// Merge resolved CLAUDE.md includes with project overrides
+			includes := append([]string{}, resolved.ClaudeMD...)
+			includes = append(includes, pcfg.Overrides.ClaudeMD.Add...)
+			if len(pcfg.Overrides.ClaudeMD.Remove) > 0 {
+				removeSet := make(map[string]bool, len(pcfg.Overrides.ClaudeMD.Remove))
+				for _, r := range pcfg.Overrides.ClaudeMD.Remove {
+					removeSet[r] = true
+				}
+				var filtered []string
+				for _, inc := range includes {
+					if !removeSet[inc] {
+						filtered = append(filtered, inc)
+					}
+				}
+				includes = filtered
+			}
+			if len(includes) > 0 {
+				assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
+				if asmErr == nil && assembled != "" {
+					claudeMDPath := filepath.Join(projectDir, ".claude", "CLAUDE.md")
+					os.WriteFile(claudeMDPath, []byte(assembled), 0644)
+				}
+			}
+		case "mcp":
+			finalMCP := copyHooks(resolved.MCP)
+			for name, raw := range pcfg.Overrides.MCP.Add {
+				finalMCP[name] = raw
+			}
+			for _, name := range pcfg.Overrides.MCP.Remove {
+				delete(finalMCP, name)
+			}
+			if len(finalMCP) > 0 {
+				mcpPath := filepath.Join(projectDir, ".mcp.json")
+				if err := claudecode.WriteMCPConfigFile(mcpPath, finalMCP); err != nil {
+					return fmt.Errorf("writing .mcp.json: %w", err)
+				}
+			}
 		}
 	}
 
