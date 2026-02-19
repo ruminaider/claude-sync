@@ -10,19 +10,33 @@ import (
 // TabBar renders profile tabs along the top of the TUI.
 // The first tab is always "Base" and cannot be deleted.
 // The last position is always the [+] button.
+// Each tab is assigned a color from ProfileThemeRotation.
 type TabBar struct {
-	tabs   []string // tab names; tabs[0] is always "Base"
-	active int      // index of the selected tab
-	width  int      // available horizontal space
-	onPlus bool     // true when the [+] button is focused
+	tabs   []string        // tab names; tabs[0] is always "Base"
+	themes []ProfileTheme  // parallel to tabs; color for each tab
+	active int             // index of the selected tab
+	width  int             // available horizontal space
+	onPlus bool            // true when the [+] button is focused
+}
+
+// themeForIndex returns the ProfileTheme for the given tab index,
+// cycling through ProfileThemeRotation.
+func themeForIndex(i int) ProfileTheme {
+	return ProfileThemeRotation[i%len(ProfileThemeRotation)]
 }
 
 // NewTabBar creates a tab bar with the Base tab and optional profile tabs.
 func NewTabBar(profiles []string) TabBar {
-	tabs := make([]string, 0, 1+len(profiles))
+	n := 1 + len(profiles)
+	tabs := make([]string, 0, n)
+	themes := make([]ProfileTheme, 0, n)
 	tabs = append(tabs, "Base")
-	tabs = append(tabs, profiles...)
-	return TabBar{tabs: tabs, active: 0}
+	themes = append(themes, themeForIndex(0))
+	for i, p := range profiles {
+		tabs = append(tabs, p)
+		themes = append(themes, themeForIndex(i+1))
+	}
+	return TabBar{tabs: tabs, themes: themes, active: 0}
 }
 
 // SetWidth sets the available width for rendering.
@@ -38,9 +52,18 @@ func (t TabBar) ActiveTab() string {
 	return ""
 }
 
+// ActiveTheme returns the ProfileTheme of the currently active tab.
+func (t TabBar) ActiveTheme() ProfileTheme {
+	if t.active >= 0 && t.active < len(t.themes) {
+		return t.themes[t.active]
+	}
+	return ProfileThemeRotation[0]
+}
+
 // AddTab appends a new profile tab and switches to it.
 func (t *TabBar) AddTab(name string) {
 	t.tabs = append(t.tabs, name)
+	t.themes = append(t.themes, themeForIndex(len(t.tabs)-1))
 	t.active = len(t.tabs) - 1
 	t.onPlus = false
 }
@@ -97,6 +120,7 @@ func (t *TabBar) RemoveTab(name string) {
 	for i, tab := range t.tabs {
 		if tab == name {
 			t.tabs = append(t.tabs[:i], t.tabs[i+1:]...)
+			t.themes = append(t.themes[:i], t.themes[i+1:]...)
 			if t.active >= len(t.tabs) {
 				t.active = len(t.tabs) - 1
 			}
@@ -154,20 +178,38 @@ func (t TabBar) Update(msg tea.Msg) (TabBar, tea.Cmd) {
 }
 
 // View renders the tab bar as a single horizontal line.
+// Each tab is colored with its assigned accent color.
 func (t TabBar) View() string {
 	var parts []string
 	for i, name := range t.tabs {
-		var style lipgloss.Style
+		accent := t.themes[i].Accent
 		if !t.onPlus && i == t.active {
-			style = ActiveTabStyle
+			// Active tab: accent background, dark foreground, bold.
+			style := lipgloss.NewStyle().
+				Foreground(colorBase).
+				Background(accent).
+				Padding(0, 1).
+				Bold(true)
+			parts = append(parts, style.Render(name))
 		} else {
-			style = InactiveTabStyle
+			// Inactive tab: accent foreground, Surface0 background.
+			style := lipgloss.NewStyle().
+				Foreground(accent).
+				Background(colorSurface0).
+				Padding(0, 1)
+			parts = append(parts, style.Render(name))
 		}
-		parts = append(parts, style.Render(name))
 	}
 	// The [+] button is always last, highlighted when focused.
 	if t.onPlus {
-		parts = append(parts, ActiveTabStyle.Render("+"))
+		// Use the next rotation color as a hint.
+		nextAccent := themeForIndex(len(t.tabs)).Accent
+		style := lipgloss.NewStyle().
+			Foreground(colorBase).
+			Background(nextAccent).
+			Padding(0, 1).
+			Bold(true)
+		parts = append(parts, style.Render("+"))
 	} else {
 		parts = append(parts, PlusTabStyle.Render("+"))
 	}
