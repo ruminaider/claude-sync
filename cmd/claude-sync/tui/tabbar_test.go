@@ -150,12 +150,20 @@ func TestTabBarCycleNext(t *testing.T) {
 
 	tb.CycleNext()
 	assert.Equal(t, "work", tb.ActiveTab())
+	assert.False(t, tb.OnPlus())
 
 	tb.CycleNext()
 	assert.Equal(t, "personal", tb.ActiveTab())
+	assert.False(t, tb.OnPlus())
 
-	// Wraps around to Base.
+	// Next lands on [+].
 	tb.CycleNext()
+	assert.True(t, tb.OnPlus())
+	assert.Equal(t, "personal", tb.ActiveTab()) // real tab unchanged
+
+	// Next wraps around to Base.
+	tb.CycleNext()
+	assert.False(t, tb.OnPlus())
 	assert.Equal(t, "Base", tb.ActiveTab())
 }
 
@@ -163,8 +171,14 @@ func TestTabBarCyclePrev(t *testing.T) {
 	tb := NewTabBar([]string{"work", "personal"})
 	assert.Equal(t, "Base", tb.ActiveTab())
 
-	// Wraps around to last tab.
+	// Wraps to [+].
 	tb.CyclePrev()
+	assert.True(t, tb.OnPlus())
+	assert.Equal(t, "personal", tb.ActiveTab()) // active moves to last real tab
+
+	// Prev from [+] goes to last real tab.
+	tb.CyclePrev()
+	assert.False(t, tb.OnPlus())
 	assert.Equal(t, "personal", tb.ActiveTab())
 
 	tb.CyclePrev()
@@ -178,14 +192,69 @@ func TestTabBarCycleNext_SingleTab(t *testing.T) {
 	tb := NewTabBar(nil) // only Base
 	assert.Equal(t, "Base", tb.ActiveTab())
 
+	// Single tab cycles to [+].
 	tb.CycleNext()
-	assert.Equal(t, "Base", tb.ActiveTab()) // no change with single tab
+	assert.True(t, tb.OnPlus())
+
+	// Then wraps back to Base.
+	tb.CycleNext()
+	assert.False(t, tb.OnPlus())
+	assert.Equal(t, "Base", tb.ActiveTab())
 }
 
 func TestTabBarCyclePrev_SingleTab(t *testing.T) {
 	tb := NewTabBar(nil) // only Base
+
+	// Prev wraps to [+].
 	tb.CyclePrev()
-	assert.Equal(t, "Base", tb.ActiveTab()) // no change with single tab
+	assert.True(t, tb.OnPlus())
+
+	// Prev from [+] goes back to Base.
+	tb.CyclePrev()
+	assert.False(t, tb.OnPlus())
+	assert.Equal(t, "Base", tb.ActiveTab())
+}
+
+func TestTabBarOnPlusClearedByAddTab(t *testing.T) {
+	tb := NewTabBar(nil)
+	tb.CycleNext() // move to [+]
+	assert.True(t, tb.OnPlus())
+
+	tb.AddTab("work")
+	assert.False(t, tb.OnPlus())
+	assert.Equal(t, "work", tb.ActiveTab())
+}
+
+func TestTabBarOnPlusClearedBySetActive(t *testing.T) {
+	tb := NewTabBar([]string{"work"})
+	tb.CycleNext() // work
+	tb.CycleNext() // [+]
+	assert.True(t, tb.OnPlus())
+
+	tb.SetActive(0)
+	assert.False(t, tb.OnPlus())
+	assert.Equal(t, "Base", tb.ActiveTab())
+}
+
+func TestTabBarEnterOnPlus(t *testing.T) {
+	tb := NewTabBar(nil)
+	tb.CycleNext() // move to [+]
+	assert.True(t, tb.OnPlus())
+
+	var cmd tea.Cmd
+	tb, cmd = tb.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.NotNil(t, cmd)
+	_, isNewProfile := cmd().(NewProfileRequestMsg)
+	assert.True(t, isNewProfile)
+}
+
+func TestTabBarEnterNotOnPlus(t *testing.T) {
+	tb := NewTabBar([]string{"work"})
+
+	// Enter on a real tab is a no-op.
+	var cmd tea.Cmd
+	tb, cmd = tb.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Nil(t, cmd)
 }
 
 func TestTabBarActiveTabEmpty(t *testing.T) {

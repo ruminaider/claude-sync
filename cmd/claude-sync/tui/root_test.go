@@ -880,7 +880,7 @@ func TestFullFlowThenNavigation(t *testing.T) {
 	require.Equal(t, FocusSidebar, m.focusZone)
 	require.Equal(t, []string{"Base", "dev", "staging"}, m.tabBar.tabs)
 
-	// --- Tab forward: Base → dev → staging → Base ---
+	// --- Tab forward: Base → dev → staging → [+] → Base ---
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(Model)
 	assert.Equal(t, "dev", m.activeTab)
@@ -891,9 +891,17 @@ func TestFullFlowThenNavigation(t *testing.T) {
 
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(Model)
+	assert.True(t, m.tabBar.OnPlus(), "should land on [+]")
+
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
 	assert.Equal(t, "Base", m.activeTab, "should wrap back to Base")
 
-	// --- Shift+Tab backward: Base → staging → dev → Base ---
+	// --- Shift+Tab backward: Base → [+] → staging → dev → Base ---
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
+	assert.True(t, m.tabBar.OnPlus(), "should land on [+]")
+
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = result.(Model)
 	assert.Equal(t, "staging", m.activeTab)
@@ -986,26 +994,42 @@ func TestTabCyclesProfiles(t *testing.T) {
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(Model)
 	assert.Equal(t, "work", m.activeTab)
+	assert.False(t, m.tabBar.OnPlus())
 
 	// Tab → personal
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(Model)
 	assert.Equal(t, "personal", m.activeTab)
+	assert.False(t, m.tabBar.OnPlus())
+
+	// Tab → [+] (content stays on personal)
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = result.(Model)
+	assert.Equal(t, "personal", m.activeTab)
+	assert.True(t, m.tabBar.OnPlus())
 
 	// Tab → wraps to Base
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = result.(Model)
 	assert.Equal(t, "Base", m.activeTab)
+	assert.False(t, m.tabBar.OnPlus())
 }
 
 func TestShiftTabCyclesProfilesBackward(t *testing.T) {
 	m := testModelWithProfiles(t)
 	assert.Equal(t, "Base", m.activeTab)
 
-	// Shift+Tab → wraps to personal
+	// Shift+Tab → [+] (content stays on Base, active moves to last real tab)
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = result.(Model)
+	assert.Equal(t, "Base", m.activeTab) // content unchanged
+	assert.True(t, m.tabBar.OnPlus())
+
+	// Shift+Tab → personal (leaves [+])
+	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = result.(Model)
 	assert.Equal(t, "personal", m.activeTab)
+	assert.False(t, m.tabBar.OnPlus())
 
 	// Shift+Tab → work
 	result, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
