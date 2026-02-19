@@ -77,6 +77,9 @@ type Model struct {
 	quitting      bool
 	skipFlags     SkipFlags
 
+	// Profile plugin diffs: tracks explicit add/remove overrides relative to base.
+	profilePluginDiffs map[string]*pluginDiff
+
 	// Discovered MCP servers from project-level .mcp.json files.
 	discoveredMCP map[string]json.RawMessage // server name → config
 	mcpSources    map[string]string          // server name → shortened source path
@@ -93,14 +96,15 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		syncDir:         syncDir,
 		remoteURL:       remoteURL,
 		pickers:         make(map[Section]Picker),
-		profilePickers:  make(map[string]map[Section]Picker),
-		profilePreviews: make(map[string]Preview),
-		activeTab:       "Base",
-		activeSection:   SectionPlugins,
-		focusZone:       FocusSidebar,
-		skipFlags:       skip,
-		discoveredMCP:   make(map[string]json.RawMessage),
-		mcpSources:      make(map[string]string),
+		profilePickers:     make(map[string]map[Section]Picker),
+		profilePreviews:    make(map[string]Preview),
+		profilePluginDiffs: make(map[string]*pluginDiff),
+		activeTab:          "Base",
+		activeSection:      SectionPlugins,
+		focusZone:          FocusSidebar,
+		skipFlags:          skip,
+		discoveredMCP:      make(map[string]json.RawMessage),
+		mcpSources:         make(map[string]string),
 	}
 
 	// Build pickers for each section from scan data.
@@ -208,19 +212,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "tab":
-			// Cycle to next tab (includes [+] stop).
+			// Save current profile diff before switching away.
+			m.saveProfilePluginDiff(m.activeTab)
 			m.tabBar.CycleNext()
 			if !m.tabBar.OnPlus() {
 				m.activeTab = m.tabBar.ActiveTab()
+				m.rebuildProfilePluginPicker(m.activeTab)
 				m.syncSidebarCounts()
 			}
 			m.syncStatusBar()
 			return m, nil
 		case "shift+tab":
-			// Cycle to previous tab (includes [+] stop).
+			// Save current profile diff before switching away.
+			m.saveProfilePluginDiff(m.activeTab)
 			m.tabBar.CyclePrev()
 			if !m.tabBar.OnPlus() {
 				m.activeTab = m.tabBar.ActiveTab()
+				m.rebuildProfilePluginPicker(m.activeTab)
 				m.syncSidebarCounts()
 			}
 			m.syncStatusBar()
@@ -322,7 +330,11 @@ func (m Model) View() string {
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
-	helperView := renderHelper(m.activeSection, isProfile, contentWidth, hLines)
+	var accentColor lipgloss.Color
+	if isProfile && (m.focusZone == FocusContent || m.focusZone == FocusPreview) {
+		accentColor = m.tabBar.ActiveTheme().Accent
+	}
+	helperView := renderHelper(m.activeSection, isProfile, contentWidth, hLines, accentColor)
 
 	contentView := m.currentContentView(contentHeight)
 
@@ -609,7 +621,7 @@ func helperText(section Section, isProfile bool) (string, string) {
 	if isProfile {
 		switch section {
 		case SectionPlugins:
-			line1 = "Add or remove plugins relative to the base config."
+			line1 = "● = inherited from base. Toggle to add or remove."
 		case SectionSettings:
 			line1 = "Override base settings for this profile."
 		case SectionClaudeMD:
@@ -662,12 +674,19 @@ func helperText(section Section, isProfile bool) (string, string) {
 
 // renderHelper renders the helper block above content.
 // lines controls the format: 3 = full (desc + shortcuts + sep), 2 = compact (desc + sep), 0 = hidden.
-func renderHelper(section Section, isProfile bool, width, lines int) string {
+// accentColor, when set, colors the ● marker in the helper text to match the profile tab.
+func renderHelper(section Section, isProfile bool, width, lines int, accentColor lipgloss.Color) string {
 	if lines <= 0 {
 		return ""
 	}
 
 	line1, line2 := helperText(section, isProfile)
+
+	// Color the ● marker to match the profile accent.
+	if accentColor != "" && strings.Contains(line1, "●") {
+		colored := lipgloss.NewStyle().Foreground(accentColor).Render("●")
+		line1 = strings.Replace(line1, "●", colored, 1)
+	}
 
 	var b strings.Builder
 	b.WriteString(HelperTextStyle.Render(" " + line1))
@@ -782,14 +801,90 @@ func (m *Model) syncStatusBar() {
 
 // --- Profile management ---
 
+// pluginDiff tracks explicit profile plugin overrides relative to base.
+type pluginDiff struct {
+	adds    map[string]bool // plugins to add (not in base, user selected in profile)
+	removes map[string]bool // plugins to remove (in base, user deselected in profile)
+}
+
+// saveProfilePluginDiff computes and stores the plugin diff for a profile by
+// comparing its current picker selections against current base selections.
+func (m *Model) saveProfilePluginDiff(profileName string) {
+	if profileName == "Base" {
+		return
+	}
+	pm, ok := m.profilePickers[profileName]
+	if !ok {
+		return
+	}
+	picker := pm[SectionPlugins]
+	baseSelected := toSet(m.pickers[SectionPlugins].SelectedKeys())
+	profileSelected := toSet(picker.SelectedKeys())
+
+	diff := &pluginDiff{
+		adds:    make(map[string]bool),
+		removes: make(map[string]bool),
+	}
+	for k := range profileSelected {
+		if !baseSelected[k] {
+			diff.adds[k] = true
+		}
+	}
+	for k := range baseSelected {
+		if !profileSelected[k] {
+			diff.removes[k] = true
+		}
+	}
+	m.profilePluginDiffs[profileName] = diff
+}
+
+// rebuildProfilePluginPicker rebuilds a profile's plugin picker from current
+// base selections plus stored overrides. This keeps profiles in sync with base.
+func (m *Model) rebuildProfilePluginPicker(profileName string) {
+	if profileName == "Base" {
+		return
+	}
+	pm, ok := m.profilePickers[profileName]
+	if !ok {
+		return
+	}
+	diff := m.profilePluginDiffs[profileName]
+	if diff == nil {
+		diff = &pluginDiff{adds: make(map[string]bool), removes: make(map[string]bool)}
+	}
+
+	baseSelected := toSet(m.pickers[SectionPlugins].SelectedKeys())
+
+	// Effective selection = (base - removes) + adds.
+	effective := make(map[string]bool)
+	for k := range baseSelected {
+		if !diff.removes[k] {
+			effective[k] = true
+		}
+	}
+	for k := range diff.adds {
+		effective[k] = true
+	}
+
+	items := PluginPickerItemsForProfile(m.scanResult, effective, baseSelected)
+	p := NewPicker(items)
+	p.SetTagColor(m.tabBar.ActiveTheme().Accent)
+	// Preserve height/width from existing picker.
+	old := pm[SectionPlugins]
+	p.SetHeight(old.height)
+	p.SetWidth(old.width)
+	pm[SectionPlugins] = p
+	m.profilePickers[profileName] = pm
+}
+
 func (m *Model) createProfile(name string) {
 	// Initialize profile pickers as copies of base selections.
 	pm := make(map[Section]Picker)
+	baseSelected := toSet(m.pickers[SectionPlugins].SelectedKeys())
 	for sec, basePicker := range m.pickers {
 		if sec == SectionPlugins {
-			// Build profile plugin items showing base vs available.
-			baseSelected := basePicker.SelectedKeys()
-			items := ProfilePluginPickerItems(m.scanResult, baseSelected)
+			// Build profile plugin items from current base selections.
+			items := PluginPickerItemsForProfile(m.scanResult, baseSelected, baseSelected)
 			pm[sec] = NewPicker(items)
 		} else {
 			// Copy base picker items.
@@ -802,6 +897,12 @@ func (m *Model) createProfile(name string) {
 		}
 	}
 	m.profilePickers[name] = pm
+
+	// Initialize empty plugin diff for this profile.
+	m.profilePluginDiffs[name] = &pluginDiff{
+		adds:    make(map[string]bool),
+		removes: make(map[string]bool),
+	}
 
 	// Copy preview sections for profile.
 	baseFragKeys := m.preview.SelectedFragmentKeys()
@@ -818,6 +919,13 @@ func (m *Model) createProfile(name string) {
 	m.tabBar.AddTab(name)
 	m.activeTab = name
 	m.useProfiles = true
+
+	// Set tag color on the plugin picker to match the profile's accent.
+	if plugPicker, ok := pm[SectionPlugins]; ok {
+		plugPicker.SetTagColor(m.tabBar.ActiveTheme().Accent)
+		pm[SectionPlugins] = plugPicker
+	}
+
 	m.syncSidebarCounts()
 	m.syncStatusBar()
 
@@ -829,6 +937,7 @@ func (m *Model) createProfile(name string) {
 func (m *Model) deleteProfile(name string) {
 	delete(m.profilePickers, name)
 	delete(m.profilePreviews, name)
+	delete(m.profilePluginDiffs, name)
 	m.tabBar.RemoveTab(name)
 	m.activeTab = m.tabBar.ActiveTab()
 
@@ -871,9 +980,10 @@ func (m *Model) resetToDefaults() {
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(m.scanResult.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(m.scanResult.Keybindings))
 
-	// Clear discovered MCP servers on reset.
+	// Clear discovered MCP servers and profile diffs on reset.
 	m.discoveredMCP = make(map[string]json.RawMessage)
 	m.mcpSources = make(map[string]string)
+	m.profilePluginDiffs = make(map[string]*pluginDiff)
 
 	previewSections := ClaudeMDPreviewSections(m.scanResult.ClaudeMDSections, "~/.claude/CLAUDE.md")
 	m.preview = NewPreview(previewSections)

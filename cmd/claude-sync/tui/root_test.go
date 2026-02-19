@@ -453,6 +453,97 @@ func TestBuildInitOptions_WithProfiles(t *testing.T) {
 	assert.Contains(t, opts.Profiles, "work")
 }
 
+func TestProfilePluginsSyncWithBase(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m", "b@m", "c@m"},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Create profile "work" — starts with all base selections inherited.
+	m.createProfile("work")
+	assert.Equal(t, "work", m.activeTab)
+
+	workPlugins := m.profilePickers["work"][SectionPlugins]
+	assert.Equal(t, 3, workPlugins.SelectedCount(), "profile should inherit all 3 base plugins")
+
+	// Switch back to Base and deselect "b@m".
+	m.saveProfilePluginDiff("work")
+	m.activeTab = "Base"
+	basePicker := m.pickers[SectionPlugins]
+	for i := range basePicker.items {
+		if basePicker.items[i].Key == "b@m" {
+			basePicker.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionPlugins] = basePicker
+
+	// Switch back to work — should reflect updated base (b@m deselected).
+	m.rebuildProfilePluginPicker("work")
+	m.activeTab = "work"
+
+	workPlugins = m.profilePickers["work"][SectionPlugins]
+	assert.Equal(t, 2, workPlugins.SelectedCount(), "profile should drop b@m after base deselected it")
+
+	// Verify inherited tags: a@m and c@m are inherited, b@m is not selected.
+	for _, it := range workPlugins.items {
+		if it.Key == "a@m" || it.Key == "c@m" {
+			assert.True(t, it.IsBase, "%s should be marked inherited", it.Key)
+			assert.Equal(t, "●", it.Tag)
+			assert.True(t, it.Selected)
+		}
+		if it.Key == "b@m" {
+			assert.False(t, it.IsBase, "b@m should NOT be marked inherited")
+			assert.False(t, it.Selected, "b@m should be deselected")
+		}
+	}
+}
+
+func TestProfilePluginDiff_Preserved(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m", "b@m", "c@m"},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	m.createProfile("work")
+
+	// In the work profile, deselect "a@m" (explicit removal from base).
+	pm := m.profilePickers["work"]
+	picker := pm[SectionPlugins]
+	for i := range picker.items {
+		if picker.items[i].Key == "a@m" {
+			picker.items[i].Selected = false
+		}
+	}
+	pm[SectionPlugins] = picker
+	m.profilePickers["work"] = pm
+
+	// Switch away — saves the diff (removes: a@m).
+	m.saveProfilePluginDiff("work")
+	diff := m.profilePluginDiffs["work"]
+	assert.True(t, diff.removes["a@m"], "a@m should be in removes")
+
+	// Switch back — rebuild preserves the removal.
+	m.rebuildProfilePluginPicker("work")
+
+	workPlugins := m.profilePickers["work"][SectionPlugins]
+	for _, it := range workPlugins.items {
+		if it.Key == "a@m" {
+			assert.False(t, it.Selected, "a@m should stay deselected after rebuild")
+		}
+		if it.Key == "b@m" || it.Key == "c@m" {
+			assert.True(t, it.Selected, "%s should stay selected", it.Key)
+		}
+	}
+}
+
 // --- Nil vs empty semantics ---
 
 func TestNilVsEmptySemantics_Plugins(t *testing.T) {
@@ -1343,7 +1434,7 @@ func TestViewLineCount_LargeTerminal(t *testing.T) {
 }
 
 func TestRenderHelper_Compact(t *testing.T) {
-	result := renderHelper(SectionPlugins, false, 60, 2)
+	result := renderHelper(SectionPlugins, false, 60, 2, "")
 	// Should contain description but NOT shortcuts line.
 	assert.Contains(t, result, "Choose which Claude plugins to sync")
 	assert.NotContains(t, result, "Space: toggle")
@@ -1352,7 +1443,7 @@ func TestRenderHelper_Compact(t *testing.T) {
 }
 
 func TestRenderHelper_Hidden(t *testing.T) {
-	result := renderHelper(SectionPlugins, false, 60, 0)
+	result := renderHelper(SectionPlugins, false, 60, 0, "")
 	assert.Equal(t, "", result, "0 lines should produce empty string")
 }
 
@@ -1427,7 +1518,7 @@ func TestViewLineCount_ClaudeMD_Narrow(t *testing.T) {
 // even when the text is longer than the available width.
 func TestRenderHelper_NoWrap(t *testing.T) {
 	// CLAUDE.md has the longest line2. Render at a narrow width.
-	result := renderHelper(SectionClaudeMD, false, 30, 3)
+	result := renderHelper(SectionClaudeMD, false, 30, 3, "")
 	lineCount := strings.Count(result, "\n")
 	assert.Equal(t, 3, lineCount, "helper must produce exactly 3 newlines (3 lines) even at narrow width")
 }
