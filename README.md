@@ -50,13 +50,15 @@ make install
 
 ```bash
 # New setup (from your current Claude Code state)
-claude-sync init
+claude-sync config create
 
 # Or join an existing shared config
-claude-sync join git@github.com:your-org/claude-sync-config.git
+claude-sync config join git@github.com:your-org/claude-sync-config.git
 ```
 
 Both commands install a Claude Code plugin that automatically checks for config updates at the start of each session and provides the `/sync` slash command.
+
+> **Note:** `claude-sync init` and `claude-sync join` still work as aliases for backward compatibility.
 
 ## Usage
 
@@ -94,6 +96,60 @@ claude-sync unfork <name>@<marketplace>  # Return to upstream tracking
 The local marketplace entry is automatically removed when no forked plugins remain — for example, after unforking the last plugin, switching to a profile with no forks, or running `pull` against a config with no forks.
 
 If you see a **"Failed to load marketplace 'claude-sync-forks'"** warning from Claude Code, run `claude-sync pull` to clean up the stale entry, or manually remove the `claude-sync-forks` key from `~/.claude/plugins/known_marketplaces.json`.
+
+## Project Management
+
+Claude Code [bug #19487](https://github.com/anthropics/claude-code/issues/19487) causes project `settings.local.json` to overwrite global `settings.json` instead of deep merging. Hooks, permissions, and other keys defined globally are lost in project sessions. claude-sync solves this by projecting your resolved configuration into each project's `settings.local.json`.
+
+### Quick start
+
+```bash
+# In a project directory
+claude-sync project init --profile work --keys hooks,permissions
+```
+
+This creates `.claude/.claude-sync.yaml` in the project, which tells claude-sync to manage that project's settings. On each `claude-sync pull`, the `settings.local.json` is regenerated from the resolved config chain:
+
+```
+base config.yaml -> machine profile -> project overrides -> settings.local.json
+```
+
+Managed keys (listed in `projected_keys`) are synced from the profile; unmanaged keys are preserved as-is. When you "Always allow" something in Claude Code, `claude-sync push` captures the new permission as a project override so it persists across pulls.
+
+### Commands
+
+```bash
+claude-sync project init [path]     # Initialize project management
+claude-sync project list             # List all managed projects
+claude-sync project remove [path]    # Remove management (keeps settings.local.json)
+```
+
+`project init` flags:
+
+| Flag | Description |
+|------|-------------|
+| `--profile <name>` | Profile to use (skips interactive picker) |
+| `--keys <list>` | Comma-separated keys to project (default: `hooks,permissions`) |
+| `--yes` | Non-interactive mode, accept defaults |
+| `--decline` | Decline management (future pulls skip this project) |
+
+### Projected keys
+
+Each key can be independently managed per project:
+
+- **hooks** -- PreToolUse/PostToolUse hook definitions
+- **permissions** -- allow/deny tool permission lists
+- **claude_md** -- CLAUDE.md fragment assembly
+- **mcp** -- MCP server configuration
+
+### Conflict resolution
+
+When a pull encounters conflicting changes, claude-sync attempts a YAML-aware auto-merge for additive changes (e.g., both sides adding permissions). True conflicts are deferred so sessions always start, and `push` is blocked until conflicts are resolved.
+
+```bash
+claude-sync conflicts              # List pending conflicts
+claude-sync conflicts discard      # Discard all (keep current config)
+```
 
 ## Supported Platforms
 
