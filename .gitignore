@@ -33,3 +33,6 @@ dist/
 # Local development
 .env
 .env.local
+
+# Worktrees
+.worktrees/
