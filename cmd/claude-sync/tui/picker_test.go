@@ -21,28 +21,34 @@ func TestPluginPickerItems(t *testing.T) {
 	}
 	items := PluginPickerItems(scan)
 
-	// 2 headers + 3 items = 5 total
-	require.Len(t, items, 5)
+	// 2 headers + 2 descriptions + 3 items = 7 total
+	require.Len(t, items, 7)
 
 	// First header: Upstream (2)
 	assert.True(t, items[0].IsHeader)
 	assert.Equal(t, "Upstream (2)", items[0].Display)
 
-	// Upstream items
-	assert.Equal(t, "a@market", items[1].Key)
-	assert.True(t, items[1].Selected)
-	assert.False(t, items[1].IsHeader)
+	// Description for upstream
+	assert.NotEmpty(t, items[1].Description)
 
-	assert.Equal(t, "b@market", items[2].Key)
+	// Upstream items
+	assert.Equal(t, "a@market", items[2].Key)
 	assert.True(t, items[2].Selected)
+	assert.False(t, items[2].IsHeader)
+
+	assert.Equal(t, "b@market", items[3].Key)
+	assert.True(t, items[3].Selected)
 
 	// Second header: Auto-forked (1)
-	assert.True(t, items[3].IsHeader)
-	assert.Equal(t, "Auto-forked (1)", items[3].Display)
+	assert.True(t, items[4].IsHeader)
+	assert.Equal(t, "Auto-forked (1)", items[4].Display)
+
+	// Description for auto-forked
+	assert.NotEmpty(t, items[5].Description)
 
 	// Auto-forked item
-	assert.Equal(t, "c@local", items[4].Key)
-	assert.True(t, items[4].Selected)
+	assert.Equal(t, "c@local", items[6].Key)
+	assert.True(t, items[6].Selected)
 }
 
 func TestPluginPickerItems_UpstreamOnly(t *testing.T) {
@@ -50,9 +56,10 @@ func TestPluginPickerItems_UpstreamOnly(t *testing.T) {
 		Upstream: []string{"x@m"},
 	}
 	items := PluginPickerItems(scan)
-	require.Len(t, items, 2) // 1 header + 1 item
+	require.Len(t, items, 3) // 1 header + 1 description + 1 item
 	assert.True(t, items[0].IsHeader)
-	assert.Equal(t, "x@m", items[1].Key)
+	assert.NotEmpty(t, items[1].Description)
+	assert.Equal(t, "x@m", items[2].Key)
 }
 
 func TestPluginPickerItems_Empty(t *testing.T) {
@@ -61,44 +68,74 @@ func TestPluginPickerItems_Empty(t *testing.T) {
 	assert.Empty(t, items)
 }
 
-func TestProfilePluginPickerItems(t *testing.T) {
+func TestPluginPickerItemsForProfile(t *testing.T) {
 	scan := &commands.InitScanResult{
 		Upstream:   []string{"a@m", "b@m", "c@m"},
 		AutoForked: []string{"d@local"},
 	}
-	baseSelected := []string{"a@m", "b@m"}
-	items := ProfilePluginPickerItems(scan, baseSelected)
+	baseSelected := map[string]bool{"a@m": true, "b@m": true}
+	// Profile inherits base selections (a@m, b@m selected).
+	items := PluginPickerItemsForProfile(scan, baseSelected, baseSelected)
 
-	// Base header + 2 base items + Available header + 2 available items = 6
-	require.Len(t, items, 6)
+	// Upstream header + desc + 3 upstream items + Auto-forked header + desc + 1 item = 8
+	require.Len(t, items, 8)
 
-	// Base header
+	// Upstream header
 	assert.True(t, items[0].IsHeader)
-	assert.Equal(t, "Base (2)", items[0].Display)
+	assert.Equal(t, "Upstream (3)", items[0].Display)
 
-	// Base items (sorted: a@m, b@m)
-	assert.Equal(t, "a@m", items[1].Key)
-	assert.True(t, items[1].IsBase)
-	assert.Equal(t, "[base]", items[1].Tag)
-	assert.True(t, items[1].Selected)
+	// Description
+	assert.NotEmpty(t, items[1].Description)
 
-	assert.Equal(t, "b@m", items[2].Key)
+	// Upstream items (a@m and b@m are base-inherited, c@m is not)
+	assert.Equal(t, "a@m", items[2].Key)
 	assert.True(t, items[2].IsBase)
-	assert.Equal(t, "[base]", items[2].Tag)
+	assert.Equal(t, "●", items[2].Tag)
 	assert.True(t, items[2].Selected)
 
-	// Available header
-	assert.True(t, items[3].IsHeader)
-	assert.Equal(t, "Available (2)", items[3].Display)
+	assert.Equal(t, "b@m", items[3].Key)
+	assert.True(t, items[3].IsBase)
+	assert.Equal(t, "●", items[3].Tag)
+	assert.True(t, items[3].Selected)
 
-	// Available items (sorted: c@m, d@local)
 	assert.Equal(t, "c@m", items[4].Key)
 	assert.False(t, items[4].IsBase)
 	assert.False(t, items[4].Selected)
 
-	assert.Equal(t, "d@local", items[5].Key)
-	assert.False(t, items[5].IsBase)
-	assert.False(t, items[5].Selected)
+	// Auto-forked header
+	assert.True(t, items[5].IsHeader)
+	assert.Equal(t, "Auto-forked (1)", items[5].Display)
+
+	// Description
+	assert.NotEmpty(t, items[6].Description)
+
+	// Auto-forked item (not in base)
+	assert.Equal(t, "d@local", items[7].Key)
+	assert.False(t, items[7].IsBase)
+	assert.False(t, items[7].Selected)
+}
+
+func TestPluginPickerItemsForProfile_Deselected(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m", "b@m"},
+	}
+	baseSelected := map[string]bool{"a@m": true} // only a@m in base
+	// Profile inherits a@m, has explicitly added b@m.
+	effective := map[string]bool{"a@m": true, "b@m": true}
+	items := PluginPickerItemsForProfile(scan, effective, baseSelected)
+
+	// Header + desc + 2 items = 4
+	require.Len(t, items, 4)
+
+	// a@m: inherited from base
+	assert.True(t, items[2].Selected)
+	assert.True(t, items[2].IsBase)
+	assert.Equal(t, "●", items[2].Tag)
+
+	// b@m: NOT in base, but selected by profile
+	assert.True(t, items[3].Selected)
+	assert.False(t, items[3].IsBase)
+	assert.Empty(t, items[3].Tag)
 }
 
 func TestPermissionPickerItems(t *testing.T) {

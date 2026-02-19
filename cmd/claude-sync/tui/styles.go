@@ -113,7 +113,7 @@ var (
 				PaddingLeft(1).
 				PaddingRight(1)
 
-	// BaseTagStyle is used for the [base] diff marker on inherited items.
+	// BaseTagStyle is used for the "inherited" marker on base-inherited items.
 	BaseTagStyle = lipgloss.NewStyle().
 			Foreground(colorOverlay0).
 			Italic(true)

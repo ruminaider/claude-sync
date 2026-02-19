@@ -15,37 +15,39 @@ import (
 
 // PickerItem represents a single row in the multi-select picker.
 type PickerItem struct {
-	Key      string // unique identifier (plugin key, setting key, etc.)
-	Display  string // display text
-	Selected bool
-	IsHeader bool   // section header, not selectable
-	IsBase   bool   // inherited from base config (profile view)
-	Tag      string // e.g. "[base]" for inherited items
+	Key         string // unique identifier (plugin key, setting key, etc.)
+	Display     string // display text
+	Selected    bool
+	IsHeader    bool   // section header, not selectable
+	IsBase      bool   // inherited from base config (profile view)
+	Tag         string // e.g. "[base]" for inherited items
+	Description string // optional description rendered below headers
 }
 
 // Picker is an enhanced multi-select list used for Plugins, Permissions, MCP,
 // Hooks, Settings, and Keybindings sections.
 type Picker struct {
 	items           []PickerItem
-	cursor          int  // index of the highlighted row
-	height          int  // viewport height (number of visible rows)
+	cursor          int             // index of the highlighted row
+	height          int             // viewport height (number of visible rows)
 	width           int
-	offset          int  // scroll offset for long lists
-	selectAll       bool // track whether all selectable items are selected
-	focused         bool // true when this picker has keyboard focus
-	hasSearchAction bool // when true, a [+ Search projects] row is appended
+	offset          int             // scroll offset for long lists
+	selectAll       bool            // track whether all selectable items are selected
+	focused         bool            // true when this picker has keyboard focus
+	hasSearchAction bool            // when true, a [+ Search projects] row is appended
+	tagColor        lipgloss.Color  // accent color for inherited-item tags (profile views)
 }
 
 // NewPicker creates a Picker with the given items. The cursor is placed on the
-// first selectable (non-header) item.
+// first selectable (non-header, non-description) item.
 func NewPicker(items []PickerItem) Picker {
 	p := Picker{
 		items:  items,
 		height: 20, // sensible default
 	}
-	// Advance cursor to the first non-header item.
-	for i, it := range p.items {
-		if !it.IsHeader {
+	// Advance cursor to the first selectable item.
+	for i := range p.items {
+		if !p.isSkippable(i) {
 			p.cursor = i
 			break
 		}
@@ -66,6 +68,9 @@ func PluginPickerItems(scan *commands.InitScanResult) []PickerItem {
 			Display:  fmt.Sprintf("Upstream (%d)", len(scan.Upstream)),
 			IsHeader: true,
 		})
+		items = append(items, PickerItem{
+			Description: "Marketplace plugins — synced by reference",
+		})
 		for _, key := range scan.Upstream {
 			items = append(items, PickerItem{
 				Key:      key,
@@ -80,6 +85,9 @@ func PluginPickerItems(scan *commands.InitScanResult) []PickerItem {
 			Display:  fmt.Sprintf("Auto-forked (%d)", len(scan.AutoForked)),
 			IsHeader: true,
 		})
+		items = append(items, PickerItem{
+			Description: "Local plugins — synced as full copies",
+		})
 		for _, key := range scan.AutoForked {
 			items = append(items, PickerItem{
 				Key:      key,
@@ -92,53 +100,55 @@ func PluginPickerItems(scan *commands.InitScanResult) []PickerItem {
 	return items
 }
 
-// ProfilePluginPickerItems builds picker items for a profile view. Base items
-// (those in baseSelected) appear first under a "Base" header with IsBase=true
-// and Tag="[base]". Remaining items appear under an "Available" header.
-func ProfilePluginPickerItems(scan *commands.InitScanResult, baseSelected []string) []PickerItem {
-	baseSet := make(map[string]bool, len(baseSelected))
-	for _, k := range baseSelected {
-		baseSet[k] = true
-	}
+// PluginPickerItemsForProfile builds the same Upstream/Auto-forked layout as
+// PluginPickerItems, but uses effectiveSelected for checkbox state and marks
+// items that are in baseSelected with an "inherited" tag so users can see what
+// comes from the base config.
+func PluginPickerItemsForProfile(scan *commands.InitScanResult, effectiveSelected, baseSelected map[string]bool) []PickerItem {
+	var items []PickerItem
 
-	var baseItems, availableItems []PickerItem
-
-	allKeys := append([]string{}, scan.Upstream...)
-	allKeys = append(allKeys, scan.AutoForked...)
-	sort.Strings(allKeys)
-
-	for _, key := range allKeys {
-		if baseSet[key] {
-			baseItems = append(baseItems, PickerItem{
+	if len(scan.Upstream) > 0 {
+		items = append(items, PickerItem{
+			Display:  fmt.Sprintf("Upstream (%d)", len(scan.Upstream)),
+			IsHeader: true,
+		})
+		items = append(items, PickerItem{
+			Description: "Marketplace plugins — synced by reference",
+		})
+		for _, key := range scan.Upstream {
+			it := PickerItem{
 				Key:      key,
 				Display:  key,
-				Selected: true,
-				IsBase:   true,
-				Tag:      "[base]",
-			})
-		} else {
-			availableItems = append(availableItems, PickerItem{
-				Key:      key,
-				Display:  key,
-				Selected: false,
-			})
+				Selected: effectiveSelected[key],
+			}
+			if baseSelected[key] {
+				it.IsBase = true
+				it.Tag = "●"
+			}
+			items = append(items, it)
 		}
 	}
 
-	var items []PickerItem
-	if len(baseItems) > 0 {
+	if len(scan.AutoForked) > 0 {
 		items = append(items, PickerItem{
-			Display:  fmt.Sprintf("Base (%d)", len(baseItems)),
+			Display:  fmt.Sprintf("Auto-forked (%d)", len(scan.AutoForked)),
 			IsHeader: true,
 		})
-		items = append(items, baseItems...)
-	}
-	if len(availableItems) > 0 {
 		items = append(items, PickerItem{
-			Display:  fmt.Sprintf("Available (%d)", len(availableItems)),
-			IsHeader: true,
+			Description: "Local plugins — synced as full copies",
 		})
-		items = append(items, availableItems...)
+		for _, key := range scan.AutoForked {
+			it := PickerItem{
+				Key:      key,
+				Display:  key,
+				Selected: effectiveSelected[key],
+			}
+			if baseSelected[key] {
+				it.IsBase = true
+				it.Tag = "●"
+			}
+			items = append(items, it)
+		}
 	}
 
 	return items
@@ -268,6 +278,11 @@ func (p *Picker) SetSearchAction(enabled bool) {
 	p.hasSearchAction = enabled
 }
 
+// SetTagColor sets the accent color used for inherited-item tag markers.
+func (p *Picker) SetTagColor(c lipgloss.Color) {
+	p.tagColor = c
+}
+
 // AddItems appends new items to the picker and marks them as selected.
 func (p *Picker) AddItems(items []PickerItem) {
 	p.items = append(p.items, items...)
@@ -275,11 +290,17 @@ func (p *Picker) AddItems(items []PickerItem) {
 	p.clampScroll()
 }
 
-// SelectedKeys returns the keys of all selected (non-header) items.
+// isSelectableItem returns true if the item is a regular selectable row
+// (not a header or description).
+func isSelectableItem(it PickerItem) bool {
+	return !it.IsHeader && it.Description == ""
+}
+
+// SelectedKeys returns the keys of all selected selectable items.
 func (p Picker) SelectedKeys() []string {
 	var keys []string
 	for _, it := range p.items {
-		if !it.IsHeader && it.Selected {
+		if isSelectableItem(it) && it.Selected {
 			keys = append(keys, it.Key)
 		}
 	}
@@ -290,18 +311,18 @@ func (p Picker) SelectedKeys() []string {
 func (p Picker) SelectedCount() int {
 	n := 0
 	for _, it := range p.items {
-		if !it.IsHeader && it.Selected {
+		if isSelectableItem(it) && it.Selected {
 			n++
 		}
 	}
 	return n
 }
 
-// TotalCount returns the number of selectable (non-header) items.
+// TotalCount returns the number of selectable (non-header, non-description) items.
 func (p Picker) TotalCount() int {
 	n := 0
 	for _, it := range p.items {
-		if !it.IsHeader {
+		if isSelectableItem(it) {
 			n++
 		}
 	}
@@ -329,9 +350,9 @@ func (p *Picker) SetItems(items []PickerItem) {
 	p.items = items
 	p.cursor = 0
 	p.offset = 0
-	// Advance cursor to the first non-header item.
-	for i, it := range p.items {
-		if !it.IsHeader {
+	// Advance cursor to the first selectable item.
+	for i := range p.items {
+		if !p.isSkippable(i) {
 			p.cursor = i
 			break
 		}
@@ -449,6 +470,11 @@ func (p Picker) View() string {
 			continue
 		}
 
+		if it.Description != "" {
+			b.WriteString("  " + dimStyle.Render(it.Description) + "\n")
+			continue
+		}
+
 		// Cursor indicator: only show when focused.
 		cursor := "  "
 		if p.focused && i == p.cursor {
@@ -481,10 +507,12 @@ func (p Picker) View() string {
 			display = dimStyle.Render(it.Display)
 		}
 
-		// Tag (e.g. [base]).
+		// Tag (e.g. ● for inherited items).
 		tag := ""
 		if it.Tag != "" {
-			if p.focused {
+			if p.focused && p.tagColor != "" {
+				tag = "  " + lipgloss.NewStyle().Foreground(p.tagColor).Render(it.Tag)
+			} else if p.focused {
 				tag = "  " + BaseTagStyle.Render(it.Tag)
 			} else {
 				tag = "  " + dimStyle.Render(it.Tag)
@@ -503,8 +531,17 @@ func (p Picker) View() string {
 
 // --- Internal helpers ---
 
+// isSkippable returns true if the item at index i should be skipped by the cursor.
+func (p *Picker) isSkippable(i int) bool {
+	if i < 0 || i >= len(p.items) {
+		return false
+	}
+	return p.items[i].IsHeader || p.items[i].Description != ""
+}
+
 // moveCursor advances the cursor in the given direction (+1 or -1), skipping
-// header items. It also adjusts the scroll offset to keep the cursor visible.
+// header and description items. It also adjusts the scroll offset to keep the
+// cursor visible.
 func (p *Picker) moveCursor(dir int) {
 	maxIndex := len(p.items) - 1
 	if p.hasSearchAction {
@@ -519,7 +556,7 @@ func (p *Picker) moveCursor(dir int) {
 			p.clampScroll()
 			return
 		}
-		if next < len(p.items) && !p.items[next].IsHeader {
+		if next < len(p.items) && !p.isSkippable(next) {
 			p.cursor = next
 			p.clampScroll()
 			return
@@ -529,9 +566,9 @@ func (p *Picker) moveCursor(dir int) {
 }
 
 // toggleCurrent toggles the selection of the item at the cursor position.
-// Headers are not togglable.
+// Headers and descriptions are not togglable.
 func (p *Picker) toggleCurrent() {
-	if p.cursor >= 0 && p.cursor < len(p.items) && !p.items[p.cursor].IsHeader {
+	if p.cursor >= 0 && p.cursor < len(p.items) && isSelectableItem(p.items[p.cursor]) {
 		p.items[p.cursor].Selected = !p.items[p.cursor].Selected
 		p.syncSelectAll()
 	}
@@ -540,7 +577,7 @@ func (p *Picker) toggleCurrent() {
 // doSelectAll selects all selectable items.
 func (p *Picker) doSelectAll() {
 	for i := range p.items {
-		if !p.items[i].IsHeader {
+		if isSelectableItem(p.items[i]) {
 			p.items[i].Selected = true
 		}
 	}
@@ -550,7 +587,7 @@ func (p *Picker) doSelectAll() {
 // doSelectNone deselects all selectable items.
 func (p *Picker) doSelectNone() {
 	for i := range p.items {
-		if !p.items[i].IsHeader {
+		if isSelectableItem(p.items[i]) {
 			p.items[i].Selected = false
 		}
 	}
@@ -561,7 +598,7 @@ func (p *Picker) doSelectNone() {
 func (p *Picker) syncSelectAll() {
 	p.selectAll = true
 	for _, it := range p.items {
-		if !it.IsHeader && !it.Selected {
+		if isSelectableItem(it) && !it.Selected {
 			p.selectAll = false
 			return
 		}
