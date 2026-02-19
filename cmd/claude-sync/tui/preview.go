@@ -35,6 +35,7 @@ type Preview struct {
 	totalWidth  int
 	totalHeight int
 	focusLeft   bool // true = list focused, false = preview focused
+	focused     bool // true when this preview has keyboard focus
 }
 
 // NewPreview creates a Preview model from a slice of PreviewSection values.
@@ -134,6 +135,11 @@ func (p *Preview) SetSize(width, height int) {
 	p.viewport.Height = vpHeight
 }
 
+// SetFocused sets whether this preview currently has keyboard focus.
+func (p *Preview) SetFocused(f bool) {
+	p.focused = f
+}
+
 // AddSections appends new sections (e.g. from search results) and selects
 // them by default.
 func (p *Preview) AddSections(sections []PreviewSection) {
@@ -185,8 +191,12 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 		if p.cursor < len(p.sections) {
 			p.selected[p.cursor] = !p.selected[p.cursor]
 		}
-	case "tab", "right", "l":
+	case "right", "l":
 		p.focusLeft = false
+	case "left", "h":
+		return p, func() tea.Msg {
+			return FocusChangeMsg{Zone: FocusSidebar}
+		}
 	case "esc":
 		return p, func() tea.Msg {
 			return FocusChangeMsg{Zone: FocusSidebar}
@@ -197,7 +207,7 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 
 func (p Preview) updateViewport(msg tea.KeyMsg) (Preview, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "left", "h":
+	case "left", "h":
 		p.focusLeft = true
 		return p, nil
 	case "esc":
@@ -232,7 +242,7 @@ func (p Preview) View() string {
 	// Divider between panels.
 	divider := lipgloss.NewStyle().
 		Foreground(colorSurface1).
-		Render(strings.Repeat("│\n", p.totalHeight))
+		Render(strings.TrimRight(strings.Repeat("│\n", p.totalHeight), "\n"))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 }
@@ -244,17 +254,27 @@ func (p Preview) viewList() string {
 		Width(p.listWidth).
 		PaddingLeft(1)
 
+	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
+
 	for i, sec := range p.sections {
 		cursor := "  "
-		if i == p.cursor && p.focusLeft {
+		if p.focused && i == p.cursor && p.focusLeft {
 			cursor = "> "
 		}
 
 		var checkbox string
-		if p.selected[i] {
-			checkbox = SelectedStyle.Render("[x]")
+		if p.focused {
+			if p.selected[i] {
+				checkbox = SelectedStyle.Render("[x]")
+			} else {
+				checkbox = UnselectedStyle.Render("[ ]")
+			}
 		} else {
-			checkbox = UnselectedStyle.Render("[ ]")
+			if p.selected[i] {
+				checkbox = dimStyle.Render("[x]")
+			} else {
+				checkbox = dimStyle.Render("[ ]")
+			}
 		}
 
 		header := sec.Header
@@ -268,15 +288,21 @@ func (p Preview) viewList() string {
 		}
 
 		var display string
-		if i == p.cursor && p.focusLeft {
+		if p.focused && i == p.cursor && p.focusLeft {
 			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(header)
-		} else {
+		} else if p.focused {
 			display = header
+		} else {
+			display = dimStyle.Render(header)
 		}
 
 		tag := ""
 		if sec.IsBase {
-			tag = "  " + BaseTagStyle.Render("[base]")
+			if p.focused {
+				tag = "  " + BaseTagStyle.Render("[base]")
+			} else {
+				tag = "  " + dimStyle.Render("[base]")
+			}
 		}
 
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
@@ -284,10 +310,13 @@ func (p Preview) viewList() string {
 
 	// [+ Search projects] action row.
 	searchCursor := "  "
-	if p.cursor == len(p.sections) && p.focusLeft {
+	if p.focused && p.cursor == len(p.sections) && p.focusLeft {
 		searchCursor = "> "
 	}
 	searchLabel := lipgloss.NewStyle().Foreground(colorBlue).Render("[+ Search projects]")
+	if !p.focused {
+		searchLabel = dimStyle.Render("[+ Search projects]")
+	}
 	b.WriteString(searchCursor + searchLabel + "\n")
 
 	return listStyle.Height(p.totalHeight).Render(b.String())

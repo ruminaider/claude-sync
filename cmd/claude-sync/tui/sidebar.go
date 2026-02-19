@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // SidebarEntry holds display data for one section in the sidebar.
@@ -18,8 +19,9 @@ type SidebarEntry struct {
 // Sidebar renders the left-hand section navigation.
 type Sidebar struct {
 	sections []SidebarEntry
-	active   int // index into sections
-	height   int // available vertical space
+	active   int  // index into sections
+	height   int  // available vertical space
+	focused  bool // true when sidebar has keyboard focus
 }
 
 // NewSidebar creates a sidebar with entries for all sections.
@@ -37,6 +39,11 @@ func NewSidebar() Sidebar {
 // SetHeight sets the available height for rendering.
 func (s *Sidebar) SetHeight(h int) {
 	s.height = h
+}
+
+// SetFocused sets whether the sidebar currently has keyboard focus.
+func (s *Sidebar) SetFocused(f bool) {
+	s.focused = f
 }
 
 // SetActive moves the sidebar cursor to the given section.
@@ -113,45 +120,70 @@ func (s Sidebar) Update(msg tea.Msg) (Sidebar, tea.Cmd) {
 }
 
 // View renders the sidebar as a vertical list of section names with counts.
+// The active section gets a full-row background highlight instead of a cursor.
 func (s Sidebar) View() string {
-	var b strings.Builder
+	// Row width fills the container (border is drawn outside Width).
+	// Row styles have PaddingLeft(1), so text area = SidebarWidth - 1.
+	rowWidth := SidebarWidth
+	textWidth := rowWidth - 1 // minus PaddingLeft(1)
+
+	lines := make([]string, 0, s.height)
 
 	for i, e := range s.sections {
+		name := e.Section.String()
+
 		if !e.Available {
-			label := fmt.Sprintf("  %-12s", e.Section.String())
-			b.WriteString(UnavailableSidebarStyle.Render(label))
-			b.WriteString("\n")
+			label := fmt.Sprintf("%-*s", textWidth, name)
+			lines = append(lines, UnavailableSidebarStyle.Render(label))
 			continue
 		}
 
-		// Build the count display.
-		var count string
+		// Build label with right-aligned count.
+		var label string
 		if e.Total > 0 {
-			count = fmt.Sprintf("(%d/%d)", e.Selected, e.Total)
-		}
-
-		// Cursor indicator.
-		cursor := " "
-		if i == s.active {
-			cursor = ">"
-		}
-
-		label := fmt.Sprintf("%s %-11s %s", cursor, e.Section.String(), count)
-
-		if i == s.active {
-			b.WriteString(ActiveSidebarStyle.Render(label))
+			count := fmt.Sprintf("%d/%d", e.Selected, e.Total)
+			gap := textWidth - len(name) - len(count)
+			if gap < 1 {
+				gap = 1
+			}
+			label = name + strings.Repeat(" ", gap) + count
 		} else {
-			b.WriteString(InactiveSidebarStyle.Render(label))
+			label = fmt.Sprintf("%-*s", textWidth, name)
 		}
-		b.WriteString("\n")
+
+		// Set Width so the background highlight spans the full row.
+		if i == s.active && s.focused {
+			lines = append(lines, ActiveSidebarStyle.Width(rowWidth).Render(label))
+		} else if i == s.active {
+			// Active but unfocused: subtle highlight without bold/blue.
+			dimActiveStyle := lipgloss.NewStyle().
+				Foreground(colorSubtext0).
+				Background(colorSurface0).
+				PaddingLeft(1)
+			lines = append(lines, dimActiveStyle.Width(rowWidth).Render(label))
+		} else if s.focused {
+			lines = append(lines, InactiveSidebarStyle.Width(rowWidth).Render(label))
+		} else {
+			dimStyle := lipgloss.NewStyle().
+				Foreground(colorOverlay0).
+				PaddingLeft(1)
+			lines = append(lines, dimStyle.Width(rowWidth).Render(label))
+		}
 	}
 
-	// Pad remaining height with empty lines.
-	rendered := len(s.sections)
-	for rendered < s.height {
-		b.WriteString("\n")
-		rendered++
+	// Pad to exactly s.height lines.
+	for len(lines) < s.height {
+		lines = append(lines, "")
 	}
 
-	return SidebarContainerStyle.Height(s.height).Render(b.String())
+	content := strings.Join(lines, "\n")
+
+	borderColor := colorSurface1
+	if s.focused {
+		borderColor = colorBlue
+	}
+	return SidebarContainerStyle.
+		Height(s.height).
+		BorderForeground(borderColor).
+		Render(content)
 }

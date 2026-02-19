@@ -37,6 +37,7 @@ const (
 	overlaySaveSummary                         // save summary with confirm/cancel
 	overlayResetConfirm                        // reset all to defaults confirmation
 	overlayQuitConfirm                         // quit without saving confirmation
+	overlayHelp                                // help modal
 )
 
 // Model is the root bubbletea model that composes all TUI child components.
@@ -194,16 +195,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "tab":
+			// Cycle to next profile tab.
 			if m.useProfiles {
-				m.focusZone = FocusTabBar
+				m.tabBar.CycleNext()
+				m.activeTab = m.tabBar.ActiveTab()
+				m.syncSidebarCounts()
+				m.syncStatusBar()
+				return m, nil
+			}
+		case "shift+tab":
+			// Cycle to previous profile tab.
+			if m.useProfiles {
+				m.tabBar.CyclePrev()
+				m.activeTab = m.tabBar.ActiveTab()
+				m.syncSidebarCounts()
+				m.syncStatusBar()
+				return m, nil
+			}
+		case "+":
+			// Global: add new profile.
+			if m.useProfiles {
+				m.overlay = NewTextInputOverlay("New profile name", "e.g. work, personal")
+				m.overlayCtx = overlayProfileName
+				return m, nil
+			}
+		case "ctrl+d":
+			// Global: delete current profile (not Base).
+			if m.useProfiles && m.activeTab != "Base" {
+				m.pendingDeleteTab = m.activeTab
+				m.overlay = NewConfirmOverlay("Delete profile",
+					fmt.Sprintf("Delete profile %q?", m.activeTab))
+				m.overlayCtx = overlayDeleteConfirm
+				return m, nil
+			}
+		case "?":
+			m.overlay = NewHelpOverlay()
+			m.overlay.SetWidth(OverlayMaxWidth(m.width))
+			m.overlay.SetHeight(m.height)
+			m.overlayCtx = overlayHelp
+			return m, nil
+		case "h":
+			// h opens help from sidebar; in content, h means "move left" (handled by picker/sidebar).
+			if m.focusZone == FocusSidebar {
+				m.overlay = NewHelpOverlay()
+				m.overlay.SetWidth(OverlayMaxWidth(m.width))
+				m.overlay.SetHeight(m.height)
+				m.overlayCtx = overlayHelp
 				return m, nil
 			}
 		case "esc":
 			if m.focusZone == FocusContent || m.focusZone == FocusPreview {
-				m.focusZone = FocusSidebar
-				return m, nil
-			}
-			if m.focusZone == FocusTabBar {
 				m.focusZone = FocusSidebar
 				return m, nil
 			}
@@ -216,8 +257,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Focus-based routing.
 	switch m.focusZone {
-	case FocusTabBar:
-		return m.updateTabBar(msg, &cmds)
 	case FocusSidebar:
 		return m.updateSidebar(msg, &cmds)
 	case FocusContent, FocusPreview:
@@ -244,30 +283,39 @@ func (m Model) View() string {
 		return Composite(blank, m.overlay.View(), m.width, m.height)
 	}
 
-	// Compute dimensions.
-	tabBarHeight := 0
-	if m.useProfiles {
-		tabBarHeight = 1
-	}
-	statusBarHeight := 1
-	contentHeight := m.height - tabBarHeight - statusBarHeight
+	// Render status bar first so we can measure its actual height.
+	statusView := m.statusBar.View()
+	statusBarHeight := strings.Count(statusView, "\n") + 1
+	mainHeight := m.height - statusBarHeight
 
-	// Tab bar (only if profiles).
+	// Sidebar spans full height (minus status bar).
+	m.sidebar.SetFocused(m.focusZone == FocusSidebar)
+	sidebarView := m.sidebar.View()
+
+	// Right pane: optional tab bar + helper text + content.
+	hLines := helperLines(m.height)
+	contentHeight := mainHeight - hLines
 	tabBarView := ""
 	if m.useProfiles {
 		tabBarView = m.tabBar.View() + "\n"
+		contentHeight = mainHeight - 1 - hLines // tab bar takes 1 line
 	}
 
-	// Sidebar + content pane.
-	sidebarView := m.sidebar.View()
+	// Contextual helper text.
+	isProfile := m.activeTab != "Base"
+	contentWidth := m.width - SidebarWidth - 2
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	helperView := renderHelper(m.activeSection, isProfile, contentWidth, hLines)
+
 	contentView := m.currentContentView(contentHeight)
-	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, contentView)
+	rightPane := tabBarView + helperView + contentView
 
-	// Status bar.
-	statusView := m.statusBar.View()
+	// Join sidebar and right pane horizontally.
+	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, rightPane)
 
-	// Compose.
-	return tabBarView + mainArea + "\n" + statusView
+	return mainArea + "\n" + statusView
 }
 
 // --- Update helpers ---
@@ -325,6 +373,8 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 		// Switch to Base tab so user configures base first.
 		m.activeTab = "Base"
 		m.tabBar.SetActive(0)
+		m.focusZone = FocusSidebar
+		m.distributeSize()
 		m.syncSidebarCounts()
 		m.syncStatusBar()
 
@@ -375,45 +425,12 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
+
+	case overlayHelp:
+		// No-op, just dismiss.
 	}
 
 	return m, nil
-}
-
-func (m Model) updateTabBar(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	m.tabBar, cmd = m.tabBar.Update(msg)
-	if cmd != nil {
-		*cmds = append(*cmds, cmd)
-
-		if switchMsg := extractTabSwitch(cmd); switchMsg != nil {
-			m.activeTab = switchMsg.Name
-			m.syncSidebarCounts()
-			m.syncStatusBar()
-		}
-		if extractNewProfileRequest(cmd) {
-			m.overlay = NewTextInputOverlay("New profile name", "e.g. work, personal")
-			m.overlayCtx = overlayProfileName
-			return m, nil
-		}
-		if deleteMsg := extractDeleteProfile(cmd); deleteMsg != nil {
-			m.pendingDeleteTab = deleteMsg.Name
-			m.overlay = NewConfirmOverlay("Delete profile",
-				fmt.Sprintf("Delete profile %q?", deleteMsg.Name))
-			m.overlayCtx = overlayDeleteConfirm
-			return m, nil
-		}
-	}
-
-	// Tab/enter on tab bar should go to sidebar.
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.String() {
-		case "down", "j", "enter":
-			m.focusZone = FocusSidebar
-		}
-	}
-
-	return m, tea.Batch(*cmds...)
 }
 
 func (m Model) updateSidebar(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) {
@@ -484,11 +501,31 @@ func (m Model) updatePreview(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) 
 
 // --- View helpers ---
 
-func (m Model) currentContentView(_ int) string {
+func (m Model) currentContentView(height int) string {
+	contentFocused := m.focusZone == FocusContent || m.focusZone == FocusPreview
+	var view string
 	if m.activeSection == SectionClaudeMD {
-		return m.currentPreview().View()
+		p := m.currentPreview()
+		p.focused = contentFocused
+		view = p.View()
+	} else {
+		p := m.currentPicker()
+		p.focused = contentFocused
+		view = p.View()
 	}
-	return m.currentPicker().View()
+	return clampHeight(view, height)
+}
+
+// clampHeight truncates s to at most maxLines lines, preventing layout overflow.
+func clampHeight(s string, maxLines int) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	lines := strings.SplitN(s, "\n", maxLines+1)
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // currentPicker returns the picker for the current tab and section.
@@ -534,27 +571,130 @@ func (m *Model) setCurrentPreview(p Preview) {
 	m.preview = p
 }
 
+// helperLines returns the number of lines the contextual helper text occupies
+// based on terminal height. Returns 3 (full), 2 (compact), or 0 (hidden).
+func helperLines(termHeight int) int {
+	switch {
+	case termHeight >= 28:
+		return 3 // description + shortcuts + separator
+	case termHeight >= 24:
+		return 2 // description + separator
+	default:
+		return 0 // hidden
+	}
+}
+
+// helperText returns the two-line contextual description for a section.
+// line1 is a description of what the section does, line2 is keyboard shortcuts.
+func helperText(section Section, isProfile bool) (string, string) {
+	var line1 string
+
+	if isProfile {
+		switch section {
+		case SectionPlugins:
+			line1 = "Add or remove plugins relative to the base config."
+		case SectionSettings:
+			line1 = "Override base settings for this profile."
+		case SectionClaudeMD:
+			line1 = "Add or exclude CLAUDE.md sections for this profile."
+		case SectionPermissions:
+			line1 = "Adjust permission rules for this profile."
+		case SectionMCP:
+			line1 = "Add or remove MCP servers for this profile."
+		case SectionKeybindings:
+			line1 = "Override keybindings for this profile."
+		case SectionHooks:
+			line1 = "Add or remove hooks for this profile."
+		default:
+			line1 = "Configure this section."
+		}
+	} else {
+		switch section {
+		case SectionPlugins:
+			line1 = "Choose which Claude plugins to sync."
+		case SectionSettings:
+			line1 = "Select Claude settings to include."
+		case SectionClaudeMD:
+			line1 = "Pick which CLAUDE.md sections to sync."
+		case SectionPermissions:
+			line1 = "Select allow/deny permission rules."
+		case SectionMCP:
+			line1 = "Choose which MCP server configs to sync."
+		case SectionKeybindings:
+			line1 = "Include or exclude keybinding config."
+		case SectionHooks:
+			line1 = "Select which auto-sync hooks to include."
+		default:
+			line1 = "Configure this section."
+		}
+	}
+
+	// Line 2: keyboard shortcuts (same for base and profile).
+	var line2 string
+	switch section {
+	case SectionClaudeMD:
+		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none \u00b7 →: preview content"
+	case SectionKeybindings:
+		line2 = "Space: toggle"
+	default:
+		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none"
+	}
+
+	return line1, line2
+}
+
+// renderHelper renders the helper block above content.
+// lines controls the format: 3 = full (desc + shortcuts + sep), 2 = compact (desc + sep), 0 = hidden.
+func renderHelper(section Section, isProfile bool, width, lines int) string {
+	if lines <= 0 {
+		return ""
+	}
+
+	line1, line2 := helperText(section, isProfile)
+
+	var b strings.Builder
+	b.WriteString(HelperTextStyle.Render(" " + line1))
+	b.WriteString("\n")
+	if lines >= 3 {
+		b.WriteString(HelperTextStyle.Render(" " + line2))
+		b.WriteString("\n")
+	}
+	sep := strings.Repeat("─", width)
+	b.WriteString(HelperSeparatorStyle.Render(sep))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
 // --- Size distribution ---
 
 func (m *Model) distributeSize() {
-	tabBarHeight := 0
-	if m.useProfiles {
-		tabBarHeight = 1
-	}
 	statusBarHeight := 1
-	contentHeight := m.height - tabBarHeight - statusBarHeight
+	mainHeight := m.height - statusBarHeight
 
-	m.tabBar.SetWidth(m.width)
-	m.sidebar.SetHeight(contentHeight)
-	m.statusBar.SetWidth(m.width)
+	// Sidebar spans full main height.
+	m.sidebar.SetHeight(mainHeight)
 
-	overlayWidth := OverlayMaxWidth(m.width)
-	m.overlay.SetWidth(overlayWidth)
-
+	// Content width = terminal - sidebar - sidebar border (2 = border char + space).
 	contentWidth := m.width - SidebarWidth - 2
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
+
+	// Tab bar sits above content, same width.
+	m.tabBar.SetWidth(contentWidth)
+
+	// Content height = main height minus tab bar minus helper text.
+	tabBarHeight := 0
+	if m.useProfiles {
+		tabBarHeight = 1
+	}
+	contentHeight := mainHeight - tabBarHeight - helperLines(m.height)
+
+	m.statusBar.SetWidth(m.width)
+
+	overlayWidth := OverlayMaxWidth(m.width)
+	m.overlay.SetWidth(overlayWidth)
 
 	// Update all pickers and preview with current dimensions.
 	for sec, p := range m.pickers {
@@ -1118,36 +1258,6 @@ func extractOverlayClose(cmd tea.Cmd) *OverlayCloseMsg {
 	return nil
 }
 
-func extractTabSwitch(cmd tea.Cmd) *TabSwitchMsg {
-	if cmd == nil {
-		return nil
-	}
-	msg := cmd()
-	if m, ok := msg.(TabSwitchMsg); ok {
-		return &m
-	}
-	return nil
-}
-
-func extractNewProfileRequest(cmd tea.Cmd) bool {
-	if cmd == nil {
-		return false
-	}
-	msg := cmd()
-	_, ok := msg.(NewProfileRequestMsg)
-	return ok
-}
-
-func extractDeleteProfile(cmd tea.Cmd) *DeleteProfileMsg {
-	if cmd == nil {
-		return nil
-	}
-	msg := cmd()
-	if m, ok := msg.(DeleteProfileMsg); ok {
-		return &m
-	}
-	return nil
-}
 
 func extractSectionSwitch(cmd tea.Cmd) *SectionSwitchMsg {
 	if cmd == nil {
