@@ -24,24 +24,55 @@ var (
 	colorRed      = lipgloss.Color(flavor.Red().Hex)
 	colorYellow   = lipgloss.Color(flavor.Yellow().Hex)
 	colorMauve    = lipgloss.Color(flavor.Mauve().Hex)
+	colorPeach    = lipgloss.Color(flavor.Peach().Hex)
+	colorTeal     = lipgloss.Color(flavor.Teal().Hex)
+	colorPink     = lipgloss.Color(flavor.Pink().Hex)
+	colorLavender = lipgloss.Color(flavor.Lavender().Hex)
 	colorOverlay0 = lipgloss.Color(flavor.Overlay0().Hex)
 )
 
+// ProfileTheme holds the accent color for a profile tab.
+type ProfileTheme struct {
+	Accent lipgloss.Color // bright accent (e.g. Blue)
+}
+
+// ProfileThemeRotation defines the color cycle for profile tabs.
+// Base always gets index 0; subsequent profiles cycle through the rest.
+var ProfileThemeRotation = []ProfileTheme{
+	{colorBlue},
+	{colorRed},
+	{colorMauve},
+	{colorPeach},
+	{colorGreen},
+	{colorTeal},
+	{colorPink},
+	{colorLavender},
+}
+
+// SectionAccent returns the Catppuccin accent color for a sidebar section.
+func SectionAccent(s Section) lipgloss.Color {
+	switch s {
+	case SectionPlugins:
+		return colorBlue
+	case SectionSettings:
+		return colorMauve
+	case SectionClaudeMD:
+		return colorGreen
+	case SectionPermissions:
+		return colorRed
+	case SectionMCP:
+		return colorPeach
+	case SectionKeybindings:
+		return colorYellow
+	case SectionHooks:
+		return colorTeal
+	default:
+		return colorBlue
+	}
+}
+
 // Tab bar styles.
 var (
-	// ActiveTabStyle is used for the currently selected profile tab.
-	ActiveTabStyle = lipgloss.NewStyle().
-			Foreground(colorBase).
-			Background(colorBlue).
-			Padding(0, 1).
-			Bold(true)
-
-	// InactiveTabStyle is used for non-selected profile tabs.
-	InactiveTabStyle = lipgloss.NewStyle().
-				Foreground(colorText).
-				Background(colorSurface0).
-				Padding(0, 1)
-
 	// PlusTabStyle is used for the [+] new profile button.
 	PlusTabStyle = lipgloss.NewStyle().
 			Foreground(colorOverlay0).
@@ -51,13 +82,6 @@ var (
 
 // Sidebar styles.
 var (
-	// ActiveSidebarStyle is used for the currently selected sidebar item.
-	ActiveSidebarStyle = lipgloss.NewStyle().
-				Foreground(colorBlue).
-				Background(colorSurface1).
-				Bold(true).
-				PaddingLeft(1)
-
 	// InactiveSidebarStyle is used for non-selected sidebar items.
 	InactiveSidebarStyle = lipgloss.NewStyle().
 				Foreground(colorText).

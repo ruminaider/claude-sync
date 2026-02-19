@@ -325,7 +325,15 @@ func (m Model) View() string {
 	helperView := renderHelper(m.activeSection, isProfile, contentWidth, hLines)
 
 	contentView := m.currentContentView(contentHeight)
-	rightPane := tabBarView + helperView + contentView
+
+	// Add a colored left border matching the active profile's accent color.
+	accent := m.tabBar.ActiveTheme().Accent
+	borderedContent := lipgloss.NewStyle().
+		BorderLeft(true).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(accent).
+		Render(helperView + contentView)
+	rightPane := tabBarView + borderedContent
 
 	// Join sidebar and right pane horizontally.
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, rightPane)

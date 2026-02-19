@@ -129,7 +129,7 @@ func (s Sidebar) Update(msg tea.Msg) (Sidebar, tea.Cmd) {
 }
 
 // View renders the sidebar as a vertical list of section names with counts.
-// The active section gets a full-row background highlight instead of a cursor.
+// Each section is colored with its accent color when focused.
 func (s Sidebar) View() string {
 	// Row width fills the container (border is drawn outside Width).
 	// Row styles have PaddingLeft(1), so text area = SidebarWidth - 1.
@@ -140,6 +140,7 @@ func (s Sidebar) View() string {
 
 	for i, e := range s.sections {
 		name := e.Section.String()
+		accent := SectionAccent(e.Section)
 
 		if !e.Available {
 			label := fmt.Sprintf("%-*s", textWidth, name)
@@ -162,17 +163,28 @@ func (s Sidebar) View() string {
 
 		// Set Width so the background highlight spans the full row.
 		if i == s.active && s.focused {
-			lines = append(lines, ActiveSidebarStyle.Width(rowWidth).Render(label))
+			// Active + focused: section accent color, Surface1 background, bold.
+			style := lipgloss.NewStyle().
+				Foreground(accent).
+				Background(colorSurface1).
+				Bold(true).
+				PaddingLeft(1)
+			lines = append(lines, style.Width(rowWidth).Render(label))
 		} else if i == s.active {
-			// Active but unfocused: subtle highlight without bold/blue.
+			// Active but unfocused: subtle highlight.
 			dimActiveStyle := lipgloss.NewStyle().
 				Foreground(colorSubtext0).
 				Background(colorSurface0).
 				PaddingLeft(1)
 			lines = append(lines, dimActiveStyle.Width(rowWidth).Render(label))
 		} else if s.focused {
-			lines = append(lines, InactiveSidebarStyle.Width(rowWidth).Render(label))
+			// Inactive + focused: section accent as foreground, no background.
+			style := lipgloss.NewStyle().
+				Foreground(accent).
+				PaddingLeft(1)
+			lines = append(lines, style.Width(rowWidth).Render(label))
 		} else {
+			// Inactive + unfocused: dim.
 			dimStyle := lipgloss.NewStyle().
 				Foreground(colorOverlay0).
 				PaddingLeft(1)
