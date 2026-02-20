@@ -21,7 +21,7 @@ var (
 	joinSkipHooks    bool
 )
 
-var joinCmd = &cobra.Command{
+var configJoinCmd = &cobra.Command{
 	Use:   "join <url>",
 	Short: "Join existing config repo",
 	Args:  cobra.ExactArgs(1),
@@ -271,9 +271,26 @@ func promptLocalPluginCleanup(plugins []commands.LocalPlugin) ([]commands.LocalP
 	return nil, nil
 }
 
+var joinAliasCmd = &cobra.Command{
+	Use:        "join <url>",
+	Short:      "Join existing config repo",
+	Hidden:     true,
+	Deprecated: "Use 'claude-sync config join' instead.",
+	Args:       cobra.ExactArgs(1),
+	RunE:       configJoinCmd.RunE,
+}
+
 func init() {
-	joinCmd.Flags().BoolVar(&joinClean, "clean", false, "Automatically remove local-only plugins not in the remote config")
-	joinCmd.Flags().BoolVar(&joinKeepLocal, "keep-local", false, "Keep all locally installed plugins without prompting")
-	joinCmd.Flags().BoolVar(&joinSkipSettings, "skip-settings", false, "Don't apply settings from the remote config")
-	joinCmd.Flags().BoolVar(&joinSkipHooks, "skip-hooks", false, "Don't apply hooks from the remote config")
+	configJoinCmd.Flags().BoolVar(&joinClean, "clean", false, "Automatically remove local-only plugins not in the remote config")
+	configJoinCmd.Flags().BoolVar(&joinKeepLocal, "keep-local", false, "Keep all locally installed plugins without prompting")
+	configJoinCmd.Flags().BoolVar(&joinSkipSettings, "skip-settings", false, "Don't apply settings from the remote config")
+	configJoinCmd.Flags().BoolVar(&joinSkipHooks, "skip-hooks", false, "Don't apply hooks from the remote config")
+
+	// Copy flags to alias for full backward compatibility.
+	joinAliasCmd.Flags().BoolVar(&joinClean, "clean", false, "Automatically remove local-only plugins not in the remote config")
+	joinAliasCmd.Flags().BoolVar(&joinKeepLocal, "keep-local", false, "Keep all locally installed plugins without prompting")
+	joinAliasCmd.Flags().BoolVar(&joinSkipSettings, "skip-settings", false, "Don't apply settings from the remote config")
+	joinAliasCmd.Flags().BoolVar(&joinSkipHooks, "skip-hooks", false, "Don't apply hooks from the remote config")
+
+	configCmd.AddCommand(configJoinCmd)
 }

@@ -29,8 +29,10 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(joinCmd)
+	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(initAliasCmd)
+	rootCmd.AddCommand(joinAliasCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(pushCmd)
@@ -46,6 +48,7 @@ func init() {
 	rootCmd.AddCommand(rejectCmd)
 	rootCmd.AddCommand(autoCommitCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(conflictsCmd)
 }
 
 func main() {

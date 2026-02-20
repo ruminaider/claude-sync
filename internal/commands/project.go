@@ -1,0 +1,445 @@
+package commands
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
+	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/profiles"
+	"github.com/ruminaider/claude-sync/internal/project"
+)
+
+// ProjectInitOptions configures project initialization.
+type ProjectInitOptions struct {
+	ProjectDir    string
+	SyncDir       string
+	Profile       string
+	ProjectedKeys []string
+	Yes           bool // non-interactive mode
+}
+
+// ProjectInitResult describes what happened during project init.
+type ProjectInitResult struct {
+	Created             bool
+	Profile             string
+	ProjectedKeys       []string
+	ImportedPermissions int
+	ImportedHooks       int
+}
+
+// ProjectInit initializes a project's settings.local.json from a claude-sync profile.
+func ProjectInit(opts ProjectInitOptions) (*ProjectInitResult, error) {
+	// 1. Verify global config exists
+	cfgPath := filepath.Join(opts.SyncDir, "config.yaml")
+	cfgData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil, fmt.Errorf("claude-sync not initialized — run 'claude-sync config create' first")
+	}
+	cfg, err := config.Parse(cfgData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// 2. Resolve base config + profile
+	resolved := ResolveWithProfile(cfg, opts.SyncDir, opts.Profile)
+
+	// 3. Import existing settings.local.json
+	var overrides project.ProjectOverrides
+	var importedPerms, importedHooks int
+	settingsPath := filepath.Join(opts.ProjectDir, ".claude", "settings.local.json")
+	if data, readErr := os.ReadFile(settingsPath); readErr == nil {
+		var existing map[string]json.RawMessage
+		if json.Unmarshal(data, &existing) == nil {
+			importedPerms = importPermissionOverrides(&overrides, existing, resolved.Permissions)
+			importedHooks = importHookOverrides(&overrides, existing, resolved.Hooks)
+		}
+	}
+
+	// 4. Write .claude-sync.yaml
+	pcfg := project.ProjectConfig{
+		Version:       "1.0.0",
+		Profile:       opts.Profile,
+		Initialized:   time.Now().UTC().Format(time.RFC3339),
+		ProjectedKeys: opts.ProjectedKeys,
+		Overrides:     overrides,
+	}
+	if err := project.WriteProjectConfig(opts.ProjectDir, pcfg); err != nil {
+		return nil, fmt.Errorf("failed to write project config: %w", err)
+	}
+
+	// 5. Apply projected keys to settings.local.json
+	if err := ApplyProjectSettings(opts.ProjectDir, resolved, pcfg, opts.SyncDir); err != nil {
+		return nil, fmt.Errorf("failed to apply project settings: %w", err)
+	}
+
+	// 6. Ensure .claude-sync.yaml is in .gitignore
+	ensureGitignore(opts.ProjectDir, ".claude/"+project.ConfigFileName)
+
+	return &ProjectInitResult{
+		Created:             true,
+		Profile:             opts.Profile,
+		ProjectedKeys:       opts.ProjectedKeys,
+		ImportedPermissions: importedPerms,
+		ImportedHooks:       importedHooks,
+	}, nil
+}
+
+// ResolvedConfig holds the fully merged base + profile result.
+// Exported so pull.go and push.go can reuse it.
+type ResolvedConfig struct {
+	Hooks       map[string]json.RawMessage
+	Permissions config.Permissions
+	Settings    map[string]any
+	ClaudeMD    []string
+	MCP         map[string]json.RawMessage
+}
+
+// ResolveWithProfile merges base config with the specified profile (or active profile if empty).
+func ResolveWithProfile(cfg config.Config, syncDir, profileName string) ResolvedConfig {
+	rc := ResolvedConfig{
+		Hooks:       copyHooks(cfg.Hooks),
+		Permissions: cfg.Permissions,
+		Settings:    cfg.Settings,
+		ClaudeMD:    cfg.ClaudeMD.Include,
+		MCP:         copyHooks(cfg.MCP), // same type: map[string]json.RawMessage
+	}
+
+	if profileName == "" {
+		profileName, _ = profiles.ReadActiveProfile(syncDir)
+	}
+
+	if profileName != "" {
+		if p, err := profiles.ReadProfile(syncDir, profileName); err == nil {
+			rc.Hooks = profiles.MergeHooks(rc.Hooks, p)
+			rc.Permissions = profiles.MergePermissions(rc.Permissions, p)
+			rc.Settings = profiles.MergeSettings(rc.Settings, p)
+			rc.ClaudeMD = profiles.MergeClaudeMD(rc.ClaudeMD, p)
+			rc.MCP = profiles.MergeMCP(rc.MCP, p)
+		}
+	}
+
+	return rc
+}
+
+// copyHooks makes a shallow copy of a map[string]json.RawMessage.
+func copyHooks(m map[string]json.RawMessage) map[string]json.RawMessage {
+	if m == nil {
+		return make(map[string]json.RawMessage)
+	}
+	result := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
+}
+
+func importPermissionOverrides(overrides *project.ProjectOverrides, existing map[string]json.RawMessage, basePerms config.Permissions) int {
+	permRaw, ok := existing["permissions"]
+	if !ok {
+		return 0
+	}
+	var perms struct {
+		Allow []string `json:"allow"`
+	}
+	if json.Unmarshal(permRaw, &perms) != nil {
+		return 0
+	}
+
+	baseSet := make(map[string]bool, len(basePerms.Allow))
+	for _, p := range basePerms.Allow {
+		baseSet[p] = true
+	}
+
+	var added int
+	for _, p := range perms.Allow {
+		if !baseSet[p] {
+			overrides.Permissions.AddAllow = append(overrides.Permissions.AddAllow, p)
+			added++
+		}
+	}
+	return added
+}
+
+func importHookOverrides(overrides *project.ProjectOverrides, existing map[string]json.RawMessage, baseHooks map[string]json.RawMessage) int {
+	hooksRaw, ok := existing["hooks"]
+	if !ok {
+		return 0
+	}
+	var hooks map[string]json.RawMessage
+	if json.Unmarshal(hooksRaw, &hooks) != nil {
+		return 0
+	}
+
+	var added int
+	for name, raw := range hooks {
+		if _, inBase := baseHooks[name]; !inBase {
+			if overrides.Hooks.Add == nil {
+				overrides.Hooks.Add = make(map[string]json.RawMessage)
+			}
+			overrides.Hooks.Add[name] = raw
+			added++
+		}
+	}
+	return added
+}
+
+// ApplyProjectSettings writes managed keys to settings.local.json.
+// Unmanaged keys are preserved. syncDir is the claude-sync config directory,
+// needed for assembling CLAUDE.md fragments.
+func ApplyProjectSettings(projectDir string, resolved ResolvedConfig, pcfg project.ProjectConfig, syncDir string) error {
+	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
+
+	// Read existing settings (preserve unmanaged keys)
+	var settings map[string]json.RawMessage
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]json.RawMessage)
+	}
+
+	// Apply project overrides on top of resolved config
+	finalPerms := config.Permissions{
+		Allow: append(append([]string{}, resolved.Permissions.Allow...), pcfg.Overrides.Permissions.AddAllow...),
+		Deny:  append(append([]string{}, resolved.Permissions.Deny...), pcfg.Overrides.Permissions.AddDeny...),
+	}
+
+	finalHooks := copyHooks(resolved.Hooks)
+	for name, raw := range pcfg.Overrides.Hooks.Add {
+		finalHooks[name] = raw
+	}
+	for _, name := range pcfg.Overrides.Hooks.Remove {
+		delete(finalHooks, name)
+	}
+
+	// Write projected keys
+	for _, key := range pcfg.ProjectedKeys {
+		switch key {
+		case "hooks":
+			data, _ := json.Marshal(finalHooks)
+			settings["hooks"] = data
+		case "permissions":
+			p := map[string]any{"allow": finalPerms.Allow}
+			if len(finalPerms.Deny) > 0 {
+				p["deny"] = finalPerms.Deny
+			}
+			data, _ := json.Marshal(p)
+			settings["permissions"] = data
+		case "claude_md":
+			// Merge resolved CLAUDE.md includes with project overrides
+			includes := append([]string{}, resolved.ClaudeMD...)
+			includes = append(includes, pcfg.Overrides.ClaudeMD.Add...)
+			if len(pcfg.Overrides.ClaudeMD.Remove) > 0 {
+				removeSet := make(map[string]bool, len(pcfg.Overrides.ClaudeMD.Remove))
+				for _, r := range pcfg.Overrides.ClaudeMD.Remove {
+					removeSet[r] = true
+				}
+				var filtered []string
+				for _, inc := range includes {
+					if !removeSet[inc] {
+						filtered = append(filtered, inc)
+					}
+				}
+				includes = filtered
+			}
+			if len(includes) > 0 {
+				assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
+				if asmErr == nil && assembled != "" {
+					claudeMDPath := filepath.Join(projectDir, ".claude", "CLAUDE.md")
+					os.WriteFile(claudeMDPath, []byte(assembled), 0644)
+				}
+			}
+		case "mcp":
+			finalMCP := copyHooks(resolved.MCP)
+			for name, raw := range pcfg.Overrides.MCP.Add {
+				finalMCP[name] = raw
+			}
+			for _, name := range pcfg.Overrides.MCP.Remove {
+				delete(finalMCP, name)
+			}
+			if len(finalMCP) > 0 {
+				mcpPath := filepath.Join(projectDir, ".mcp.json")
+				if err := claudecode.WriteMCPConfigFile(mcpPath, finalMCP); err != nil {
+					return fmt.Errorf("writing .mcp.json: %w", err)
+				}
+			}
+		}
+	}
+
+	// Ensure .claude dir exists
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0755); err != nil {
+		return err
+	}
+
+	// Write back
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, append(data, '\n'), 0644)
+}
+
+func ensureGitignore(projectDir, entry string) {
+	gitignorePath := filepath.Join(projectDir, ".gitignore")
+	content, _ := os.ReadFile(gitignorePath)
+	if containsLine(string(content), entry) {
+		return
+	}
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		f.WriteString("\n")
+	}
+	f.WriteString(entry + "\n")
+}
+
+func containsLine(s, target string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ProjectPushOptions configures project push behavior.
+type ProjectPushOptions struct {
+	ProjectDir string
+	SyncDir    string
+}
+
+// ProjectPushResult describes what drift was captured.
+type ProjectPushResult struct {
+	NewPermissions int
+	NewHooks       int
+}
+
+// ProjectPush detects new permissions/hooks in settings.local.json that aren't
+// in the resolved config or existing overrides, and saves them to project overrides.
+func ProjectPush(opts ProjectPushOptions) (*ProjectPushResult, error) {
+	pcfg, err := project.ReadProjectConfig(opts.ProjectDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse global config
+	cfgData, err := os.ReadFile(filepath.Join(opts.SyncDir, "config.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+	cfg, err := config.Parse(cfgData)
+	if err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	resolved := ResolveWithProfile(cfg, opts.SyncDir, pcfg.Profile)
+
+	// Read current settings.local.json
+	settingsPath := filepath.Join(opts.ProjectDir, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading settings.local.json: %w", err)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, fmt.Errorf("parsing settings.local.json: %w", err)
+	}
+
+	var newPerms, newHooks int
+
+	// Diff permissions
+	newPerms = diffNewPermissions(&pcfg, settings, resolved.Permissions)
+
+	// Diff hooks
+	newHooks = diffNewHooks(&pcfg, settings, resolved.Hooks)
+
+	// Save updated overrides
+	if newPerms > 0 || newHooks > 0 {
+		if err := project.WriteProjectConfig(opts.ProjectDir, pcfg); err != nil {
+			return nil, fmt.Errorf("writing project config: %w", err)
+		}
+	}
+
+	return &ProjectPushResult{
+		NewPermissions: newPerms,
+		NewHooks:       newHooks,
+	}, nil
+}
+
+// diffNewPermissions finds permissions in settings.local.json that aren't
+// in the resolved config or existing overrides. Adds them to pcfg overrides.
+func diffNewPermissions(pcfg *project.ProjectConfig, settings map[string]json.RawMessage, resolvedPerms config.Permissions) int {
+	permRaw, ok := settings["permissions"]
+	if !ok {
+		return 0
+	}
+	var perms struct {
+		Allow []string `json:"allow"`
+	}
+	if json.Unmarshal(permRaw, &perms) != nil {
+		return 0
+	}
+
+	// Build set of all known permissions (resolved + existing overrides)
+	known := make(map[string]bool)
+	for _, p := range resolvedPerms.Allow {
+		known[p] = true
+	}
+	for _, p := range pcfg.Overrides.Permissions.AddAllow {
+		known[p] = true
+	}
+
+	var added int
+	for _, p := range perms.Allow {
+		if !known[p] {
+			pcfg.Overrides.Permissions.AddAllow = append(pcfg.Overrides.Permissions.AddAllow, p)
+			added++
+		}
+	}
+	return added
+}
+
+// diffNewHooks finds hooks in settings.local.json that aren't
+// in the resolved config or existing overrides.
+func diffNewHooks(pcfg *project.ProjectConfig, settings map[string]json.RawMessage, resolvedHooks map[string]json.RawMessage) int {
+	hooksRaw, ok := settings["hooks"]
+	if !ok {
+		return 0
+	}
+	var hooks map[string]json.RawMessage
+	if json.Unmarshal(hooksRaw, &hooks) != nil {
+		return 0
+	}
+
+	// Build set of all known hook names
+	known := make(map[string]bool)
+	for name := range resolvedHooks {
+		known[name] = true
+	}
+	if pcfg.Overrides.Hooks.Add != nil {
+		for name := range pcfg.Overrides.Hooks.Add {
+			known[name] = true
+		}
+	}
+
+	var added int
+	for name, raw := range hooks {
+		if !known[name] {
+			if pcfg.Overrides.Hooks.Add == nil {
+				pcfg.Overrides.Hooks.Add = make(map[string]json.RawMessage)
+			}
+			pcfg.Overrides.Hooks.Add[name] = raw
+			added++
+		}
+	}
+	return added
+}
