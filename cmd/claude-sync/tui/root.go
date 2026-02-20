@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
+	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/profiles"
@@ -17,13 +18,14 @@ import (
 
 // SkipFlags controls which sections are skipped (deselected) via CLI flags.
 type SkipFlags struct {
-	Plugins     bool
-	Settings    bool
-	Hooks       bool
-	Permissions bool
-	ClaudeMD    bool
-	MCP         bool
-	Keybindings bool
+	Plugins        bool
+	Settings       bool
+	Hooks          bool
+	Permissions    bool
+	ClaudeMD       bool
+	MCP            bool
+	Keybindings    bool
+	CommandsSkills bool
 }
 
 // overlayContext tracks what the currently-active overlay was opened for.
@@ -84,6 +86,9 @@ type Model struct {
 	discoveredMCP map[string]json.RawMessage // server name → config
 	mcpSources    map[string]string          // server name → shortened source path
 
+	// Discovered commands/skills from project-level .claude/ directories.
+	discoveredCmdSkills []cmdskill.Item
+
 	// Result -- set on save, read by cmd_init.go after TUI exits.
 	Result *commands.InitOptions
 }
@@ -117,6 +122,18 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(scan.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(scan.Keybindings))
 
+	// Build Commands & Skills picker.
+	csPicker := NewPicker(CommandsSkillsPickerItems(scan.CommandsSkills))
+	csPicker.SetSearchAction(true)
+	if scan.CommandsSkills != nil {
+		previewContent := make(map[string]string)
+		for _, item := range scan.CommandsSkills.Items {
+			previewContent[item.Key()] = item.Content
+		}
+		csPicker.SetPreview(previewContent)
+	}
+	m.pickers[SectionCommandsSkills] = csPicker
+
 	// Build CLAUDE.md preview.
 	previewSections := ClaudeMDPreviewSections(scan.ClaudeMDSections, "~/.claude/CLAUDE.md")
 	m.preview = NewPreview(previewSections)
@@ -140,6 +157,9 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	if skip.Keybindings {
 		m.deselectPicker(SectionKeybindings)
 	}
+	if skip.CommandsSkills {
+		m.deselectPicker(SectionCommandsSkills)
+	}
 	if skip.ClaudeMD {
 		// Deselect all CLAUDE.md sections.
 		for i := range m.preview.SelectedFragmentKeys() {
@@ -154,6 +174,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	// Initialize sidebar and tab bar.
 	m.sidebar = NewSidebar()
 	m.sidebar.SetAlwaysAvailable(SectionMCP)
+	m.sidebar.SetAlwaysAvailable(SectionCommandsSkills)
 	m.syncSidebarCounts()
 	m.tabBar = NewTabBar(nil)
 
@@ -192,6 +213,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case MCPSearchDoneMsg:
 		return m.handleMCPSearchDone(msg), nil
+
+	case CmdSkillSearchDoneMsg:
+		return m.handleCmdSkillSearchDone(msg), nil
 	}
 
 	// When overlay is active, route ALL messages to the overlay.
@@ -495,8 +519,13 @@ func (m Model) updatePicker(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) {
 		if focusMsg := extractFocusChange(cmd); focusMsg != nil {
 			m.focusZone = focusMsg.Zone
 		}
-		if extractSearchRequest(cmd) && m.activeSection == SectionMCP {
-			return m, SearchMCPConfigs()
+		if extractSearchRequest(cmd) {
+			switch m.activeSection {
+			case SectionMCP:
+				return m, SearchMCPConfigs()
+			case SectionCommandsSkills:
+				return m, SearchCommandsSkills()
+			}
 		}
 	}
 
@@ -634,6 +663,8 @@ func helperText(section Section, isProfile bool) (string, string) {
 			line1 = "Override keybindings for this profile."
 		case SectionHooks:
 			line1 = "Add or remove hooks for this profile."
+		case SectionCommandsSkills:
+			line1 = "Add or remove commands and skills for this profile."
 		default:
 			line1 = "Configure this section."
 		}
@@ -653,6 +684,8 @@ func helperText(section Section, isProfile bool) (string, string) {
 			line1 = "Include or exclude keybinding config."
 		case SectionHooks:
 			line1 = "Select which auto-sync hooks to include."
+		case SectionCommandsSkills:
+			line1 = "Choose commands and skills to sync."
 		default:
 			line1 = "Configure this section."
 		}
@@ -663,6 +696,8 @@ func helperText(section Section, isProfile bool) (string, string) {
 	switch section {
 	case SectionClaudeMD:
 		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none \u00b7 →: preview content"
+	case SectionCommandsSkills:
+		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none \u00b7 →: preview"
 	case SectionKeybindings:
 		line2 = "Space: toggle"
 	default:
@@ -980,9 +1015,22 @@ func (m *Model) resetToDefaults() {
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(m.scanResult.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(m.scanResult.Keybindings))
 
-	// Clear discovered MCP servers and profile diffs on reset.
+	// Reset Commands & Skills picker.
+	csPicker := NewPicker(CommandsSkillsPickerItems(m.scanResult.CommandsSkills))
+	csPicker.SetSearchAction(true)
+	if m.scanResult.CommandsSkills != nil {
+		previewContent := make(map[string]string)
+		for _, item := range m.scanResult.CommandsSkills.Items {
+			previewContent[item.Key()] = item.Content
+		}
+		csPicker.SetPreview(previewContent)
+	}
+	m.pickers[SectionCommandsSkills] = csPicker
+
+	// Clear discovered MCP servers, project commands/skills, and profile diffs on reset.
 	m.discoveredMCP = make(map[string]json.RawMessage)
 	m.mcpSources = make(map[string]string)
+	m.discoveredCmdSkills = nil
 	m.profilePluginDiffs = make(map[string]*pluginDiff)
 
 	previewSections := ClaudeMDPreviewSections(m.scanResult.ClaudeMDSections, "~/.claude/CLAUDE.md")
@@ -1006,6 +1054,9 @@ func (m *Model) resetToDefaults() {
 	}
 	if m.skipFlags.Keybindings {
 		m.deselectPicker(SectionKeybindings)
+	}
+	if m.skipFlags.CommandsSkills {
+		m.deselectPicker(SectionCommandsSkills)
 	}
 	if m.skipFlags.ClaudeMD {
 		for i := range m.preview.sections {
@@ -1033,6 +1084,7 @@ func (m Model) triggerSave() (tea.Model, tea.Cmd) {
 	stats["mcp"] = m.pickers[SectionMCP].SelectedCount()
 	stats["keybindings"] = m.pickers[SectionKeybindings].SelectedCount()
 	stats["hooks"] = m.pickers[SectionHooks].SelectedCount()
+	stats["commands_skills"] = m.pickers[SectionCommandsSkills].SelectedCount()
 
 	// Check that at least something is selected.
 	total := 0
@@ -1144,6 +1196,16 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 		opts.Keybindings = m.scanResult.Keybindings
 	}
 
+	// Commands & Skills: split selected keys by type prefix.
+	csKeys := m.pickers[SectionCommandsSkills].SelectedKeys()
+	for _, k := range csKeys {
+		if strings.HasPrefix(k, "cmd:") {
+			opts.Commands = append(opts.Commands, k)
+		} else if strings.HasPrefix(k, "skill:") {
+			opts.Skills = append(opts.Skills, k)
+		}
+	}
+
 	// Profiles.
 	if m.useProfiles && len(m.profilePickers) > 0 {
 		opts.Profiles = m.buildProfiles()
@@ -1176,6 +1238,11 @@ func (m Model) buildProfiles() map[string]profiles.Profile {
 
 	baseKBKeys := m.pickers[SectionKeybindings].SelectedKeys()
 	baseKBSet := toSet(baseKBKeys)
+
+	baseCSKeys := m.pickers[SectionCommandsSkills].SelectedKeys()
+	baseCmdKeys, baseSkillKeys := splitCmdSkillKeys(baseCSKeys)
+	baseCmdSet := toSet(baseCmdKeys)
+	baseSkillSet := toSet(baseSkillKeys)
 
 	for name, pickerMap := range m.profilePickers {
 		p := profiles.Profile{}
@@ -1301,6 +1368,32 @@ func (m Model) buildProfiles() map[string]profiles.Profile {
 			}
 		}
 
+		// Commands & Skills diff.
+		profCSKeys := pickerMap[SectionCommandsSkills].SelectedKeys()
+		profCmdKeys, profSkillKeys := splitCmdSkillKeys(profCSKeys)
+		profCmdSet := toSet(profCmdKeys)
+		profSkillSet := toSet(profSkillKeys)
+		for _, k := range profCmdKeys {
+			if !baseCmdSet[k] {
+				p.Commands.Add = append(p.Commands.Add, k)
+			}
+		}
+		for _, k := range baseCmdKeys {
+			if !profCmdSet[k] {
+				p.Commands.Remove = append(p.Commands.Remove, k)
+			}
+		}
+		for _, k := range profSkillKeys {
+			if !baseSkillSet[k] {
+				p.Skills.Add = append(p.Skills.Add, k)
+			}
+		}
+		for _, k := range baseSkillKeys {
+			if !profSkillSet[k] {
+				p.Skills.Remove = append(p.Skills.Remove, k)
+			}
+		}
+
 		profs[name] = p
 	}
 
@@ -1404,6 +1497,91 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 	return m
 }
 
+func (m Model) handleCmdSkillSearchDone(msg CmdSkillSearchDoneMsg) Model {
+	if len(msg.Items) == 0 {
+		return m
+	}
+
+	// Append discovered items to internal list.
+	m.discoveredCmdSkills = append(m.discoveredCmdSkills, msg.Items...)
+
+	// Build picker items from the discovered project items.
+	var newItems []PickerItem
+	existingKeys := toSet(m.pickers[SectionCommandsSkills].AllKeys())
+
+	// Group by project.
+	projectGroups := make(map[string][]cmdskill.Item)
+	for _, item := range msg.Items {
+		if existingKeys[item.Key()] {
+			continue
+		}
+		projectGroups[item.SourceLabel] = append(projectGroups[item.SourceLabel], item)
+	}
+
+	projectNames := make([]string, 0, len(projectGroups))
+	for name := range projectGroups {
+		projectNames = append(projectNames, name)
+	}
+	sort.Strings(projectNames)
+
+	for _, projName := range projectNames {
+		items := projectGroups[projName]
+		newItems = append(newItems, PickerItem{
+			Display:  fmt.Sprintf("Project: %s (%d)", projName, len(items)),
+			IsHeader: true,
+		})
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].Key() < items[j].Key()
+		})
+		for _, item := range items {
+			typeTag := "[cmd]"
+			if item.Type == cmdskill.TypeSkill {
+				typeTag = "[skill]"
+			}
+			newItems = append(newItems, PickerItem{
+				Key:      item.Key(),
+				Display:  item.Name,
+				Selected: true,
+				Tag:      typeTag,
+			})
+		}
+	}
+
+	if len(newItems) == 0 {
+		return m
+	}
+
+	// Add to base picker.
+	if p, ok := m.pickers[SectionCommandsSkills]; ok {
+		p.AddItems(newItems)
+		// Also update preview content for the new items.
+		for _, item := range msg.Items {
+			if p.previewContent != nil {
+				p.previewContent[item.Key()] = item.Content
+			}
+		}
+		m.pickers[SectionCommandsSkills] = p
+	}
+
+	// Add to profile pickers.
+	for name, pm := range m.profilePickers {
+		if p, ok := pm[SectionCommandsSkills]; ok {
+			p.AddItems(newItems)
+			for _, item := range msg.Items {
+				if p.previewContent != nil {
+					p.previewContent[item.Key()] = item.Content
+				}
+			}
+			pm[SectionCommandsSkills] = p
+		}
+		m.profilePickers[name] = pm
+	}
+
+	m.syncSidebarCounts()
+	m.syncStatusBar()
+	return m
+}
+
 // sortPickerItems sorts items by Key for deterministic order.
 func sortPickerItems(items []PickerItem) {
 	sort.Slice(items, func(i, j int) bool {
@@ -1421,7 +1599,21 @@ func hasScanData(scan *commands.InitScanResult) bool {
 		len(scan.Permissions.Deny) > 0 ||
 		scan.ClaudeMDContent != "" ||
 		len(scan.MCP) > 0 ||
-		len(scan.Keybindings) > 0
+		len(scan.Keybindings) > 0 ||
+		(scan.CommandsSkills != nil && len(scan.CommandsSkills.Items) > 0)
+}
+
+// splitCmdSkillKeys splits a list of keys into command keys and skill keys
+// based on their prefix.
+func splitCmdSkillKeys(keys []string) (cmds, skills []string) {
+	for _, k := range keys {
+		if strings.HasPrefix(k, "cmd:") {
+			cmds = append(cmds, k)
+		} else if strings.HasPrefix(k, "skill:") {
+			skills = append(skills, k)
+		}
+	}
+	return cmds, skills
 }
 
 func toSet(keys []string) map[string]bool {

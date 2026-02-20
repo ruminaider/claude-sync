@@ -10,6 +10,7 @@ import (
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
+	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
@@ -29,6 +30,7 @@ type InitScanResult struct {
 	ClaudeMDSections []claudemd.Section        // pre-split sections for picker display
 	MCP             map[string]json.RawMessage // MCP server configs found
 	Keybindings     map[string]any             // keybindings found
+	CommandsSkills  *cmdskill.ScanResult
 }
 
 // InitResult describes how plugins were categorized during init.
@@ -45,6 +47,8 @@ type InitResult struct {
 	ClaudeMDFragments   []string // CLAUDE.md fragment names created
 	MCPIncluded         []string // MCP server names included
 	KeybindingsIncluded bool     // whether keybindings were included
+	CommandsIncluded    int
+	SkillsIncluded      int
 }
 
 // InitOptions configures what Init includes in the sync config.
@@ -63,6 +67,8 @@ type InitOptions struct {
 	ClaudeMDFragments []string                    // fragment names to include (nil = all when ImportClaudeMD is true)
 	MCP               map[string]json.RawMessage  // MCP server configs to include
 	Keybindings       map[string]any              // keybindings to include
+	Commands          []string                    // selected command keys to include
+	Skills            []string                    // selected skill keys to include
 }
 
 // Fields from settings.json that should NOT be synced.
@@ -176,6 +182,12 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 	kb, err := claudecode.ReadKeybindings(claudeDir)
 	if err == nil && len(kb) > 0 {
 		result.Keybindings = kb
+	}
+
+	// Scan commands and skills
+	cs, csErr := cmdskill.ScanAll(claudeDir, nil)
+	if csErr == nil {
+		result.CommandsSkills = cs
 	}
 
 	return result, nil
@@ -402,6 +414,47 @@ func Init(opts InitOptions) (*InitResult, error) {
 	}
 	if len(opts.Keybindings) > 0 {
 		result.KeybindingsIncluded = true
+	}
+
+	// Copy selected commands and skills to sync directory.
+	if len(opts.Commands) > 0 || len(opts.Skills) > 0 {
+		cs, csErr := cmdskill.ScanAll(claudeDir, nil)
+		if csErr == nil {
+			selectedSet := make(map[string]bool)
+			for _, k := range opts.Commands {
+				selectedSet[k] = true
+			}
+			for _, k := range opts.Skills {
+				selectedSet[k] = true
+			}
+			for _, item := range cs.Items {
+				if !selectedSet[item.Key()] {
+					continue
+				}
+				if item.Source == cmdskill.SourcePlugin {
+					continue // don't copy plugin items
+				}
+				switch item.Type {
+				case cmdskill.TypeCommand:
+					dstDir := filepath.Join(syncDir, "commands")
+					os.MkdirAll(dstDir, 0755)
+					dstPath := filepath.Join(dstDir, filepath.Base(item.FilePath))
+					data, err := os.ReadFile(item.FilePath)
+					if err == nil {
+						os.WriteFile(dstPath, data, 0644)
+						result.CommandsIncluded++
+					}
+				case cmdskill.TypeSkill:
+					// Copy entire skill directory
+					skillName := item.Name
+					srcDir := filepath.Dir(item.FilePath) // parent of SKILL.md
+					dstDir := filepath.Join(syncDir, "skills", skillName)
+					if err := copyDir(srcDir, dstDir); err == nil {
+						result.SkillsIncluded++
+					}
+				}
+			}
+		}
 	}
 
 	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n"

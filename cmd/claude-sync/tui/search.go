@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/cmdskill"
 )
 
 // SearchResultMsg carries a single discovered CLAUDE.md file path.
@@ -199,4 +200,93 @@ func splitLines(s string) []string {
 		}
 	}
 	return result
+}
+
+// CmdSkillSearchDoneMsg is sent when the background commands/skills search is
+// complete. It contains all discovered project-local command and skill items.
+type CmdSkillSearchDoneMsg struct {
+	Items []cmdskill.Item
+}
+
+// SearchCommandsSkills returns a tea.Cmd that searches for project directories
+// containing .claude/commands/ or .claude/skills/ under the home directory.
+// It uses fd/find to locate .claude directories, then calls cmdskill.ScanProject
+// for each found project.
+func SearchCommandsSkills() tea.Cmd {
+	return func() tea.Msg {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return CmdSkillSearchDoneMsg{}
+		}
+
+		globalClaude := filepath.Join(home, ".claude")
+		var rawPaths []string
+
+		// Try fd first. Look for directories named ".claude" that contain
+		// commands/ or skills/ subdirectories.
+		if fdPath, err := exec.LookPath("fd"); err == nil {
+			out, err := exec.Command(
+				fdPath,
+				"-H",
+				"-t", "d",
+				"-d", "4",
+				"^.claude$",
+				"--search-path", home,
+				"-E", "node_modules",
+				"-E", ".git",
+				"-E", "Library",
+				"-E", ".cache",
+				"-E", ".Trash",
+				"-E", "go/pkg",
+			).Output()
+			if err == nil {
+				rawPaths = splitLines(string(out))
+			}
+		}
+
+		// Fallback to find.
+		if len(rawPaths) == 0 {
+			out, _ := exec.Command(
+				"find", home,
+				"-maxdepth", "4",
+				"-type", "d",
+				"-name", ".claude",
+				"-not", "-path", "*/node_modules/*",
+				"-not", "-path", "*/.git/*",
+				"-not", "-path", "*/Library/*",
+				"-not", "-path", "*/.cache/*",
+				"-not", "-path", "*/.Trash/*",
+				"-not", "-path", "*/go/pkg/*",
+			).Output()
+			rawPaths = splitLines(string(out))
+		}
+
+		var allItems []cmdskill.Item
+
+		for _, p := range rawPaths {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+
+			// Skip the global ~/.claude/ directory.
+			absP, _ := filepath.Abs(p)
+			absGlobal, _ := filepath.Abs(globalClaude)
+			if absP == absGlobal {
+				continue
+			}
+
+			// The project root is the parent of .claude/.
+			projectDir := filepath.Dir(p)
+
+			items, err := cmdskill.ScanProject(projectDir)
+			if err != nil || len(items) == 0 {
+				continue
+			}
+
+			allItems = append(allItems, items...)
+		}
+
+		return CmdSkillSearchDoneMsg{Items: allItems}
+	}
 }

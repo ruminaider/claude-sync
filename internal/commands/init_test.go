@@ -205,6 +205,73 @@ func TestInit_AutoForksNonPortablePlugins(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestInit_AutoForksDirectorySourceMarketplace(t *testing.T) {
+	// Simulates the bash-validator scenario: a plugin whose marketplace is
+	// registered in known_marketplaces.json with "source": "directory".
+	// This exercises the IsPortableFromKnownMarketplaces path (not the
+	// hardcoded fallback) and verifies the plugin is correctly auto-forked.
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	// Create a real install path with plugin files (like bash-validator).
+	bvInstallDir := filepath.Join(t.TempDir(), "bash-validator-files")
+	bvPluginDir := filepath.Join(bvInstallDir, ".claude-plugin")
+	bvHooksDir := filepath.Join(bvInstallDir, "hooks")
+	os.MkdirAll(bvPluginDir, 0755)
+	os.MkdirAll(bvHooksDir, 0755)
+	os.WriteFile(filepath.Join(bvPluginDir, "plugin.json"), []byte(`{"name":"bash-validator","version":"1.0.0"}`), 0644)
+	os.WriteFile(filepath.Join(bvHooksDir, "bash-validator.py"), []byte(`print("hook")`), 0644)
+	os.WriteFile(filepath.Join(bvHooksDir, "hooks.json"), []byte(`{}`), 0644)
+
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"bash-validator@bv-marketplace": [{"scope":"user","installPath":"` + bvInstallDir + `","version":"1.0.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+
+	// Key: the marketplace is registered as "directory" source — this is
+	// the code path that differs from TestInit_AutoForksNonPortablePlugins
+	// (which uses an empty known_marketplaces.json and falls through to
+	// the hardcoded list).
+	km := `{"bv-marketplace": {"source": {"source": "directory", "path": "` + bvInstallDir + `"}}}`
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	// InitScan should classify bash-validator as non-portable.
+	scan, err := commands.InitScan(claudeDir)
+	require.NoError(t, err)
+	assert.Contains(t, scan.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, scan.AutoForked, "bash-validator@bv-marketplace")
+	assert.NotContains(t, scan.Upstream, "bash-validator@bv-marketplace")
+
+	// Init should auto-fork and copy files.
+	result, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	assert.Contains(t, result.Upstream, "context7@claude-plugins-official")
+	assert.Contains(t, result.AutoForked, "bash-validator@bv-marketplace")
+
+	// Config should have bash-validator in forked, not upstream.
+	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Upstream, "context7@claude-plugins-official")
+	assert.NotContains(t, cfg.Upstream, "bash-validator@bv-marketplace")
+	assert.Contains(t, cfg.Forked, "bash-validator")
+
+	// Plugin files should have been copied to the fork directory.
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "bash-validator", "hooks", "bash-validator.py"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "bash-validator", "hooks", "hooks.json"))
+	assert.NoError(t, err)
+}
+
 func TestInit_SkipsClaudeSyncForksEntries(t *testing.T) {
 	claudeDir := t.TempDir()
 	syncDir := filepath.Join(t.TempDir(), ".claude-sync")

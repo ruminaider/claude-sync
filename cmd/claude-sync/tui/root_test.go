@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
+	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -43,6 +44,12 @@ func fullScan() *commands.InitScanResult {
 		},
 		MCP:         map[string]json.RawMessage{"server1": json.RawMessage(`{"url":"http://s1"}`)},
 		Keybindings: map[string]any{"ctrl+s": "save"},
+		CommandsSkills: &cmdskill.ScanResult{
+			Items: []cmdskill.Item{
+				{Name: "review-pr", Type: cmdskill.TypeCommand, Source: cmdskill.SourceGlobal, SourceLabel: "global", Content: "# Review PR"},
+				{Name: "tdd", Type: cmdskill.TypeSkill, Source: cmdskill.SourceGlobal, SourceLabel: "global", Content: "# TDD"},
+			},
+		},
 	}
 }
 

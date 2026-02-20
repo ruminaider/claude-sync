@@ -14,13 +14,14 @@ const (
 type Section int
 
 const (
-	SectionPlugins    Section = iota
-	SectionSettings           // Claude settings (model, env, etc.)
-	SectionClaudeMD           // CLAUDE.md fragments
-	SectionPermissions        // Allow/deny permission rules
-	SectionMCP                // MCP server configs
-	SectionKeybindings        // Key bindings
-	SectionHooks              // Auto-sync hooks
+	SectionPlugins        Section = iota
+	SectionSettings               // Claude settings (model, env, etc.)
+	SectionClaudeMD               // CLAUDE.md fragments
+	SectionPermissions            // Allow/deny permission rules
+	SectionMCP                    // MCP server configs
+	SectionCommandsSkills         // Commands (.md) and skills (SKILL.md)
+	SectionKeybindings            // Key bindings
+	SectionHooks                  // Auto-sync hooks
 )
 
 // String returns the display name for a section.
@@ -36,6 +37,8 @@ func (s Section) String() string {
 		return "Permissions"
 	case SectionMCP:
 		return "MCP"
+	case SectionCommandsSkills:
+		return "Cmds & Skills"
 	case SectionKeybindings:
 		return "Keybindings"
 	case SectionHooks:
@@ -52,6 +55,7 @@ var AllSections = []Section{
 	SectionClaudeMD,
 	SectionPermissions,
 	SectionMCP,
+	SectionCommandsSkills,
 	SectionKeybindings,
 	SectionHooks,
 }

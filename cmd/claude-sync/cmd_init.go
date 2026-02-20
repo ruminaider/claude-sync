@@ -20,7 +20,8 @@ var (
 	initSkipClaudeMD    bool
 	initSkipPermissions bool
 	initSkipMCP         bool
-	initSkipKeybindings bool
+	initSkipKeybindings    bool
+	initSkipCommandsSkills bool
 )
 
 // capitalize returns the string with its first letter uppercased.
@@ -52,7 +53,8 @@ var configCreateCmd = &cobra.Command{
 			len(scan.Permissions.Deny) == 0 &&
 			scan.ClaudeMDContent == "" &&
 			len(scan.MCP) == 0 &&
-			len(scan.Keybindings) == 0 {
+			len(scan.Keybindings) == 0 &&
+			(scan.CommandsSkills == nil || len(scan.CommandsSkills.Items) == 0) {
 			fmt.Println("No Claude Code configuration found to sync.")
 			return nil
 		}
@@ -64,8 +66,9 @@ var configCreateCmd = &cobra.Command{
 			Hooks:       initSkipHooks,
 			Permissions: initSkipPermissions,
 			ClaudeMD:    initSkipClaudeMD,
-			MCP:         initSkipMCP,
-			Keybindings: initSkipKeybindings,
+			MCP:            initSkipMCP,
+			Keybindings:    initSkipKeybindings,
+			CommandsSkills: initSkipCommandsSkills,
 		}
 		model := tui.NewModel(scan, claudeDir, syncDir, initRemote, initSkipProfiles, skip)
 		p := tea.NewProgram(model, tea.WithAltScreen())
@@ -137,6 +140,12 @@ func printInitResult(result *commands.InitResult, scan *commands.InitScanResult)
 	if result.KeybindingsIncluded {
 		fmt.Println("  Keybindings: included")
 	}
+	if result.CommandsIncluded > 0 {
+		fmt.Printf("  Commands:    %d included\n", result.CommandsIncluded)
+	}
+	if result.SkillsIncluded > 0 {
+		fmt.Printf("  Skills:      %d included\n", result.SkillsIncluded)
+	}
 
 	if result.RemotePushed {
 		fmt.Println()
@@ -152,14 +161,6 @@ func printInitResult(result *commands.InitResult, scan *commands.InitScanResult)
 	}
 }
 
-var initAliasCmd = &cobra.Command{
-	Use:        "init",
-	Short:      "Create new config from current Claude Code setup",
-	Hidden:     true,
-	Deprecated: "Use 'claude-sync config create' instead.",
-	RunE:       configCreateCmd.RunE,
-}
-
 func init() {
 	configCreateCmd.Flags().StringVarP(&initRemote, "remote", "r", "", "Git remote URL to add as origin and push to")
 	configCreateCmd.Flags().BoolVar(&initSkipPlugins, "skip-plugins", false, "Skip plugin selection prompt (include all)")
@@ -170,17 +171,7 @@ func init() {
 	configCreateCmd.Flags().BoolVar(&initSkipPermissions, "skip-permissions", false, "Don't include permissions in sync config")
 	configCreateCmd.Flags().BoolVar(&initSkipMCP, "skip-mcp", false, "Don't include MCP servers in sync config")
 	configCreateCmd.Flags().BoolVar(&initSkipKeybindings, "skip-keybindings", false, "Don't include keybindings in sync config")
-
-	// Copy flags to alias for full backward compatibility.
-	initAliasCmd.Flags().StringVarP(&initRemote, "remote", "r", "", "Git remote URL to add as origin and push to")
-	initAliasCmd.Flags().BoolVar(&initSkipPlugins, "skip-plugins", false, "Skip plugin selection prompt (include all)")
-	initAliasCmd.Flags().BoolVar(&initSkipSettings, "skip-settings", false, "Don't include settings in sync config")
-	initAliasCmd.Flags().BoolVar(&initSkipHooks, "skip-hooks", false, "Don't include hooks in sync config")
-	initAliasCmd.Flags().BoolVar(&initSkipProfiles, "skip-profiles", false, "Skip profile creation prompt")
-	initAliasCmd.Flags().BoolVar(&initSkipClaudeMD, "skip-claude-md", false, "Don't include CLAUDE.md in sync config")
-	initAliasCmd.Flags().BoolVar(&initSkipPermissions, "skip-permissions", false, "Don't include permissions in sync config")
-	initAliasCmd.Flags().BoolVar(&initSkipMCP, "skip-mcp", false, "Don't include MCP servers in sync config")
-	initAliasCmd.Flags().BoolVar(&initSkipKeybindings, "skip-keybindings", false, "Don't include keybindings in sync config")
+	configCreateCmd.Flags().BoolVar(&initSkipCommandsSkills, "skip-commands-skills", false, "Don't include commands/skills in sync config")
 
 	configCmd.AddCommand(configCreateCmd)
 }

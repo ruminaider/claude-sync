@@ -62,6 +62,8 @@ func SectionAccent(s Section) lipgloss.Color {
 		return colorRed
 	case SectionMCP:
 		return colorPeach
+	case SectionCommandsSkills:
+		return colorLavender
 	case SectionKeybindings:
 		return colorYellow
 	case SectionHooks:

@@ -24,13 +24,16 @@ type PushScanResult struct {
 	ChangedClaudeMD    *claudemd.ReconcileResult
 	ChangedMCP         bool
 	ChangedKeybindings bool
+	ChangedCommands    bool
+	ChangedSkills      bool
 }
 
 func (r *PushScanResult) HasChanges() bool {
 	return len(r.AddedPlugins) > 0 || len(r.RemovedPlugins) > 0 ||
 		len(r.ChangedSettings) > 0 ||
 		r.ChangedPermissions || r.ChangedClaudeMD != nil ||
-		r.ChangedMCP || r.ChangedKeybindings
+		r.ChangedMCP || r.ChangedKeybindings ||
+		r.ChangedCommands || r.ChangedSkills
 }
 
 func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
@@ -139,6 +142,18 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		}
 	}
 
+	// Scan commands — compare claudeDir/commands/ vs syncDir/commands/.
+	result.ChangedCommands = dirContentsDiffer(
+		filepath.Join(claudeDir, "commands"),
+		filepath.Join(syncDir, "commands"),
+	)
+
+	// Scan skills — compare claudeDir/skills/ vs syncDir/skills/.
+	result.ChangedSkills = dirContentsDiffer(
+		filepath.Join(claudeDir, "skills"),
+		filepath.Join(syncDir, "skills"),
+	)
+
 	return result, nil
 }
 
@@ -155,6 +170,8 @@ type PushApplyOptions struct {
 	UpdateClaudeMD    bool
 	UpdateMCP         bool
 	UpdateKeybindings bool
+	UpdateCommands    bool
+	UpdateSkills      bool
 }
 
 func PushApply(opts PushApplyOptions) error {
@@ -282,6 +299,16 @@ func PushApply(opts PushApplyOptions) error {
 		}
 	}
 
+	// Update commands from current state.
+	if opts.UpdateCommands {
+		syncCopyCommands(opts.ClaudeDir, opts.SyncDir)
+	}
+
+	// Update skills from current state.
+	if opts.UpdateSkills {
+		syncCopySkills(opts.ClaudeDir, opts.SyncDir)
+	}
+
 	// Always write config (excluded list may change even for profile-targeted pushes).
 	newData, err := config.Marshal(cfg)
 	if err != nil {
@@ -310,6 +337,22 @@ func PushApply(opts PushApplyOptions) error {
 		if _, err := os.Stat(claudeMdDir); err == nil {
 			if err := git.Add(opts.SyncDir, "claude-md"); err != nil {
 				return fmt.Errorf("staging claude-md: %w", err)
+			}
+		}
+	}
+	if opts.UpdateCommands {
+		cmdsDir := filepath.Join(opts.SyncDir, "commands")
+		if _, err := os.Stat(cmdsDir); err == nil {
+			if err := git.Add(opts.SyncDir, "commands"); err != nil {
+				return fmt.Errorf("staging commands: %w", err)
+			}
+		}
+	}
+	if opts.UpdateSkills {
+		skillsDir := filepath.Join(opts.SyncDir, "skills")
+		if _, err := os.Stat(skillsDir); err == nil {
+			if err := git.Add(opts.SyncDir, "skills"); err != nil {
+				return fmt.Errorf("staging skills: %w", err)
 			}
 		}
 	}
@@ -391,6 +434,92 @@ func jsonMapsEqual(a, b map[string]json.RawMessage) bool {
 		}
 	}
 	return true
+}
+
+// dirContentsDiffer returns true if the .md files in dir a differ from those
+// in dir b. Compares filenames and file contents. Returns false if neither
+// directory exists.
+func dirContentsDiffer(a, b string) bool {
+	aFiles := readDirMDFiles(a)
+	bFiles := readDirMDFiles(b)
+
+	if len(aFiles) != len(bFiles) {
+		return len(aFiles) > 0 || len(bFiles) > 0
+	}
+	for name, aContent := range aFiles {
+		if bContent, ok := bFiles[name]; !ok || aContent != bContent {
+			return true
+		}
+	}
+	return false
+}
+
+// readDirMDFiles reads all .md files in a directory into a map of name→content.
+// For skill directories, reads SKILL.md from each subdirectory.
+func readDirMDFiles(dir string) map[string]string {
+	files := make(map[string]string)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return files
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Skill directory: read SKILL.md.
+			skillFile := filepath.Join(dir, entry.Name(), "SKILL.md")
+			if data, err := os.ReadFile(skillFile); err == nil {
+				files[entry.Name()+"/SKILL.md"] = string(data)
+			}
+		} else if strings.HasSuffix(entry.Name(), ".md") {
+			path := filepath.Join(dir, entry.Name())
+			if data, err := os.ReadFile(path); err == nil {
+				files[entry.Name()] = string(data)
+			}
+		}
+	}
+	return files
+}
+
+// syncCopyCommands copies .md files from claudeDir/commands/ to syncDir/commands/.
+func syncCopyCommands(claudeDir, syncDir string) {
+	srcDir := filepath.Join(claudeDir, "commands")
+	dstDir := filepath.Join(syncDir, "commands")
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return
+	}
+
+	os.MkdirAll(dstDir, 0755)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		srcPath := filepath.Join(srcDir, entry.Name())
+		dstPath := filepath.Join(dstDir, entry.Name())
+		if data, err := os.ReadFile(srcPath); err == nil {
+			os.WriteFile(dstPath, data, 0644)
+		}
+	}
+}
+
+// syncCopySkills copies skill directories from claudeDir/skills/ to syncDir/skills/.
+func syncCopySkills(claudeDir, syncDir string) {
+	srcDir := filepath.Join(claudeDir, "skills")
+	dstDir := filepath.Join(syncDir, "skills")
+
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		srcSkillDir := filepath.Join(srcDir, entry.Name())
+		dstSkillDir := filepath.Join(dstDir, entry.Name())
+		copyDir(srcSkillDir, dstSkillDir)
+	}
 }
 
 // anyMapsEqual compares two map[string]any maps by JSON serialization.
