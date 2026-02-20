@@ -51,6 +51,9 @@ var pullCmd = &cobra.Command{
 		if len(result.Installed) > 0 {
 			fmt.Printf("\n✓ %d plugin(s) installed\n", len(result.Installed))
 		}
+		if len(result.Updated) > 0 {
+			fmt.Printf("✓ %d plugin(s) updated\n", len(result.Updated))
+		}
 
 		if len(result.SettingsApplied) > 0 {
 			fmt.Printf("✓ Settings applied: %s\n", strings.Join(result.SettingsApplied, ", "))
@@ -83,17 +86,18 @@ var pullCmd = &cobra.Command{
 			fmt.Printf("  Skipped: %s (per user-preferences.yaml)\n", strings.Join(result.SkippedCategories, ", "))
 		}
 
-		if len(result.Failed) > 0 {
-			fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) failed:\n", len(result.Failed))
-			for _, p := range result.Failed {
+		allFailed := append(result.Failed, result.UpdateFailed...)
+		if len(allFailed) > 0 {
+			fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) failed:\n", len(allFailed))
+			for _, p := range allFailed {
 				fmt.Fprintf(os.Stderr, "  • %s\n", p)
 			}
 		}
 
-		nothingChanged := len(result.ToInstall) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
+		nothingChanged := len(result.ToInstall) == 0 && len(result.Updated) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
 			len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
 			len(result.MCPApplied) == 0 && len(result.MCPProjectApplied) == 0 && !result.KeybindingsApplied
-		if len(result.Failed) > 0 {
+		if len(allFailed) > 0 {
 			fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
 		} else if nothingChanged {
 			fmt.Println("Everything up to date.")
@@ -106,7 +110,7 @@ var pullCmd = &cobra.Command{
 			}
 		}
 
-		if len(result.Untracked) > 0 && len(result.Failed) == 0 {
+		if len(result.Untracked) > 0 && len(allFailed) == 0 {
 			fmt.Printf("\nNote: %d plugin(s) installed locally but not in config:\n", len(result.Untracked))
 			for _, p := range result.Untracked {
 				fmt.Printf("  • %s\n", p)

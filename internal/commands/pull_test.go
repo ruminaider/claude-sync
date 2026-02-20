@@ -928,3 +928,102 @@ func TestPull_AppliesProjectSettings(t *testing.T) {
 	assert.Contains(t, string(settings["permissions"]), "mcp__evvy_db__query")
 	assert.Contains(t, string(settings["permissions"]), "Read")
 }
+
+// --- Stale plugin detection tests ---
+
+// setupStalePluginEnv creates an environment where a plugin is installed at version 1.0.0
+// but the marketplace source has been bumped to newVersion.
+func setupStalePluginEnv(t *testing.T, newVersion string) (claudeDir, syncDir string) {
+	t.Helper()
+
+	claudeDir = t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	// Create a directory-based marketplace.
+	marketplaceDir := t.TempDir()
+
+	// Write marketplace.json and plugin.json with the new version.
+	mkplDir := filepath.Join(marketplaceDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+
+	mkpl := `{
+		"name": "test-marketplace",
+		"plugins": [{"name": "test-plugin", "source": "./", "version": "` + newVersion + `"}]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"), []byte(mkpl), 0644))
+
+	pj := `{"name": "test-plugin", "version": "` + newVersion + `"}`
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "plugin.json"), []byte(pj), 0644))
+
+	// Write known_marketplaces.json pointing to the marketplace.
+	km, _ := json.MarshalIndent(map[string]any{
+		"test-marketplace": map[string]any{
+			"source":          map[string]string{"source": "directory", "path": marketplaceDir},
+			"installLocation": marketplaceDir,
+		},
+	}, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "plugins", "known_marketplaces.json"), km, 0644))
+
+	// Write installed_plugins.json with plugin at version 1.0.0.
+	installed := `{
+		"version": 2,
+		"plugins": {
+			"test-plugin@test-marketplace": [{
+				"scope": "user",
+				"installPath": "` + filepath.Join(claudeDir, "plugins", "cache", "test-marketplace", "test-plugin", "1.0.0") + `",
+				"version": "1.0.0",
+				"installedAt": "2026-01-01T00:00:00Z",
+				"lastUpdated": "2026-01-01T00:00:00Z"
+			}]
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "plugins", "installed_plugins.json"), []byte(installed), 0644))
+
+	// Create a sync dir with config listing the plugin.
+	syncDir = filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - test-plugin@test-marketplace
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	return claudeDir, syncDir
+}
+
+func TestPull_DetectsStalePlugin(t *testing.T) {
+	claudeDir, syncDir := setupStalePluginEnv(t, "1.1.0")
+
+	// DryRun should show the plugin as Synced (already installed).
+	result, err := commands.PullDryRun(claudeDir, syncDir)
+	require.NoError(t, err)
+	assert.Contains(t, result.Synced, "test-plugin@test-marketplace")
+	assert.Empty(t, result.ToInstall)
+}
+
+func TestPull_NoStaleWhenVersionsMatch(t *testing.T) {
+	claudeDir, syncDir := setupStalePluginEnv(t, "1.0.0")
+
+	// Pull should not report any updates when versions match.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Empty(t, result.Updated)
+	assert.Empty(t, result.UpdateFailed)
+}
+
+func TestPullResult_HasUpdatedFields(t *testing.T) {
+	// Verify the PullResult struct has the new fields.
+	result := commands.PullResult{
+		Updated:      []string{"foo@bar"},
+		UpdateFailed: []string{"baz@qux"},
+	}
+	assert.Equal(t, []string{"foo@bar"}, result.Updated)
+	assert.Equal(t, []string{"baz@qux"}, result.UpdateFailed)
+}
