@@ -328,6 +328,142 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+// ─── ReadMarketplacePluginVersion ──────────────────────────────────────────
+
+// setupMarketplaceEnv creates a claudeDir with known_marketplaces.json pointing
+// to a marketplace directory containing a valid marketplace.json and plugin.json.
+func setupMarketplaceEnv(t *testing.T, pluginName, version string) (claudeDir, marketplaceDir string) {
+	t.Helper()
+
+	claudeDir = t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	marketplaceDir = t.TempDir()
+
+	// Write known_marketplaces.json.
+	km := map[string]any{
+		"test-marketplace": map[string]any{
+			"source":          map[string]string{"source": "directory", "path": marketplaceDir},
+			"installLocation": marketplaceDir,
+		},
+	}
+	kmData, err := json.MarshalIndent(km, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), kmData, 0644))
+
+	// Write marketplace.json.
+	mkplDir := filepath.Join(marketplaceDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	mkpl := map[string]any{
+		"name": "test-marketplace",
+		"plugins": []map[string]string{
+			{"name": pluginName, "source": "./", "version": version},
+		},
+	}
+	mkplData, err := json.MarshalIndent(mkpl, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"), mkplData, 0644))
+
+	// Write plugin.json at the source path.
+	pj := map[string]string{"name": pluginName, "version": version}
+	pjData, err := json.MarshalIndent(pj, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "plugin.json"), pjData, 0644))
+
+	return claudeDir, marketplaceDir
+}
+
+func TestReadMarketplacePluginVersion_SinglePlugin(t *testing.T) {
+	claudeDir, _ := setupMarketplaceEnv(t, "my-plugin", "1.2.3")
+
+	ver, err := marketplace.ReadMarketplacePluginVersion(claudeDir, "my-plugin@test-marketplace")
+	require.NoError(t, err)
+	assert.Equal(t, "1.2.3", ver)
+}
+
+func TestReadMarketplacePluginVersion_MultiPlugin(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	marketplaceDir := t.TempDir()
+
+	km := map[string]any{
+		"multi-marketplace": map[string]any{
+			"source":          map[string]string{"source": "directory", "path": marketplaceDir},
+			"installLocation": marketplaceDir,
+		},
+	}
+	kmData, _ := json.MarshalIndent(km, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), kmData, 0644))
+
+	// Write marketplace.json with multiple plugins.
+	mkplDir := filepath.Join(marketplaceDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	mkpl := map[string]any{
+		"name": "multi-marketplace",
+		"plugins": []map[string]string{
+			{"name": "plugin-a", "source": "./plugins/plugin-a", "version": "1.0.0"},
+			{"name": "plugin-b", "source": "./plugins/plugin-b", "version": "2.0.0"},
+		},
+	}
+	mkplData, _ := json.MarshalIndent(mkpl, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"), mkplData, 0644))
+
+	// Write plugin.json for plugin-b with a different version than marketplace.json.
+	pbDir := filepath.Join(marketplaceDir, "plugins", "plugin-b", ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pbDir, 0755))
+	pj := map[string]string{"name": "plugin-b", "version": "2.1.0"}
+	pjData, _ := json.MarshalIndent(pj, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(pbDir, "plugin.json"), pjData, 0644))
+
+	t.Run("falls back to marketplace.json version", func(t *testing.T) {
+		// plugin-a has no plugin.json on disk, so it uses marketplace.json version.
+		ver, err := marketplace.ReadMarketplacePluginVersion(claudeDir, "plugin-a@multi-marketplace")
+		require.NoError(t, err)
+		assert.Equal(t, "1.0.0", ver)
+	})
+
+	t.Run("prefers plugin.json version", func(t *testing.T) {
+		// plugin-b has a plugin.json with version 2.1.0, overriding marketplace.json's 2.0.0.
+		ver, err := marketplace.ReadMarketplacePluginVersion(claudeDir, "plugin-b@multi-marketplace")
+		require.NoError(t, err)
+		assert.Equal(t, "2.1.0", ver)
+	})
+}
+
+func TestReadMarketplacePluginVersion_Errors(t *testing.T) {
+	t.Run("invalid plugin key", func(t *testing.T) {
+		_, err := marketplace.ReadMarketplacePluginVersion("/tmp", "no-at-sign")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid plugin key")
+	})
+
+	t.Run("missing known_marketplaces.json", func(t *testing.T) {
+		_, err := marketplace.ReadMarketplacePluginVersion("/nonexistent", "foo@bar")
+		assert.Error(t, err)
+	})
+
+	t.Run("marketplace not found", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(claudeDir, "plugins"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "plugins", "known_marketplaces.json"), []byte("{}"), 0644))
+
+		_, err := marketplace.ReadMarketplacePluginVersion(claudeDir, "foo@nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("plugin not in marketplace", func(t *testing.T) {
+		claudeDir, _ := setupMarketplaceEnv(t, "my-plugin", "1.0.0")
+
+		_, err := marketplace.ReadMarketplacePluginVersion(claudeDir, "other-plugin@test-marketplace")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+}
+
 // ─── QueryRemoteVersion (skipped by default — requires network) ────────────
 
 func TestQueryRemoteVersion_InvalidURL(t *testing.T) {
