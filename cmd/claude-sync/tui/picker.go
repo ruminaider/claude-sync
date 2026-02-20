@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 
@@ -20,12 +21,13 @@ type PickerItem struct {
 	Selected    bool
 	IsHeader    bool   // section header, not selectable
 	IsBase      bool   // inherited from base config (profile view)
+	IsReadOnly  bool   // read-only items cannot be toggled (e.g. plugin-provided commands)
 	Tag         string // e.g. "[base]" for inherited items
 	Description string // optional description rendered below headers
 }
 
 // Picker is an enhanced multi-select list used for Plugins, Permissions, MCP,
-// Hooks, Settings, and Keybindings sections.
+// Hooks, Settings, Keybindings, and Commands & Skills sections.
 type Picker struct {
 	items           []PickerItem
 	cursor          int             // index of the highlighted row
@@ -36,6 +38,12 @@ type Picker struct {
 	focused         bool            // true when this picker has keyboard focus
 	hasSearchAction bool            // when true, a [+ Search projects] row is appended
 	tagColor        lipgloss.Color  // accent color for inherited-item tags (profile views)
+
+	// Preview mode: when enabled, → shows item content in a side viewport.
+	hasPreview     bool
+	previewContent map[string]string // key → markdown content for preview
+	previewActive  bool              // true when the preview viewport is shown
+	previewScroll  int               // scroll offset within preview content
 }
 
 // NewPicker creates a Picker with the given items. The cursor is placed on the
@@ -271,11 +279,143 @@ func KeybindingsPickerItems(kb map[string]any) []PickerItem {
 	}
 }
 
+// CommandsSkillsPickerItems builds picker items from a cmdskill.ScanResult,
+// grouping by source with plugin items marked read-only.
+func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
+	if scan == nil || len(scan.Items) == 0 {
+		return nil
+	}
+
+	// Group items by source.
+	var pluginItems, globalCmds, globalSkills []cmdskill.Item
+	projectGroups := make(map[string][]cmdskill.Item) // sourceLabel -> items
+
+	for _, item := range scan.Items {
+		switch item.Source {
+		case cmdskill.SourcePlugin:
+			pluginItems = append(pluginItems, item)
+		case cmdskill.SourceGlobal:
+			if item.Type == cmdskill.TypeCommand {
+				globalCmds = append(globalCmds, item)
+			} else {
+				globalSkills = append(globalSkills, item)
+			}
+		case cmdskill.SourceProject:
+			projectGroups[item.SourceLabel] = append(projectGroups[item.SourceLabel], item)
+		}
+	}
+
+	var items []PickerItem
+
+	// Plugin-provided items (read-only).
+	if len(pluginItems) > 0 {
+		items = append(items, PickerItem{
+			Display:  fmt.Sprintf("Plugin-provided (%d)", len(pluginItems)),
+			IsHeader: true,
+		})
+		items = append(items, PickerItem{
+			Description: "From installed plugins — read-only",
+		})
+		sort.Slice(pluginItems, func(i, j int) bool {
+			return pluginItems[i].Key() < pluginItems[j].Key()
+		})
+		for _, item := range pluginItems {
+			typeTag := "[cmd]"
+			if item.Type == cmdskill.TypeSkill {
+				typeTag = "[skill]"
+			}
+			items = append(items, PickerItem{
+				Key:        item.Key(),
+				Display:    item.Name,
+				Selected:   true,
+				IsReadOnly: true,
+				Tag:        typeTag + " " + item.SourceLabel,
+			})
+		}
+	}
+
+	// Global commands.
+	if len(globalCmds) > 0 {
+		items = append(items, PickerItem{
+			Display:  fmt.Sprintf("Global commands (%d)", len(globalCmds)),
+			IsHeader: true,
+		})
+		sort.Slice(globalCmds, func(i, j int) bool {
+			return globalCmds[i].Name < globalCmds[j].Name
+		})
+		for _, item := range globalCmds {
+			items = append(items, PickerItem{
+				Key:      item.Key(),
+				Display:  item.Name,
+				Selected: true,
+				Tag:      "[cmd]",
+			})
+		}
+	}
+
+	// Global skills.
+	if len(globalSkills) > 0 {
+		items = append(items, PickerItem{
+			Display:  fmt.Sprintf("Global skills (%d)", len(globalSkills)),
+			IsHeader: true,
+		})
+		sort.Slice(globalSkills, func(i, j int) bool {
+			return globalSkills[i].Name < globalSkills[j].Name
+		})
+		for _, item := range globalSkills {
+			items = append(items, PickerItem{
+				Key:      item.Key(),
+				Display:  item.Name,
+				Selected: true,
+				Tag:      "[skill]",
+			})
+		}
+	}
+
+	// Project-local items.
+	projectLabels := make([]string, 0, len(projectGroups))
+	for label := range projectGroups {
+		projectLabels = append(projectLabels, label)
+	}
+	sort.Strings(projectLabels)
+
+	for _, label := range projectLabels {
+		projItems := projectGroups[label]
+		items = append(items, PickerItem{
+			Display:  fmt.Sprintf("Project: %s (%d)", label, len(projItems)),
+			IsHeader: true,
+		})
+		sort.Slice(projItems, func(i, j int) bool {
+			return projItems[i].Key() < projItems[j].Key()
+		})
+		for _, item := range projItems {
+			typeTag := "[cmd]"
+			if item.Type == cmdskill.TypeSkill {
+				typeTag = "[skill]"
+			}
+			items = append(items, PickerItem{
+				Key:      item.Key(),
+				Display:  item.Name,
+				Selected: true,
+				Tag:      typeTag,
+			})
+		}
+	}
+
+	return items
+}
+
 // --- Methods ---
 
 // SetSearchAction enables or disables the virtual [+ Search projects] row.
 func (p *Picker) SetSearchAction(enabled bool) {
 	p.hasSearchAction = enabled
+}
+
+// SetPreview enables preview mode and sets the content map (key → markdown).
+func (p *Picker) SetPreview(content map[string]string) {
+	p.hasPreview = true
+	p.previewContent = content
 }
 
 // SetTagColor sets the accent color used for inherited-item tag markers.
@@ -291,9 +431,9 @@ func (p *Picker) AddItems(items []PickerItem) {
 }
 
 // isSelectableItem returns true if the item is a regular selectable row
-// (not a header or description).
+// (not a header, description, or read-only).
 func isSelectableItem(it PickerItem) bool {
-	return !it.IsHeader && it.Description == ""
+	return !it.IsHeader && it.Description == "" && !it.IsReadOnly
 }
 
 // SelectedKeys returns the keys of all selected selectable items.
@@ -301,6 +441,17 @@ func (p Picker) SelectedKeys() []string {
 	var keys []string
 	for _, it := range p.items {
 		if isSelectableItem(it) && it.Selected {
+			keys = append(keys, it.Key)
+		}
+	}
+	return keys
+}
+
+// AllKeys returns all keys in the picker (selectable and read-only, excluding headers).
+func (p Picker) AllKeys() []string {
+	var keys []string
+	for _, it := range p.items {
+		if !it.IsHeader && it.Key != "" {
 			keys = append(keys, it.Key)
 		}
 	}
@@ -365,6 +516,25 @@ func (p *Picker) SetItems(items []PickerItem) {
 func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// When preview is active, handle preview-specific keys first.
+		if p.previewActive {
+			switch msg.String() {
+			case "left", "h", "esc":
+				p.previewActive = false
+				p.previewScroll = 0
+				return p, nil
+			case "up", "k":
+				if p.previewScroll > 0 {
+					p.previewScroll--
+				}
+				return p, nil
+			case "down", "j":
+				p.previewScroll++
+				return p, nil
+			}
+			return p, nil
+		}
+
 		switch msg.String() {
 		case "up", "k":
 			p.moveCursor(-1)
@@ -383,6 +553,15 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 				}
 			}
 			p.toggleCurrent()
+		case "right", "l":
+			if p.hasPreview && p.cursor >= 0 && p.cursor < len(p.items) {
+				key := p.items[p.cursor].Key
+				if _, ok := p.previewContent[key]; ok {
+					p.previewActive = true
+					p.previewScroll = 0
+					return p, nil
+				}
+			}
 		case "a":
 			p.doSelectAll()
 		case "n":
@@ -402,6 +581,11 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 
 // View renders the picker list with scrolling support.
 func (p Picker) View() string {
+	// When preview is active, show split view.
+	if p.previewActive && p.hasPreview {
+		return p.viewWithPreview()
+	}
+
 	totalRows := len(p.items)
 	if p.hasSearchAction {
 		totalRows++ // virtual search action row
@@ -529,6 +713,88 @@ func (p Picker) View() string {
 	return ContentPaneStyle.Render(strings.TrimRight(b.String(), "\n"))
 }
 
+// viewWithPreview renders a split view: list on the left, content preview on the right.
+func (p Picker) viewWithPreview() string {
+	// Split width: 40% list, 60% preview.
+	listWidth := p.width * 2 / 5
+	if listWidth < 20 {
+		listWidth = 20
+	}
+	previewWidth := p.width - listWidth - 3 // 3 = border + padding
+	if previewWidth < 10 {
+		previewWidth = 10
+	}
+
+	// Get current item's preview content.
+	var content string
+	if p.cursor >= 0 && p.cursor < len(p.items) {
+		content = p.previewContent[p.items[p.cursor].Key]
+	}
+	if content == "" {
+		content = "(no preview available)"
+	}
+
+	// Render preview with scroll.
+	previewLines := strings.Split(content, "\n")
+	maxScroll := len(previewLines) - p.height
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := p.previewScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	end := scroll + p.height
+	if end > len(previewLines) {
+		end = len(previewLines)
+	}
+	visible := previewLines[scroll:end]
+
+	// Truncate lines to fit preview width.
+	for i, line := range visible {
+		if len(line) > previewWidth {
+			visible[i] = line[:previewWidth]
+		}
+	}
+
+	previewStr := strings.Join(visible, "\n")
+	previewView := lipgloss.NewStyle().
+		Width(previewWidth).
+		PaddingLeft(1).
+		BorderLeft(true).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(colorSurface1).
+		Render(previewStr)
+
+	// Render a compact list on the left showing only item names.
+	var listB strings.Builder
+	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
+	for i, it := range p.items {
+		if it.IsHeader || it.Description != "" {
+			continue
+		}
+		cursor := "  "
+		if p.focused && i == p.cursor {
+			cursor = "> "
+		}
+		display := it.Display
+		if len(display) > listWidth-4 {
+			display = display[:listWidth-7] + "..."
+		}
+		if p.focused && i == p.cursor {
+			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(display)
+		} else if !p.focused {
+			display = dimStyle.Render(display)
+		}
+		listB.WriteString(cursor + display + "\n")
+	}
+	listView := lipgloss.NewStyle().Width(listWidth).Render(
+		strings.TrimRight(listB.String(), "\n"),
+	)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, listView, previewView)
+}
+
 // --- Internal helpers ---
 
 // isSkippable returns true if the item at index i should be skipped by the cursor.
@@ -566,9 +832,9 @@ func (p *Picker) moveCursor(dir int) {
 }
 
 // toggleCurrent toggles the selection of the item at the cursor position.
-// Headers and descriptions are not togglable.
+// Headers, descriptions, and read-only items are not togglable.
 func (p *Picker) toggleCurrent() {
-	if p.cursor >= 0 && p.cursor < len(p.items) && isSelectableItem(p.items[p.cursor]) {
+	if p.cursor >= 0 && p.cursor < len(p.items) && isSelectableItem(p.items[p.cursor]) && !p.items[p.cursor].IsReadOnly {
 		p.items[p.cursor].Selected = !p.items[p.cursor].Selected
 		p.syncSelectAll()
 	}

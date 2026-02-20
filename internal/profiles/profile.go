@@ -21,6 +21,8 @@ type Profile struct {
 	ClaudeMD    ProfileClaudeMD    `yaml:"claude_md,omitempty"`
 	MCP         ProfileMCP         `yaml:"mcp,omitempty"`
 	Keybindings ProfileKeybindings `yaml:"keybindings,omitempty"`
+	Commands    ProfileCommands    `yaml:"commands,omitempty"`
+	Skills      ProfileSkills      `yaml:"skills,omitempty"`
 }
 
 // ProfilePlugins holds plugin add/remove directives for a profile.
@@ -56,6 +58,18 @@ type ProfileMCP struct {
 // ProfileKeybindings holds keybinding override directives for a profile.
 type ProfileKeybindings struct {
 	Override map[string]any `yaml:"override,omitempty"`
+}
+
+// ProfileCommands holds command add/remove directives for a profile.
+type ProfileCommands struct {
+	Add    []string `yaml:"add,omitempty"`
+	Remove []string `yaml:"remove,omitempty"`
+}
+
+// ProfileSkills holds skill add/remove directives for a profile.
+type ProfileSkills struct {
+	Add    []string `yaml:"add,omitempty"`
+	Remove []string `yaml:"remove,omitempty"`
 }
 
 // ParseProfile parses a profile YAML file into a Profile struct.
@@ -130,6 +144,20 @@ func ParseProfile(data []byte) (Profile, error) {
 				return Profile{}, fmt.Errorf("parsing profile keybindings: %w", err)
 			}
 			p.Keybindings = kb
+
+		case "commands":
+			var cmds ProfileCommands
+			if err := valNode.Decode(&cmds); err != nil {
+				return Profile{}, fmt.Errorf("parsing profile commands: %w", err)
+			}
+			p.Commands = cmds
+
+		case "skills":
+			var skills ProfileSkills
+			if err := valNode.Decode(&skills); err != nil {
+				return Profile{}, fmt.Errorf("parsing profile skills: %w", err)
+			}
+			p.Skills = skills
 		}
 	}
 
@@ -348,6 +376,30 @@ func MarshalProfile(p Profile) ([]byte, error) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "keybindings", Tag: "!!str"},
 			&kbNode,
+		)
+	}
+
+	// commands
+	if len(p.Commands.Add) > 0 || len(p.Commands.Remove) > 0 {
+		var cmdsNode yaml.Node
+		if err := cmdsNode.Encode(p.Commands); err != nil {
+			return nil, fmt.Errorf("encoding profile commands: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "commands", Tag: "!!str"},
+			&cmdsNode,
+		)
+	}
+
+	// skills
+	if len(p.Skills.Add) > 0 || len(p.Skills.Remove) > 0 {
+		var skillsNode yaml.Node
+		if err := skillsNode.Encode(p.Skills); err != nil {
+			return nil, fmt.Errorf("encoding profile skills: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "skills", Tag: "!!str"},
+			&skillsNode,
 		)
 	}
 
@@ -610,6 +662,74 @@ func MergeKeybindings(base map[string]any, profile Profile) map[string]any {
 	return result
 }
 
+// MergeCommands starts with base, adds profile.Commands.Add (no duplicates),
+// then removes profile.Commands.Remove. Same pattern as MergePlugins.
+func MergeCommands(base []string, profile Profile) []string {
+	seen := make(map[string]bool, len(base))
+	result := make([]string, 0, len(base)+len(profile.Commands.Add))
+
+	for _, s := range base {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	for _, s := range profile.Commands.Add {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	if len(profile.Commands.Remove) > 0 {
+		removeSet := make(map[string]bool, len(profile.Commands.Remove))
+		for _, s := range profile.Commands.Remove {
+			removeSet[s] = true
+		}
+		filtered := result[:0]
+		for _, s := range result {
+			if !removeSet[s] {
+				filtered = append(filtered, s)
+			}
+		}
+		result = filtered
+	}
+	return result
+}
+
+// MergeSkills starts with base, adds profile.Skills.Add (no duplicates),
+// then removes profile.Skills.Remove. Same pattern as MergePlugins.
+func MergeSkills(base []string, profile Profile) []string {
+	seen := make(map[string]bool, len(base))
+	result := make([]string, 0, len(base)+len(profile.Skills.Add))
+
+	for _, s := range base {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	for _, s := range profile.Skills.Add {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+	if len(profile.Skills.Remove) > 0 {
+		removeSet := make(map[string]bool, len(profile.Skills.Remove))
+		for _, s := range profile.Skills.Remove {
+			removeSet[s] = true
+		}
+		filtered := result[:0]
+		for _, s := range result {
+			if !removeSet[s] {
+				filtered = append(filtered, s)
+			}
+		}
+		result = filtered
+	}
+	return result
+}
+
 // ProfileSummary returns a human-readable summary of profile changes.
 // Format: "+N plugin(s), -N plugin(s), key -> value, +N hook(s), -N hook(s)"
 // Returns "no changes" if the profile has no directives.
@@ -665,6 +785,19 @@ func ProfileSummary(p Profile) string {
 
 	if n := len(p.Keybindings.Override); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", n, pluralize("keybinding override", n)))
+	}
+
+	if n := len(p.Commands.Add); n > 0 {
+		parts = append(parts, fmt.Sprintf("+%d %s", n, pluralize("command", n)))
+	}
+	if n := len(p.Commands.Remove); n > 0 {
+		parts = append(parts, fmt.Sprintf("-%d %s", n, pluralize("command", n)))
+	}
+	if n := len(p.Skills.Add); n > 0 {
+		parts = append(parts, fmt.Sprintf("+%d %s", n, pluralize("skill", n)))
+	}
+	if n := len(p.Skills.Remove); n > 0 {
+		parts = append(parts, fmt.Sprintf("-%d %s", n, pluralize("skill", n)))
 	}
 
 	if len(parts) == 0 {

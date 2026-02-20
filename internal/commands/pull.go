@@ -7,12 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
@@ -38,7 +40,11 @@ type PullResult struct {
 	MCPEnvWarnings         []string // unresolved ${VAR} references
 	MCPProjectApplied      map[string][]string // project path -> server names written there
 	KeybindingsApplied     bool
+	CommandsRestored           int
+	SkillsRestored             int
 	PendingHighRisk            []approval.Change
+	Updated                    []string // plugins refreshed due to version mismatch
+	UpdateFailed               []string // plugins that failed to refresh
 	ProjectSettingsApplied     bool
 	ProjectUnmanagedDetected   bool // CWD has settings.local.json but no .claude-sync.yaml
 }
@@ -202,6 +208,12 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 		result.Failed = stillFailed
 	}
 
+	// Refresh stale plugins (version mismatch between marketplace and cache).
+	if stale := detectStalePlugins(claudeDir, result.Synced); len(stale) > 0 {
+		installed, _ := claudecode.ReadInstalledPlugins(claudeDir)
+		result.Updated, result.UpdateFailed = refreshStalePlugins(claudeDir, stale, installed, quiet)
+	}
+
 	// Read user preferences for category skip logic.
 	prefs := config.DefaultUserPreferences()
 	prefsPath := filepath.Join(syncDir, "user-preferences.yaml")
@@ -361,6 +373,19 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				if claudecode.WriteKeybindings(claudeDir, kbConfig) == nil {
 					result.KeybindingsApplied = true
 				}
+			}
+
+			// Restore commands and skills from sync dir (always safe).
+			effectiveCommands := cfg.Commands
+			effectiveSkills := cfg.Skills
+			if activeProfile != nil {
+				effectiveCommands = profiles.MergeCommands(effectiveCommands, *activeProfile)
+				effectiveSkills = profiles.MergeSkills(effectiveSkills, *activeProfile)
+			}
+			if len(effectiveCommands) > 0 || len(effectiveSkills) > 0 {
+				cr, sr := restoreCommandsSkills(claudeDir, syncDir, effectiveCommands, effectiveSkills)
+				result.CommandsRestored = cr
+				result.SkillsRestored = sr
 			}
 
 			// In auto mode, write high-risk items to pending.
@@ -550,6 +575,72 @@ func applyPermissions(claudeDir string, perms config.Permissions) error {
 	return claudecode.WriteSettings(claudeDir, settings)
 }
 
+// restoreCommandsSkills copies command .md files and skill directories from
+// syncDir to claudeDir, filtered by the effective key lists. Returns counts.
+func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []string) (int, int) {
+	var cmdsRestored, skillsRestored int
+
+	// Build set of command filenames from keys (e.g. "cmd:global:review-pr" → "review-pr.md").
+	cmdNames := make(map[string]bool)
+	for _, k := range commandKeys {
+		parts := strings.Split(k, ":")
+		if len(parts) >= 2 {
+			cmdNames[parts[len(parts)-1]+".md"] = true
+		}
+	}
+
+	// Copy commands.
+	srcCmdsDir := filepath.Join(syncDir, "commands")
+	if entries, err := os.ReadDir(srcCmdsDir); err == nil {
+		dstCmdsDir := filepath.Join(claudeDir, "commands")
+		os.MkdirAll(dstCmdsDir, 0755)
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			if len(cmdNames) > 0 && !cmdNames[entry.Name()] {
+				continue
+			}
+			srcPath := filepath.Join(srcCmdsDir, entry.Name())
+			dstPath := filepath.Join(dstCmdsDir, entry.Name())
+			if data, err := os.ReadFile(srcPath); err == nil {
+				if os.WriteFile(dstPath, data, 0644) == nil {
+					cmdsRestored++
+				}
+			}
+		}
+	}
+
+	// Build set of skill names from keys (e.g. "skill:global:brainstorming" → "brainstorming").
+	skillNames := make(map[string]bool)
+	for _, k := range skillKeys {
+		parts := strings.Split(k, ":")
+		if len(parts) >= 2 {
+			skillNames[parts[len(parts)-1]] = true
+		}
+	}
+
+	// Copy skills (entire directories).
+	srcSkillsDir := filepath.Join(syncDir, "skills")
+	if entries, err := os.ReadDir(srcSkillsDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if len(skillNames) > 0 && !skillNames[entry.Name()] {
+				continue
+			}
+			srcDir := filepath.Join(srcSkillsDir, entry.Name())
+			dstDir := filepath.Join(claudeDir, "skills", entry.Name())
+			if err := copyDir(srcDir, dstDir); err == nil {
+				skillsRestored++
+			}
+		}
+	}
+
+	return cmdsRestored, skillsRestored
+}
+
 // appendUniqueStrings appends items from add to base without duplicates.
 func appendUniqueStrings(base, add []string) []string {
 	seen := make(map[string]bool, len(base))
@@ -565,5 +656,67 @@ func appendUniqueStrings(base, add []string) []string {
 		}
 	}
 	return result
+}
+
+// detectStalePlugins returns synced plugin keys whose installed version differs
+// from the marketplace source version on disk.
+func detectStalePlugins(claudeDir string, syncedKeys []string) []string {
+	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
+	if err != nil {
+		return nil
+	}
+
+	var stale []string
+	for _, key := range syncedKeys {
+		installations, ok := installed.Plugins[key]
+		if !ok || len(installations) == 0 {
+			continue
+		}
+		installedVersion := installations[0].Version
+
+		mkplVersion, err := marketplace.ReadMarketplacePluginVersion(claudeDir, key)
+		if err != nil {
+			continue // skip silently (missing marketplace, remote-only, etc.)
+		}
+
+		if marketplace.HasUpdate(installedVersion, mkplVersion) {
+			stale = append(stale, key)
+		}
+	}
+	return stale
+}
+
+// refreshStalePlugins removes old cache directories and reinstalls plugins
+// to pick up version changes from the marketplace source.
+func refreshStalePlugins(claudeDir string, staleKeys []string, installed *claudecode.InstalledPlugins, quiet bool) (updated, failed []string) {
+	for _, key := range staleKeys {
+		installations, ok := installed.Plugins[key]
+		if !ok || len(installations) == 0 {
+			failed = append(failed, key)
+			continue
+		}
+
+		installPath := installations[0].InstallPath
+		if installPath != "" {
+			os.RemoveAll(installPath)
+		}
+
+		if !quiet {
+			fmt.Printf("  Updating %s...\n", key)
+		}
+
+		if err := installPlugin(key); err != nil {
+			failed = append(failed, key)
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", key, err)
+			}
+		} else {
+			updated = append(updated, key)
+			if !quiet {
+				fmt.Printf("  ✓ %s\n", key)
+			}
+		}
+	}
+	return updated, failed
 }
 

@@ -682,6 +682,7 @@ func FormatSummaryBody(stats map[string]int, profiles []string) string {
 		{"mcp", "MCP servers"},
 		{"keybindings", "keybindings"},
 		{"hooks", "hooks"},
+		{"commands_skills", "commands & skills"},
 	}
 
 	b.WriteString("Base: ")

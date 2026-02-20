@@ -39,6 +39,8 @@ type ConfigV2 struct {
 	MCP         map[string]json.RawMessage `yaml:"-"`
 	MCPMeta     map[string]MCPServerMeta   `yaml:"-"`
 	Keybindings map[string]any             `yaml:"-"`
+	Commands    []string                   `yaml:"-"`
+	Skills      []string                   `yaml:"-"`
 }
 
 // Config is a type alias for ConfigV2 to maintain backward compatibility.
@@ -163,6 +165,18 @@ func Parse(data []byte) (Config, error) {
 				return Config{}, fmt.Errorf("parsing config keybindings: %w", err)
 			}
 			cfg.Keybindings = kb
+		case "commands":
+			var commands []string
+			if err := valNode.Decode(&commands); err != nil {
+				return Config{}, fmt.Errorf("parsing config commands: %w", err)
+			}
+			cfg.Commands = commands
+		case "skills":
+			var skills []string
+			if err := valNode.Decode(&skills); err != nil {
+				return Config{}, fmt.Errorf("parsing config skills: %w", err)
+			}
+			cfg.Skills = skills
 		}
 	}
 
@@ -422,6 +436,34 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "keybindings", Tag: "!!str"},
 			&kbNode,
+		)
+	}
+
+	// commands
+	if len(cfg.Commands) > 0 {
+		cmdSeq := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, c := range cfg.Commands {
+			cmdSeq.Content = append(cmdSeq.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Value: c, Tag: "!!str"},
+			)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "commands", Tag: "!!str"},
+			cmdSeq,
+		)
+	}
+
+	// skills
+	if len(cfg.Skills) > 0 {
+		skillSeq := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, s := range cfg.Skills {
+			skillSeq.Content = append(skillSeq.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Value: s, Tag: "!!str"},
+			)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "skills", Tag: "!!str"},
+			skillSeq,
 		)
 	}
 
