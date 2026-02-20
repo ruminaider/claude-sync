@@ -58,8 +58,6 @@ claude-sync config join git@github.com:your-org/claude-sync-config.git
 
 Both commands install a Claude Code plugin that automatically checks for config updates at the start of each session and provides the `/sync` slash command.
 
-> **Note:** `claude-sync init` and `claude-sync join` still work as aliases for backward compatibility.
-
 ## Usage
 
 ```bash
