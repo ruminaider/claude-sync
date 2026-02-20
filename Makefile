@@ -1,4 +1,4 @@
-VERSION ?= 0.1.33
+VERSION ?= 0.3.1
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 BINARY := claude-sync
 
