@@ -348,27 +348,27 @@ func TestPickerNavigation(t *testing.T) {
 	assert.Equal(t, 1, p.cursor)
 
 	// Move down: should skip header at index 2, land on "b" (index 3)
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 3, p.cursor)
 
 	// Move down again: should land on "c" (index 4)
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 4, p.cursor)
 
 	// Move down at end: should stay at 4
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 4, p.cursor)
 
 	// Move up: should land on "b" (index 3)
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
 	assert.Equal(t, 3, p.cursor)
 
 	// Move up again: should skip header at index 2, land on "a" (index 1)
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
 	assert.Equal(t, 1, p.cursor)
 
 	// Move up at start: should stay at 1 (can't go to header)
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
 	assert.Equal(t, 1, p.cursor)
 }
 
@@ -432,8 +432,8 @@ func TestPickerSelectAll(t *testing.T) {
 	}
 	p := NewPicker(items)
 
-	// Press 'a' to select all
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	// Press Ctrl+A to select all
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	assert.True(t, p.items[1].Selected)
 	assert.True(t, p.items[2].Selected)
 	assert.True(t, p.items[3].Selected)
@@ -452,8 +452,8 @@ func TestPickerSelectNone(t *testing.T) {
 	}
 	p := NewPicker(items)
 
-	// Press 'n' to select none
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	// Press Ctrl+N to select none
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	assert.False(t, p.items[1].Selected)
 	assert.False(t, p.items[2].Selected)
 	assert.False(t, p.items[3].Selected)
@@ -476,19 +476,16 @@ func TestPickerLeftKeyGoesToSidebar(t *testing.T) {
 	assert.Equal(t, FocusSidebar, focusMsg.Zone)
 }
 
-func TestPickerHKeyGoesToSidebar(t *testing.T) {
+func TestPickerHKeyGoesToFilter(t *testing.T) {
 	items := []PickerItem{
 		{Key: "a", Display: "a", Selected: true},
 	}
 	p := NewPicker(items)
 
-	var cmd tea.Cmd
-	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	require.NotNil(t, cmd)
-	msg := cmd()
-	focusMsg, ok := msg.(FocusChangeMsg)
-	assert.True(t, ok)
-	assert.Equal(t, FocusSidebar, focusMsg.Zone)
+	// 'h' now types into filter instead of going to sidebar
+	p, cmd := p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	assert.Equal(t, "h", p.filterText)
+	assert.Nil(t, cmd, "h should not emit focus change")
 }
 
 func TestPickerSetItems(t *testing.T) {
@@ -535,15 +532,15 @@ func TestPickerSearchAction_CursorCanReach(t *testing.T) {
 	assert.Equal(t, 0, p.cursor)
 
 	// Move down to search action row (index 1 = len(items))
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 1, p.cursor, "cursor should reach the search action row")
 
 	// Move down again: should stay at search action row
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 1, p.cursor, "cursor should stay at search action row")
 
 	// Move back up
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
 	assert.Equal(t, 0, p.cursor, "cursor should go back to item a")
 }
 
@@ -556,7 +553,7 @@ func TestPickerSearchAction_EnterEmitsSearchRequest(t *testing.T) {
 	p.SetHeight(10)
 
 	// Move to search action row
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 1, p.cursor)
 
 	// Press Enter
@@ -577,7 +574,7 @@ func TestPickerSearchAction_SpaceIsNoOp(t *testing.T) {
 	p.SetHeight(10)
 
 	// Move to search action row
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 1, p.cursor)
 
 	// Press Space — should not toggle anything or crash
@@ -618,7 +615,7 @@ func TestPickerSearchAction_WithHeaders(t *testing.T) {
 	assert.Equal(t, 1, p.cursor)
 
 	// Move down: should reach search action row (index 2 = len(items))
-	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 2, p.cursor, "cursor should reach search action row past items")
 }
 
@@ -699,4 +696,104 @@ func TestVisibleSelectableCount(t *testing.T) {
 	p.filterText = "alpha"
 	p.refilter()
 	assert.Equal(t, 1, p.visibleSelectableCount())
+}
+
+// --- Filter keyboard handling tests ---
+
+func TestFilterKeyInput(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+
+	// Type "a" - should go to filter
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	assert.Equal(t, "a", p.filterText)
+
+	// Type "l" - should append
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	assert.Equal(t, "al", p.filterText)
+
+	// Backspace - should delete last char
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	assert.Equal(t, "a", p.filterText)
+
+	// Backspace again - empty
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	assert.Equal(t, "", p.filterText)
+}
+
+func TestEscClearsFilter(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	p.filterText = "alpha"
+	p.refilter()
+
+	// Esc should clear filter text (not emit focus change)
+	p, cmd := p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	assert.Equal(t, "", p.filterText)
+	assert.Nil(t, p.filterView, "filterView should be nil after clearing")
+	assert.Nil(t, cmd, "should not emit focus change when clearing filter")
+}
+
+func TestEscEmitsFocusWhenFilterEmpty(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	p.filterText = ""
+
+	// Esc with empty filter should emit focus change
+	_, cmd := p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	assert.NotNil(t, cmd, "should emit focus change when filter is empty")
+}
+
+func TestCtrlASelectsVisibleOnly(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	// Deselect all first
+	for i := range p.items {
+		p.items[i].Selected = false
+	}
+
+	// Filter to "alpha"
+	p.filterText = "alpha"
+	p.refilter()
+
+	// Ctrl+A should only select visible items
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	assert.True(t, p.items[2].Selected, "alpha should be selected")
+	assert.False(t, p.items[3].Selected, "beta should NOT be selected")
+	assert.False(t, p.items[6].Selected, "charlie should NOT be selected")
+}
+
+func TestCtrlNDeselectsVisibleOnly(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	// All start selected
+
+	// Filter to "alpha"
+	p.filterText = "alpha"
+	p.refilter()
+
+	// Ctrl+N should only deselect visible items
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	assert.False(t, p.items[2].Selected, "alpha should be deselected")
+	assert.True(t, p.items[3].Selected, "beta should still be selected")
+	assert.True(t, p.items[6].Selected, "charlie should still be selected")
+}
+
+func TestArrowKeysStillNavigate(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+
+	startCursor := p.cursor
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	assert.NotEqual(t, startCursor, p.cursor, "down arrow should move cursor")
+}
+
+func TestFilterResetsOnSetItems(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "alpha"
+	p.refilter()
+
+	p.SetItems(testItems())
+	assert.Equal(t, "", p.filterText)
+	assert.Nil(t, p.filterView)
 }
