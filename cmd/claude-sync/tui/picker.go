@@ -39,6 +39,10 @@ type Picker struct {
 	hasSearchAction bool            // when true, a [+ Search projects] row is appended
 	tagColor        lipgloss.Color  // accent color for inherited-item tags (profile views)
 
+	// Filter mode: type-to-filter narrows the visible item list.
+	filterText string
+	filterView []int // nil = no filter; otherwise, indices into items to render
+
 	// Preview mode: when enabled, → shows item content in a side viewport.
 	hasPreview     bool
 	previewContent map[string]string // key → markdown content for preview
@@ -458,6 +462,82 @@ func (p Picker) AllKeys() []string {
 	return keys
 }
 
+// refilter recomputes filterView based on current filterText.
+// When filterText is empty, filterView is set to nil (show all).
+func (p *Picker) refilter() {
+	if p.filterText == "" {
+		p.filterView = nil
+		return
+	}
+
+	needle := strings.ToLower(p.filterText)
+
+	// First pass: determine which selectable items match.
+	matches := make([]bool, len(p.items))
+	for i, it := range p.items {
+		if it.IsHeader || it.Description != "" {
+			continue
+		}
+		haystack := strings.ToLower(it.Display + " " + it.Tag)
+		if strings.Contains(haystack, needle) {
+			matches[i] = true
+		}
+	}
+
+	// Second pass: build visible indices, including headers/descriptions
+	// only if they have at least one matching child.
+	vis := make([]int, 0)
+	for i, it := range p.items {
+		if matches[i] {
+			vis = append(vis, i)
+			continue
+		}
+		if it.IsHeader {
+			// Include header if any child before the next header matches.
+			for j := i + 1; j < len(p.items); j++ {
+				if p.items[j].IsHeader {
+					break
+				}
+				if matches[j] {
+					vis = append(vis, i)
+					break
+				}
+			}
+		} else if it.Description != "" {
+			// Include description if its preceding header was included.
+			if len(vis) > 0 && vis[len(vis)-1] == i-1 {
+				vis = append(vis, i)
+			}
+		}
+	}
+
+	p.filterView = vis
+}
+
+// isFilteredOut returns true if the item at index i is hidden by the active filter.
+func (p *Picker) isFilteredOut(i int) bool {
+	if p.filterView == nil {
+		return false
+	}
+	for _, vi := range p.filterView {
+		if vi == i {
+			return false
+		}
+	}
+	return true
+}
+
+// visibleSelectableCount returns the number of selectable items currently visible.
+func (p Picker) visibleSelectableCount() int {
+	n := 0
+	for i, it := range p.items {
+		if isSelectableItem(it) && !p.isFilteredOut(i) {
+			n++
+		}
+	}
+	return n
+}
+
 // SelectedCount returns the number of selected selectable items.
 func (p Picker) SelectedCount() int {
 	n := 0
@@ -501,6 +581,8 @@ func (p *Picker) SetItems(items []PickerItem) {
 	p.items = items
 	p.cursor = 0
 	p.offset = 0
+	p.filterText = ""
+	p.filterView = nil
 	// Advance cursor to the first selectable item.
 	for i := range p.items {
 		if !p.isSkippable(i) {
@@ -802,7 +884,13 @@ func (p *Picker) isSkippable(i int) bool {
 	if i < 0 || i >= len(p.items) {
 		return false
 	}
-	return p.items[i].IsHeader || p.items[i].Description != ""
+	if p.items[i].IsHeader || p.items[i].Description != "" {
+		return true
+	}
+	if p.isFilteredOut(i) {
+		return true
+	}
+	return false
 }
 
 // moveCursor advances the cursor in the given direction (+1 or -1), skipping

@@ -621,3 +621,82 @@ func TestPickerSearchAction_WithHeaders(t *testing.T) {
 	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	assert.Equal(t, 2, p.cursor, "cursor should reach search action row past items")
 }
+
+// --- Filter infrastructure tests ---
+
+func testItems() []PickerItem {
+	return []PickerItem{
+		{Display: "Upstream (2)", IsHeader: true},
+		{Description: "Marketplace plugins"},
+		{Key: "a@m", Display: "alpha-plugin", Selected: true},
+		{Key: "b@m", Display: "beta-plugin", Selected: true, Tag: "[cmd] beads"},
+		{Display: "Auto-forked (1)", IsHeader: true},
+		{Description: "Local plugins"},
+		{Key: "c@local", Display: "charlie", Selected: true, Tag: "[skill]"},
+	}
+}
+
+func TestRefilter_NoFilter(t *testing.T) {
+	p := NewPicker(testItems())
+	p.refilter()
+	assert.Nil(t, p.filterView, "no filter text should produce nil filterView")
+}
+
+func TestRefilter_MatchesByDisplay(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "alpha"
+	p.refilter()
+	// Should show: Upstream header, description, alpha-plugin
+	assert.NotNil(t, p.filterView)
+	assert.Equal(t, 3, len(p.filterView)) // header + desc + alpha
+}
+
+func TestRefilter_MatchesByTag(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "beads"
+	p.refilter()
+	// Should show: Upstream header, description, beta-plugin (matched via tag)
+	assert.Equal(t, 3, len(p.filterView))
+}
+
+func TestRefilter_CaseInsensitive(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "ALPHA"
+	p.refilter()
+	assert.Equal(t, 3, len(p.filterView))
+}
+
+func TestRefilter_NoMatches(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "zzz"
+	p.refilter()
+	assert.NotNil(t, p.filterView)
+	assert.Equal(t, 0, len(p.filterView))
+}
+
+func TestRefilter_HidesEmptyHeaders(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "charlie"
+	p.refilter()
+	// Should show: Auto-forked header, description, charlie
+	// NOT Upstream header (no matching children)
+	assert.Equal(t, 3, len(p.filterView))
+	assert.Equal(t, 4, p.filterView[0]) // Auto-forked header at index 4
+}
+
+func TestRefilter_MatchesSkill(t *testing.T) {
+	p := NewPicker(testItems())
+	p.filterText = "skill"
+	p.refilter()
+	// [skill] tag on charlie matches
+	assert.Equal(t, 3, len(p.filterView)) // Auto-forked header + desc + charlie
+}
+
+func TestVisibleSelectableCount(t *testing.T) {
+	p := NewPicker(testItems())
+	assert.Equal(t, 3, p.visibleSelectableCount()) // 3 selectable items
+
+	p.filterText = "alpha"
+	p.refilter()
+	assert.Equal(t, 1, p.visibleSelectableCount())
+}
