@@ -988,22 +988,31 @@ func (p Picker) viewWithPreview() string {
 		BorderForeground(colorSurface1).
 		Render(previewStr)
 
-	// Render a compact list on the left showing only item names.
+	// Render filter bar if filter is active.
+	var topBar string
+	if p.filterText != "" {
+		dimFilter := lipgloss.NewStyle().Foreground(colorOverlay0)
+		topBar = " " + dimFilter.Render("Filter: ") + p.filterText + "\n"
+	}
+
+	// Render a compact list on the left showing only visible item names.
+	indices := p.viewIndices()
 	var listB strings.Builder
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
-	for i, it := range p.items {
+	for _, idx := range indices {
+		it := p.items[idx]
 		if it.IsHeader || it.Description != "" {
 			continue
 		}
 		cursor := "  "
-		if p.focused && i == p.cursor {
+		if p.focused && idx == p.cursor {
 			cursor = "> "
 		}
 		display := it.Display
 		if len(display) > listWidth-4 {
 			display = display[:listWidth-7] + "..."
 		}
-		if p.focused && i == p.cursor {
+		if p.focused && idx == p.cursor {
 			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(display)
 		} else if !p.focused {
 			display = dimStyle.Render(display)
@@ -1014,7 +1023,11 @@ func (p Picker) viewWithPreview() string {
 		strings.TrimRight(listB.String(), "\n"),
 	)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, listView, previewView)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, listView, previewView)
+	if topBar != "" {
+		return topBar + joined
+	}
+	return joined
 }
 
 // --- Internal helpers ---
