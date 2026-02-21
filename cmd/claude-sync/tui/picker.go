@@ -905,34 +905,45 @@ func (p Picker) computeScrollOffset(cursorPos, totalRows, viewHeight int) int {
 	return offset
 }
 
-// renderFilterBar renders the filter input line.
+// renderFilterBar renders the filter input line with a distinct background.
 func (p Picker) renderFilterBar() string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
-	label := dimStyle.Render("Filter: ")
+	barBg := colorSurface0
 
-	filterDisplay := p.filterText
-	cursor := dimStyle.Render("_")
-	if p.focused {
-		cursor = lipgloss.NewStyle().Foreground(colorText).Render("_")
+	// Build inner content.
+	var inner string
+	if p.filterText == "" {
+		// Placeholder when empty.
+		placeholder := lipgloss.NewStyle().Foreground(colorOverlay0).Background(barBg).Render("Type to search...")
+		inner = " " + placeholder
+	} else {
+		label := lipgloss.NewStyle().Foreground(colorOverlay0).Background(barBg).Render("Filter: ")
+		text := lipgloss.NewStyle().Foreground(colorText).Background(barBg).Render(p.filterText)
+		cursor := lipgloss.NewStyle().Foreground(colorText).Background(barBg).Render("_")
+		inner = " " + label + text + cursor
 	}
 
+	// Right-aligned match count when filter is active.
 	right := ""
 	if p.filterText != "" {
 		visible := p.visibleSelectableCount()
 		total := p.TotalCount()
-		right = dimStyle.Render(fmt.Sprintf("%d/%d", visible, total))
+		right = dimStyle.Background(barBg).Render(fmt.Sprintf("%d/%d", visible, total))
 	}
 
-	left := label + filterDisplay + cursor
 	if right != "" {
-		// Right-align the count.
-		gap := p.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
+		gap := p.width - lipgloss.Width(inner) - lipgloss.Width(right) - 2
 		if gap < 1 {
 			gap = 1
 		}
-		return " " + left + strings.Repeat(" ", gap) + right
+		inner = inner + lipgloss.NewStyle().Background(barBg).Render(strings.Repeat(" ", gap)) + right
 	}
-	return " " + left
+
+	// Render the full-width bar with background.
+	barStyle := lipgloss.NewStyle().
+		Background(barBg).
+		Width(p.width)
+	return barStyle.Render(inner)
 }
 
 // viewWithPreview renders a split view: list on the left, content preview on the right.

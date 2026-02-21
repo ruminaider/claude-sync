@@ -807,7 +807,13 @@ func TestViewShowsFilterBar(t *testing.T) {
 	p.SetWidth(60)
 
 	view := p.View()
-	assert.Contains(t, view, "Filter:", "view should contain filter bar")
+	assert.Contains(t, view, "Type to search", "empty filter should show placeholder")
+
+	// With filter text active, should show "Filter:" label.
+	p.filterText = "a"
+	p.refilter()
+	view = p.View()
+	assert.Contains(t, view, "Filter:", "active filter should show label")
 }
 
 func TestViewFilterBarShowsCount(t *testing.T) {
