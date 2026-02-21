@@ -210,16 +210,23 @@ func PermissionPickerItems(perms config.Permissions) []PickerItem {
 	return items
 }
 
-// MCPPickerItems builds a flat list of MCP server names. All items are
+// MCPPickerItems builds picker items from MCP server names. When source is
+// non-empty and there are servers, a group header is prepended. All items are
 // pre-selected.
-func MCPPickerItems(mcp map[string]json.RawMessage) []PickerItem {
+func MCPPickerItems(mcp map[string]json.RawMessage, source string) []PickerItem {
 	keys := make([]string, 0, len(mcp))
 	for k := range mcp {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
-	items := make([]PickerItem, 0, len(keys))
+	var items []PickerItem
+	if source != "" && len(keys) > 0 {
+		items = append(items, PickerItem{
+			Display:  fmt.Sprintf("%s (%d)", source, len(keys)),
+			IsHeader: true,
+		})
+	}
 	for _, k := range keys {
 		items = append(items, PickerItem{
 			Key:      k,
