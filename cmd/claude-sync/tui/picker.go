@@ -1046,14 +1046,10 @@ func (p Picker) viewWithPreview() string {
 	}
 	visible := previewLines[scroll:end]
 
-	// Truncate lines to fit preview width.
-	for i, line := range visible {
-		if len(line) > previewWidth {
-			visible[i] = line[:previewWidth]
-		}
-	}
-
-	previewStr := strings.Join(visible, "\n")
+	// Word-wrap lines to fit preview width instead of truncating.
+	previewStr := lipgloss.NewStyle().Width(previewWidth).Render(
+		strings.Join(visible, "\n"),
+	)
 	previewView := lipgloss.NewStyle().
 		Width(previewWidth).
 		PaddingLeft(1).
