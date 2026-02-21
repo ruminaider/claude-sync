@@ -797,3 +797,66 @@ func TestFilterResetsOnSetItems(t *testing.T) {
 	assert.Equal(t, "", p.filterText)
 	assert.Nil(t, p.filterView)
 }
+
+// --- Filter view rendering tests ---
+
+func TestViewShowsFilterBar(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+
+	view := p.View()
+	assert.Contains(t, view, "Filter:", "view should contain filter bar")
+}
+
+func TestViewFilterBarShowsCount(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+	p.filterText = "alpha"
+	p.refilter()
+
+	view := p.View()
+	assert.Contains(t, view, "1/3", "should show filtered/total count")
+}
+
+func TestViewShowsNoMatches(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+	p.filterText = "zzzzz"
+	p.refilter()
+
+	view := p.View()
+	assert.Contains(t, view, "No matches", "should show no matches message")
+}
+
+func TestViewHidesFilteredItems(t *testing.T) {
+	p := NewPicker(testItems())
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+	p.filterText = "alpha"
+	p.refilter()
+
+	view := p.View()
+	assert.Contains(t, view, "alpha", "matching item should be visible")
+	assert.NotContains(t, view, "beta", "non-matching item should be hidden")
+	assert.NotContains(t, view, "charlie", "non-matching item should be hidden")
+}
+
+func TestViewSearchActionAlwaysVisible(t *testing.T) {
+	p := NewPicker(testItems())
+	p.SetSearchAction(true)
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+	p.filterText = "zzzzz"
+	p.refilter()
+
+	view := p.View()
+	assert.Contains(t, view, "Search projects", "search action should always be visible")
+}
