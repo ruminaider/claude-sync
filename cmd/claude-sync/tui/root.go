@@ -697,11 +697,11 @@ func helperText(section Section, isProfile bool) (string, string) {
 	case SectionClaudeMD:
 		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none \u00b7 →: preview content"
 	case SectionCommandsSkills:
-		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none \u00b7 →: preview"
+		line2 = "Space: toggle \u00b7 Ctrl+A: all \u00b7 Ctrl+N: none \u00b7 →: preview \u00b7 type to filter"
 	case SectionKeybindings:
-		line2 = "Space: toggle"
+		line2 = "Space: toggle \u00b7 type to filter"
 	default:
-		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none"
+		line2 = "Space: toggle \u00b7 Ctrl+A: all \u00b7 Ctrl+N: none \u00b7 type to filter"
 	}
 
 	return line1, line2
