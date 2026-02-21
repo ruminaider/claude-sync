@@ -562,6 +562,12 @@ func (m Model) updatePreview(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) 
 			m.focusZone = focusMsg.Zone
 		}
 		if extractSearchRequest(cmd) {
+			// Set searching state on all previews.
+			m.preview.searching = true
+			for name, pp := range m.profilePreviews {
+				pp.searching = true
+				m.profilePreviews[name] = pp
+			}
 			return m, SearchClaudeMD()
 		}
 	}
@@ -1424,6 +1430,13 @@ func (m Model) buildProfiles() map[string]profiles.Profile {
 // --- Search handling ---
 
 func (m Model) handleSearchDone(msg SearchDoneMsg) Model {
+	// Clear searching state.
+	m.preview.searching = false
+	for name, pp := range m.profilePreviews {
+		pp.searching = false
+		m.profilePreviews[name] = pp
+	}
+
 	if len(msg.Paths) == 0 {
 		return m
 	}
@@ -1439,7 +1452,7 @@ func (m Model) handleSearchDone(msg SearchDoneMsg) Model {
 			continue
 		}
 
-		previewSections := ClaudeMDPreviewSections(sections, path)
+		previewSections := ClaudeMDPreviewSections(sections, shortenPath(path))
 		m.preview.AddSections(previewSections)
 
 		// Also add to profile previews.

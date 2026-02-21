@@ -36,6 +36,7 @@ type Preview struct {
 	totalHeight int
 	focusLeft   bool // true = list focused, false = preview focused
 	focused     bool // true when this preview has keyboard focus
+	searching   bool // true while a background search is running
 }
 
 // NewPreview creates a Preview model from a slice of PreviewSection values.
@@ -186,8 +187,8 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 			p.selected[p.cursor] = !p.selected[p.cursor]
 		}
 	case "enter":
-		// If on the search action, emit SearchRequestMsg.
-		if p.cursor == len(p.sections) {
+		// If on the search action, emit SearchRequestMsg (unless already searching).
+		if p.cursor == len(p.sections) && !p.searching {
 			return p, func() tea.Msg { return SearchRequestMsg{} }
 		}
 		// Otherwise toggle selection.
@@ -326,9 +327,19 @@ func (p Preview) viewList() string {
 	if p.focused && p.cursor == len(p.sections) && p.focusLeft {
 		searchCursor = "> "
 	}
-	searchLabel := lipgloss.NewStyle().Foreground(colorBlue).Render("[+ Search projects]")
-	if !p.focused {
-		searchLabel = dimStyle.Render("[+ Search projects]")
+	var searchLabel string
+	if p.searching {
+		searchLabel = "Searching..."
+		if p.focused && p.cursor == len(p.sections) && p.focusLeft {
+			searchLabel = lipgloss.NewStyle().Bold(true).Foreground(colorOverlay0).Render(searchLabel)
+		} else {
+			searchLabel = dimStyle.Render(searchLabel)
+		}
+	} else {
+		searchLabel = lipgloss.NewStyle().Foreground(colorBlue).Render("[+ Search projects]")
+		if !p.focused {
+			searchLabel = dimStyle.Render("[+ Search projects]")
+		}
 	}
 	b.WriteString(searchCursor + searchLabel + "\n")
 

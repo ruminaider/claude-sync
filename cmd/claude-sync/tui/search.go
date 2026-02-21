@@ -39,7 +39,7 @@ func SearchClaudeMD() tea.Cmd {
 				"-t", "f",
 				"-d", "4",
 				"CLAUDE.md",
-				"--search-path", home,
+				home,
 				"-E", "node_modules",
 				"-E", ".git",
 				"-E", "Library",
@@ -68,17 +68,21 @@ func SearchClaudeMD() tea.Cmd {
 			rawPaths = splitLines(string(out))
 		}
 
-		// Filter to only .claude/CLAUDE.md paths.
+		// Keep all CLAUDE.md files except the global ~/.claude/CLAUDE.md
+		// (already loaded by the initial scan).
+		globalClaude := filepath.Join(home, ".claude", "CLAUDE.md")
 		var filtered []string
 		for _, p := range rawPaths {
 			p = strings.TrimSpace(p)
-			if p == "" {
+			if p == "" || filepath.Base(p) != "CLAUDE.md" {
 				continue
 			}
-			dir := filepath.Dir(p)
-			if filepath.Base(dir) == ".claude" && filepath.Base(p) == "CLAUDE.md" {
-				filtered = append(filtered, p)
+			absP, _ := filepath.Abs(p)
+			absGlobal, _ := filepath.Abs(globalClaude)
+			if absP == absGlobal {
+				continue
 			}
+			filtered = append(filtered, p)
 		}
 
 		return SearchDoneMsg{Paths: filtered}
@@ -113,7 +117,7 @@ func SearchMCPConfigs() tea.Cmd {
 				"-t", "f",
 				"-d", "4",
 				".mcp.json",
-				"--search-path", home,
+				home,
 				"-E", "node_modules",
 				"-E", ".git",
 				"-E", "Library",
@@ -231,7 +235,7 @@ func SearchCommandsSkills() tea.Cmd {
 				"-t", "d",
 				"-d", "4",
 				"^.claude$",
-				"--search-path", home,
+				home,
 				"-E", "node_modules",
 				"-E", ".git",
 				"-E", "Library",
