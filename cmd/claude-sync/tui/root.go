@@ -295,6 +295,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			if m.focusZone == FocusContent || m.focusZone == FocusPreview {
+				// If the active picker has a filter, let it handle Esc first
+				// (clears filter). Only go to sidebar if filter was already empty.
+				if m.activeSection != SectionClaudeMD {
+					p := m.currentPicker()
+					if p.filterText != "" {
+						var escCmds []tea.Cmd
+						return m.updatePicker(msg, &escCmds)
+					}
+				}
 				m.focusZone = FocusSidebar
 				return m, nil
 			}
