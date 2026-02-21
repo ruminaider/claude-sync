@@ -48,14 +48,22 @@ type Picker struct {
 	previewContent map[string]string // key → markdown content for preview
 	previewActive  bool              // true when the preview viewport is shown
 	previewScroll  int               // scroll offset within preview content
+
+	// Collapse support: headers can be collapsed to hide their children.
+	collapsed        map[int]bool // header indices that are currently collapsed
+	CollapseReadOnly bool         // auto-collapse headers whose children are all read-only
+
+	// Search status indicator.
+	searching bool
 }
 
 // NewPicker creates a Picker with the given items. The cursor is placed on the
 // first selectable (non-header, non-description) item.
 func NewPicker(items []PickerItem) Picker {
 	p := Picker{
-		items:  items,
-		height: 20, // sensible default
+		items:     items,
+		height:    20, // sensible default
+		collapsed: make(map[int]bool),
 	}
 	// Advance cursor to the first selectable item.
 	for i := range p.items {
@@ -314,11 +322,11 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 	// Plugin-provided items (read-only).
 	if len(pluginItems) > 0 {
 		items = append(items, PickerItem{
-			Display:  fmt.Sprintf("Plugin-provided (%d)", len(pluginItems)),
+			Display:  fmt.Sprintf("Installed plugins (%d)", len(pluginItems)),
 			IsHeader: true,
 		})
 		items = append(items, PickerItem{
-			Description: "From installed plugins — read-only",
+			Description: "Auto-detected from plugins — view only",
 		})
 		sort.Slice(pluginItems, func(i, j int) bool {
 			return pluginItems[i].Key() < pluginItems[j].Key()
@@ -414,6 +422,20 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 // SetSearchAction enables or disables the virtual [+ Search projects] row.
 func (p *Picker) SetSearchAction(enabled bool) {
 	p.hasSearchAction = enabled
+}
+
+// SetSearching sets whether the search action is currently in progress.
+func (p *Picker) SetSearching(s bool) {
+	p.searching = s
+}
+
+// SetCollapsed programmatically sets the collapsed state for a header index.
+func (p *Picker) SetCollapsed(headerIdx int, collapsed bool) {
+	if collapsed {
+		p.collapsed[headerIdx] = true
+	} else {
+		delete(p.collapsed, headerIdx)
+	}
 }
 
 // SetPreview enables preview mode and sets the content map (key → markdown).
@@ -583,6 +605,10 @@ func (p *Picker) SetItems(items []PickerItem) {
 	p.offset = 0
 	p.filterText = ""
 	p.filterView = nil
+	p.collapsed = make(map[int]bool)
+	if p.CollapseReadOnly {
+		p.autoCollapseReadOnly()
+	}
 	// Advance cursor to the first selectable item.
 	for i := range p.items {
 		if !p.isSkippable(i) {
@@ -628,8 +654,21 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 				p.toggleCurrent()
 			}
 		case "enter":
+			// Enter on a header toggles its collapsed state.
+			if p.cursor >= 0 && p.cursor < len(p.items) && p.items[p.cursor].IsHeader {
+				if p.collapsed[p.cursor] {
+					delete(p.collapsed, p.cursor)
+				} else {
+					p.collapsed[p.cursor] = true
+				}
+				p.clampScroll()
+				return p, nil
+			}
 			// Enter on the search action row emits SearchRequestMsg.
 			if p.hasSearchAction && p.cursor == len(p.items) {
+				if p.searching {
+					return p, nil // ignore re-trigger while searching
+				}
 				return p, func() tea.Msg {
 					return SearchRequestMsg{}
 				}
@@ -764,13 +803,23 @@ func (p Picker) View() string {
 			if p.focused && p.cursor == realIdx {
 				cursor = "> "
 			}
-			actionText := "[+ Search projects]"
-			if p.focused && p.cursor == realIdx {
-				actionText = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render(actionText)
-			} else if p.focused {
-				actionText = lipgloss.NewStyle().Foreground(colorBlue).Render(actionText)
+			var actionText string
+			if p.searching {
+				actionText = "Searching..."
+				if p.focused && p.cursor == realIdx {
+					actionText = lipgloss.NewStyle().Bold(true).Foreground(colorOverlay0).Render(actionText)
+				} else {
+					actionText = dimStyle.Render(actionText)
+				}
 			} else {
-				actionText = dimStyle.Render(actionText)
+				actionText = "[+ Search projects]"
+				if p.focused && p.cursor == realIdx {
+					actionText = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render(actionText)
+				} else if p.focused {
+					actionText = lipgloss.NewStyle().Foreground(colorBlue).Render(actionText)
+				} else {
+					actionText = dimStyle.Render(actionText)
+				}
 			}
 			b.WriteString(cursor + actionText + "\n")
 			continue
@@ -780,8 +829,14 @@ func (p Picker) View() string {
 		it := p.items[i]
 
 		if it.IsHeader {
-			line := fmt.Sprintf("── %s ──", it.Display)
-			if p.focused {
+			indicator := "▾"
+			if p.collapsed[i] {
+				indicator = "▸"
+			}
+			line := fmt.Sprintf("── %s %s ──", indicator, it.Display)
+			if p.focused && i == p.cursor {
+				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(line))
+			} else if p.focused {
 				b.WriteString(HeaderStyle.Render(line))
 			} else {
 				b.WriteString(dimStyle.Render(line))
@@ -850,14 +905,24 @@ func (p Picker) View() string {
 }
 
 // viewIndices returns the list of item indices to render.
-// When no filter is active, returns all item indices.
+// When a filter is active, returns filterView (ignores collapsed state).
+// Otherwise, returns all items except children of collapsed headers.
 func (p Picker) viewIndices() []int {
 	if p.filterView != nil {
 		return p.filterView
 	}
-	indices := make([]int, len(p.items))
+	var indices []int
 	for i := range p.items {
-		indices[i] = i
+		if p.items[i].IsHeader {
+			indices = append(indices, i)
+			continue
+		}
+		// Skip non-header items under collapsed headers.
+		header := p.headerForItem(i)
+		if header >= 0 && p.collapsed[header] {
+			continue
+		}
+		indices = append(indices, i)
 	}
 	return indices
 }
@@ -1041,7 +1106,9 @@ func (p Picker) viewWithPreview() string {
 
 // --- Internal helpers ---
 
-// isSkippable returns true if the item at index i should be skipped by the cursor.
+// isSkippable returns true if the item at index i should be skipped for initial
+// cursor placement (headers and descriptions are skipped, as are items under
+// collapsed headers and filtered-out items).
 func (p *Picker) isSkippable(i int) bool {
 	if i < 0 || i >= len(p.items) {
 		return false
@@ -1050,6 +1117,11 @@ func (p *Picker) isSkippable(i int) bool {
 		return true
 	}
 	if p.isFilteredOut(i) {
+		return true
+	}
+	// Items under a collapsed header are skippable.
+	header := p.headerForItem(i)
+	if header >= 0 && p.collapsed[header] {
 		return true
 	}
 	return false
@@ -1085,7 +1157,7 @@ func (p *Picker) moveCursor(dir int) {
 		}
 		if nextPos < len(indices) {
 			realIdx := indices[nextPos]
-			if !p.items[realIdx].IsHeader && p.items[realIdx].Description == "" {
+			if p.items[realIdx].Description == "" {
 				p.cursor = realIdx
 				p.clampScroll()
 				return
@@ -1131,6 +1203,44 @@ func (p *Picker) syncSelectAll() {
 		if isSelectableItem(it) && !it.Selected {
 			p.selectAll = false
 			return
+		}
+	}
+}
+
+// headerForItem returns the index of the nearest preceding header for item i,
+// or -1 if there is no preceding header.
+func (p *Picker) headerForItem(i int) int {
+	for j := i - 1; j >= 0; j-- {
+		if p.items[j].IsHeader {
+			return j
+		}
+	}
+	return -1
+}
+
+// autoCollapseReadOnly collapses headers whose children are all read-only.
+func (p *Picker) autoCollapseReadOnly() {
+	for i, it := range p.items {
+		if !it.IsHeader {
+			continue
+		}
+		allReadOnly := true
+		hasChildren := false
+		for j := i + 1; j < len(p.items); j++ {
+			if p.items[j].IsHeader {
+				break
+			}
+			if p.items[j].Description != "" {
+				continue // skip description rows
+			}
+			hasChildren = true
+			if !p.items[j].IsReadOnly {
+				allReadOnly = false
+				break
+			}
+		}
+		if hasChildren && allReadOnly {
+			p.collapsed[i] = true
 		}
 	}
 }

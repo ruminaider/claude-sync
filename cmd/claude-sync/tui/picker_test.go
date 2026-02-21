@@ -344,14 +344,18 @@ func TestPickerNavigation(t *testing.T) {
 	}
 	p := NewPicker(items)
 
-	// Cursor starts on "a" (index 1)
+	// Cursor starts on "a" (index 1) — initial placement skips headers.
 	assert.Equal(t, 1, p.cursor)
 
-	// Move down: should skip header at index 2, land on "b" (index 3)
+	// Move down: lands on Header 2 (index 2) — headers are navigable.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	assert.Equal(t, 2, p.cursor)
+
+	// Move down again: lands on "b" (index 3)
 	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 3, p.cursor)
 
-	// Move down again: should land on "c" (index 4)
+	// Move down again: lands on "c" (index 4)
 	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, 4, p.cursor)
 
@@ -363,13 +367,21 @@ func TestPickerNavigation(t *testing.T) {
 	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
 	assert.Equal(t, 3, p.cursor)
 
-	// Move up again: should skip header at index 2, land on "a" (index 1)
+	// Move up again: lands on Header 2 (index 2) — headers are navigable.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
+	assert.Equal(t, 2, p.cursor)
+
+	// Move up again: lands on "a" (index 1)
 	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
 	assert.Equal(t, 1, p.cursor)
 
-	// Move up at start: should stay at 1 (can't go to header)
+	// Move up again: lands on Header (index 0) — headers are navigable.
 	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
-	assert.Equal(t, 1, p.cursor)
+	assert.Equal(t, 0, p.cursor)
+
+	// Move up at start: should stay at 0
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
+	assert.Equal(t, 0, p.cursor)
 }
 
 func TestPickerToggle(t *testing.T) {
@@ -865,4 +877,193 @@ func TestViewSearchActionAlwaysVisible(t *testing.T) {
 
 	view := p.View()
 	assert.Contains(t, view, "Search projects", "search action should always be visible")
+}
+
+// --- Collapse toggle tests ---
+
+func TestCollapseToggle(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Section A (2)", IsHeader: true},
+		{Key: "a1", Display: "a1", Selected: true},
+		{Key: "a2", Display: "a2", Selected: true},
+		{Display: "Section B (1)", IsHeader: true},
+		{Key: "b1", Display: "b1", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetHeight(20)
+
+	// All 5 items visible initially.
+	indices := p.viewIndices()
+	assert.Len(t, indices, 5)
+
+	// Navigate to header at index 0.
+	p.cursor = 0
+
+	// Press Enter to collapse Section A.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.True(t, p.collapsed[0], "header should be collapsed")
+
+	// Items under Section A are hidden; header is still visible.
+	indices = p.viewIndices()
+	assert.Len(t, indices, 3) // Section A header + Section B header + b1
+
+	// Press Enter again to expand.
+	p.cursor = 0
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.False(t, p.collapsed[0], "header should be expanded")
+
+	indices = p.viewIndices()
+	assert.Len(t, indices, 5)
+}
+
+func TestCollapsedHeaderRendering(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Section A (2)", IsHeader: true},
+		{Key: "a1", Display: "a1", Selected: true},
+		{Key: "a2", Display: "a2", Selected: true},
+	}
+	p := NewPicker(items)
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+
+	// Expanded: should show ▾
+	view := p.View()
+	assert.Contains(t, view, "▾", "expanded header should show ▾")
+
+	// Collapse.
+	p.collapsed[0] = true
+	view = p.View()
+	assert.Contains(t, view, "▸", "collapsed header should show ▸")
+}
+
+func TestAutoCollapseReadOnly(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Read-only section (2)", IsHeader: true},
+		{Description: "All items are read-only"},
+		{Key: "r1", Display: "r1", Selected: true, IsReadOnly: true},
+		{Key: "r2", Display: "r2", Selected: true, IsReadOnly: true},
+		{Display: "Editable section (1)", IsHeader: true},
+		{Key: "e1", Display: "e1", Selected: true},
+	}
+	p := NewPicker(items)
+	p.CollapseReadOnly = true
+	p.autoCollapseReadOnly()
+
+	// Read-only section should be auto-collapsed.
+	assert.True(t, p.collapsed[0], "all-read-only section should be collapsed")
+	// Editable section should not be collapsed.
+	assert.False(t, p.collapsed[4], "editable section should not be collapsed")
+}
+
+func TestFilterIgnoresCollapse(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Section A (2)", IsHeader: true},
+		{Key: "a1", Display: "alpha", Selected: true},
+		{Key: "a2", Display: "another", Selected: true},
+		{Display: "Section B (1)", IsHeader: true},
+		{Key: "b1", Display: "bravo", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetHeight(20)
+
+	// Collapse Section A.
+	p.collapsed[0] = true
+
+	// Without filter, collapsed items are hidden.
+	indices := p.viewIndices()
+	assert.Len(t, indices, 3) // Section A header + Section B header + bravo
+
+	// Type a filter that matches a collapsed item.
+	p.filterText = "alpha"
+	p.refilter()
+
+	// Filter should find the item regardless of collapsed state.
+	indices = p.viewIndices()
+	found := false
+	for _, idx := range indices {
+		if p.items[idx].Key == "a1" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "filter should find items inside collapsed sections")
+}
+
+// --- Search status tests ---
+
+func TestSearchStatusRendering(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.focused = true
+	p.SetHeight(10)
+	p.SetWidth(60)
+
+	// Default: shows search action text.
+	view := p.View()
+	assert.Contains(t, view, "Search projects")
+	assert.NotContains(t, view, "Searching...")
+
+	// Set searching.
+	p.SetSearching(true)
+	view = p.View()
+	assert.Contains(t, view, "Searching...", "should show searching indicator")
+	assert.NotContains(t, view, "Search projects", "should not show action text while searching")
+
+	// Clear searching.
+	p.SetSearching(false)
+	view = p.View()
+	assert.Contains(t, view, "Search projects")
+	assert.NotContains(t, view, "Searching...")
+}
+
+func TestEnterBlockedDuringSearch(t *testing.T) {
+	items := []PickerItem{
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.SetSearchAction(true)
+	p.SetHeight(10)
+	p.searching = true
+
+	// Move to search action row.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	// Should be on the search action row (cursor == len(items) == 1).
+	assert.Equal(t, 1, p.cursor)
+
+	// Press Enter — should NOT emit SearchRequestMsg because searching is true.
+	var cmd tea.Cmd
+	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Nil(t, cmd, "Enter on search row while searching should not emit command")
+}
+
+func TestSetItemsResetsCollapsed(t *testing.T) {
+	items := []PickerItem{
+		{Display: "Header", IsHeader: true},
+		{Key: "a", Display: "a", Selected: true},
+	}
+	p := NewPicker(items)
+	p.collapsed[0] = true
+
+	// SetItems should reset collapsed state.
+	p.SetItems(items)
+	assert.Empty(t, p.collapsed, "collapsed state should be reset after SetItems")
+}
+
+func TestSetItemsAutoCollapsesReadOnly(t *testing.T) {
+	items := []PickerItem{
+		{Display: "RO Section (1)", IsHeader: true},
+		{Key: "r1", Display: "r1", Selected: true, IsReadOnly: true},
+		{Display: "RW Section (1)", IsHeader: true},
+		{Key: "e1", Display: "e1", Selected: true},
+	}
+	p := NewPicker(nil)
+	p.CollapseReadOnly = true
+	p.SetItems(items)
+
+	assert.True(t, p.collapsed[0], "read-only section should be auto-collapsed after SetItems")
+	assert.False(t, p.collapsed[2], "editable section should not be collapsed")
 }
