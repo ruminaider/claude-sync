@@ -1576,7 +1576,7 @@ func TestMCPSearchDoneMsg(t *testing.T) {
 	// Global server should NOT be in discovered (it's in scanResult).
 	assert.NotContains(t, m.discoveredMCP, "global-server")
 
-	// Picker should now have 2 items + search action.
+	// Picker should now have 2 selectable items (global + discovered).
 	p := m.pickers[SectionMCP]
 	assert.Equal(t, 2, p.TotalCount(), "picker should have global + discovered server")
 
@@ -1588,6 +1588,83 @@ func TestMCPSearchDoneMsg(t *testing.T) {
 			return
 		}
 	}
+}
+
+func TestMCPSearchDoneMsg_NoDuplicateOnSecondSearch(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"global-server": json.RawMessage(`{"url":"http://g"}`)},
+	}
+	m := testModel(scan)
+
+	msg := MCPSearchDoneMsg{
+		Servers: map[string]json.RawMessage{
+			"project-server": json.RawMessage(`{"url":"http://p"}`),
+		},
+		Sources: map[string]string{
+			"project-server": "~/Repos/myproject",
+		},
+	}
+
+	// First search adds the server.
+	m = m.handleMCPSearchDone(msg)
+	countAfterFirst := m.pickers[SectionMCP].TotalCount()
+	assert.Equal(t, 2, countAfterFirst, "should have global + discovered")
+
+	// Second search with the same server should NOT change the count.
+	m = m.handleMCPSearchDone(msg)
+	countAfterSecond := m.pickers[SectionMCP].TotalCount()
+	assert.Equal(t, countAfterFirst, countAfterSecond,
+		"second search should not add duplicates")
+}
+
+func TestMCPSearchDoneMsg_GroupedBySource(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"global-server": json.RawMessage(`{}`)},
+	}
+	m := testModel(scan)
+
+	msg := MCPSearchDoneMsg{
+		Servers: map[string]json.RawMessage{
+			"srv-a": json.RawMessage(`{}`),
+			"srv-b": json.RawMessage(`{}`),
+			"srv-c": json.RawMessage(`{}`),
+		},
+		Sources: map[string]string{
+			"srv-a": "~/Work/proj1",
+			"srv-b": "~/Work/proj1",
+			"srv-c": "~/Work/proj2",
+		},
+	}
+	m = m.handleMCPSearchDone(msg)
+
+	p := m.pickers[SectionMCP]
+
+	// Count headers: should have initial global header + 2 project headers.
+	var headers []string
+	for _, it := range p.items {
+		if it.IsHeader {
+			headers = append(headers, it.Display)
+		}
+	}
+	assert.Len(t, headers, 3, "should have 3 headers: global + 2 project groups")
+
+	// Selectable items: 1 global + 3 discovered = 4.
+	assert.Equal(t, 4, p.TotalCount())
+
+	// Verify project headers contain counts.
+	foundProj1, foundProj2 := false, false
+	for _, h := range headers {
+		if strings.Contains(h, "proj1") && strings.Contains(h, "(2)") {
+			foundProj1 = true
+		}
+		if strings.Contains(h, "proj2") && strings.Contains(h, "(1)") {
+			foundProj2 = true
+		}
+	}
+	assert.True(t, foundProj1, "should have proj1 header with count 2")
+	assert.True(t, foundProj2, "should have proj2 header with count 1")
 }
 
 func TestBuildInitOptions_WithDiscoveredMCP(t *testing.T) {

@@ -183,25 +183,42 @@ func TestPermissionPickerItems_Empty(t *testing.T) {
 
 func TestMCPPickerItems(t *testing.T) {
 	mcp := map[string]json.RawMessage{
-		"bravo":  json.RawMessage(`{"url":"http://b"}`),
-		"alpha":  json.RawMessage(`{"url":"http://a"}`),
+		"bravo":   json.RawMessage(`{"url":"http://b"}`),
+		"alpha":   json.RawMessage(`{"url":"http://a"}`),
 		"charlie": json.RawMessage(`{}`),
 	}
-	items := MCPPickerItems(mcp)
+	items := MCPPickerItems(mcp, "~/.claude/.mcp.json")
 
-	require.Len(t, items, 3)
+	// 1 header + 3 items = 4
+	require.Len(t, items, 4)
 
-	// Should be sorted by name
+	// First item is the header.
+	assert.True(t, items[0].IsHeader)
+	assert.Contains(t, items[0].Display, "(3)")
+
+	// Selectable items sorted by name
+	assert.Equal(t, "alpha", items[1].Key)
+	assert.Equal(t, "alpha", items[1].Display)
+	assert.True(t, items[1].Selected)
+
+	assert.Equal(t, "bravo", items[2].Key)
+	assert.Equal(t, "charlie", items[3].Key)
+}
+
+func TestMCPPickerItems_NoSource(t *testing.T) {
+	mcp := map[string]json.RawMessage{
+		"alpha": json.RawMessage(`{}`),
+	}
+	items := MCPPickerItems(mcp, "")
+
+	// No header when source is empty.
+	require.Len(t, items, 1)
 	assert.Equal(t, "alpha", items[0].Key)
-	assert.Equal(t, "alpha", items[0].Display)
-	assert.True(t, items[0].Selected)
-
-	assert.Equal(t, "bravo", items[1].Key)
-	assert.Equal(t, "charlie", items[2].Key)
+	assert.False(t, items[0].IsHeader)
 }
 
 func TestMCPPickerItems_Empty(t *testing.T) {
-	items := MCPPickerItems(nil)
+	items := MCPPickerItems(nil, "~/.claude/.mcp.json")
 	assert.Empty(t, items)
 }
 

@@ -116,7 +116,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	m.pickers[SectionPlugins] = NewPicker(PluginPickerItems(scan))
 	m.pickers[SectionSettings] = NewPicker(SettingsPickerItems(scan.Settings))
 	m.pickers[SectionPermissions] = NewPicker(PermissionPickerItems(scan.Permissions))
-	mcpPicker := NewPicker(MCPPickerItems(scan.MCP))
+	mcpPicker := NewPicker(MCPPickerItems(scan.MCP, "~/.claude/.mcp.json"))
 	mcpPicker.SetSearchAction(true)
 	m.pickers[SectionMCP] = mcpPicker
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(scan.Hooks))
@@ -1034,7 +1034,7 @@ func (m *Model) resetToDefaults() {
 	m.pickers[SectionPlugins] = NewPicker(PluginPickerItems(m.scanResult))
 	m.pickers[SectionSettings] = NewPicker(SettingsPickerItems(m.scanResult.Settings))
 	m.pickers[SectionPermissions] = NewPicker(PermissionPickerItems(m.scanResult.Permissions))
-	mcpPicker := NewPicker(MCPPickerItems(m.scanResult.MCP))
+	mcpPicker := NewPicker(MCPPickerItems(m.scanResult.MCP, "~/.claude/.mcp.json"))
 	mcpPicker.SetSearchAction(true)
 	m.pickers[SectionMCP] = mcpPicker
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(m.scanResult.Hooks))
@@ -1491,31 +1491,66 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 		m.mcpSources[name] = msg.Sources[name]
 	}
 
-	// Build new picker items for the discovered servers.
-	var newItems []PickerItem
+	// Build grouped picker items for newly discovered servers.
+	// Use AllKeys to deduplicate against items already in the picker — this
+	// prevents the count from growing on repeated searches.
+	existingKeys := toSet(m.pickers[SectionMCP].AllKeys())
+
+	// Group by source path, preserving discovery order.
+	type group struct {
+		source string
+		items  []PickerItem
+	}
+	var groups []group
+	sourceIdx := make(map[string]int) // source → index in groups
+
+	// Sort server names for deterministic order.
+	serverNames := make([]string, 0, len(msg.Servers))
 	for name := range msg.Servers {
+		serverNames = append(serverNames, name)
+	}
+	sort.Strings(serverNames)
+
+	for _, name := range serverNames {
 		if _, exists := m.scanResult.MCP[name]; exists {
 			continue
 		}
-		// Only add items not already in the picker.
-		tag := ""
-		if src, ok := m.mcpSources[name]; ok {
-			tag = "[" + src + "]"
+		if existingKeys[name] {
+			continue
 		}
-		newItems = append(newItems, PickerItem{
+
+		src := m.mcpSources[name]
+		if src == "" {
+			src = "project"
+		}
+
+		idx, ok := sourceIdx[src]
+		if !ok {
+			idx = len(groups)
+			sourceIdx[src] = idx
+			groups = append(groups, group{source: src})
+		}
+
+		groups[idx].items = append(groups[idx].items, PickerItem{
 			Key:      name,
 			Display:  name,
 			Selected: true,
-			Tag:      tag,
 		})
+	}
+
+	// Build newItems: header + items per group.
+	var newItems []PickerItem
+	for _, g := range groups {
+		newItems = append(newItems, PickerItem{
+			Display:  fmt.Sprintf("%s (%d)", g.source, len(g.items)),
+			IsHeader: true,
+		})
+		newItems = append(newItems, g.items...)
 	}
 
 	if len(newItems) == 0 {
 		return m
 	}
-
-	// Sort for deterministic order.
-	sortPickerItems(newItems)
 
 	// Add to base MCP picker.
 	if p, ok := m.pickers[SectionMCP]; ok {
