@@ -145,12 +145,23 @@ func (p *Preview) SetFocused(f bool) {
 }
 
 // AddSections appends new sections (e.g. from search results) and selects
-// them by default.
+// them by default. Sections whose Source already exists are skipped to
+// prevent duplicates on repeated searches.
 func (p *Preview) AddSections(sections []PreviewSection) {
-	startIdx := len(p.sections)
-	p.sections = append(p.sections, sections...)
-	for i := startIdx; i < len(p.sections); i++ {
-		p.selected[i] = true
+	existing := make(map[string]bool)
+	for _, s := range p.sections {
+		if s.Source != "" {
+			existing[s.Source] = true
+		}
+	}
+
+	for _, s := range sections {
+		if s.Source != "" && existing[s.Source] {
+			continue
+		}
+		idx := len(p.sections)
+		p.sections = append(p.sections, s)
+		p.selected[idx] = true
 	}
 }
 
