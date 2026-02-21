@@ -149,3 +149,31 @@ func TestReadKeybindings_Missing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, loaded)
 }
+
+// ─── PluginContentHashes ───────────────────────────────────────────────────
+
+func TestPluginContentHashes_RoundTrip(t *testing.T) {
+	dir := setupClaudeDir(t)
+
+	pch := &claudecode.PluginContentHashes{
+		Hashes: map[string]string{
+			"my-plugin@test-marketplace": "abcdef1234567890",
+			"other@dir-mkt":              "1234567890abcdef",
+		},
+	}
+
+	err := claudecode.WritePluginContentHashes(dir, pch)
+	require.NoError(t, err)
+
+	loaded, err := claudecode.ReadPluginContentHashes(dir)
+	require.NoError(t, err)
+	assert.Equal(t, pch.Hashes, loaded.Hashes)
+}
+
+func TestPluginContentHashes_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+	loaded, err := claudecode.ReadPluginContentHashes(dir)
+	require.NoError(t, err)
+	assert.NotNil(t, loaded.Hashes)
+	assert.Empty(t, loaded.Hashes)
+}

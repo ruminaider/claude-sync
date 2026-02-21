@@ -208,6 +208,11 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 		result.Failed = stillFailed
 	}
 
+	// Record content hashes for newly installed directory-based plugins.
+	if len(result.Installed) > 0 {
+		updatePluginContentHashes(claudeDir, result.Installed)
+	}
+
 	// Refresh stale plugins (version mismatch between marketplace and cache).
 	if stale := detectStalePlugins(claudeDir, result.Synced); len(stale) > 0 {
 		installed, _ := claudecode.ReadInstalledPlugins(claudeDir)
@@ -658,13 +663,16 @@ func appendUniqueStrings(base, add []string) []string {
 	return result
 }
 
-// detectStalePlugins returns synced plugin keys whose installed version differs
-// from the marketplace source version on disk.
+// detectStalePlugins returns synced plugin keys whose cache is out of date.
+// For directory-based marketplaces, it compares content hashes of the source
+// files. For remote marketplaces, it uses the existing version-string comparison.
 func detectStalePlugins(claudeDir string, syncedKeys []string) []string {
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
 		return nil
 	}
+
+	storedHashes, _ := claudecode.ReadPluginContentHashes(claudeDir)
 
 	var stale []string
 	for _, key := range syncedKeys {
@@ -672,15 +680,40 @@ func detectStalePlugins(claudeDir string, syncedKeys []string) []string {
 		if !ok || len(installations) == 0 {
 			continue
 		}
-		installedVersion := installations[0].Version
 
-		mkplVersion, err := marketplace.ReadMarketplacePluginVersion(claudeDir, key)
-		if err != nil {
-			continue // skip silently (missing marketplace, remote-only, etc.)
+		// Extract marketplace name from "plugin@marketplace".
+		parts := strings.SplitN(key, "@", 2)
+		if len(parts) != 2 {
+			continue
 		}
+		marketplaceName := parts[1]
 
-		if marketplace.HasUpdate(installedVersion, mkplVersion) {
-			stale = append(stale, key)
+		srcType := marketplace.MarketplaceSourceType(claudeDir, marketplaceName)
+
+		if srcType == "directory" {
+			// Content-hash comparison for directory-based marketplaces.
+			sourceDir, err := marketplace.ResolvePluginSourceDir(claudeDir, key)
+			if err != nil {
+				continue
+			}
+			currentHash, err := marketplace.ComputePluginContentHash(sourceDir)
+			if err != nil {
+				continue
+			}
+			storedHash := storedHashes.Hashes[key]
+			if storedHash == "" || storedHash != currentHash {
+				stale = append(stale, key)
+			}
+		} else {
+			// Version-string comparison for remote marketplaces.
+			installedVersion := installations[0].Version
+			mkplVersion, err := marketplace.ReadMarketplacePluginVersion(claudeDir, key)
+			if err != nil {
+				continue
+			}
+			if marketplace.HasUpdate(installedVersion, mkplVersion) {
+				stale = append(stale, key)
+			}
 		}
 	}
 	return stale
@@ -717,6 +750,44 @@ func refreshStalePlugins(claudeDir string, staleKeys []string, installed *claude
 			}
 		}
 	}
+
+	// Record content hashes for successfully updated directory-based plugins.
+	if len(updated) > 0 {
+		updatePluginContentHashes(claudeDir, updated)
+	}
+
 	return updated, failed
+}
+
+// updatePluginContentHashes computes and stores content hashes for
+// directory-based plugins in the sidecar file.
+func updatePluginContentHashes(claudeDir string, keys []string) {
+	pch, _ := claudecode.ReadPluginContentHashes(claudeDir)
+
+	for _, key := range keys {
+		parts := strings.SplitN(key, "@", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		marketplaceName := parts[1]
+
+		if marketplace.MarketplaceSourceType(claudeDir, marketplaceName) != "directory" {
+			continue
+		}
+
+		sourceDir, err := marketplace.ResolvePluginSourceDir(claudeDir, key)
+		if err != nil {
+			continue
+		}
+
+		hash, err := marketplace.ComputePluginContentHash(sourceDir)
+		if err != nil {
+			continue
+		}
+
+		pch.Hashes[key] = hash
+	}
+
+	_ = claudecode.WritePluginContentHashes(claudeDir, pch)
 }
 
