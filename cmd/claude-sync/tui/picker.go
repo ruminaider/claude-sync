@@ -645,10 +645,8 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 				}
 			}
 		case "left":
-			if p.filterText == "" {
-				return p, func() tea.Msg {
-					return FocusChangeMsg{Zone: FocusSidebar}
-				}
+			return p, func() tea.Msg {
+				return FocusChangeMsg{Zone: FocusSidebar}
 			}
 		case "esc":
 			if p.filterText != "" {
@@ -919,7 +917,7 @@ func (p Picker) renderFilterBar() string {
 	} else {
 		label := lipgloss.NewStyle().Foreground(colorOverlay0).Background(barBg).Render("Filter: ")
 		text := lipgloss.NewStyle().Foreground(colorText).Background(barBg).Render(p.filterText)
-		cursor := lipgloss.NewStyle().Foreground(colorText).Background(barBg).Render("_")
+		cursor := lipgloss.NewStyle().Foreground(colorText).Background(barBg).Render("│")
 		inner = " " + label + text + cursor
 	}
 
