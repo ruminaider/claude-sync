@@ -125,6 +125,8 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	// Build Commands & Skills picker.
 	csPicker := NewPicker(CommandsSkillsPickerItems(scan.CommandsSkills))
 	csPicker.SetSearchAction(true)
+	csPicker.CollapseReadOnly = true
+	csPicker.autoCollapseReadOnly()
 	if scan.CommandsSkills != nil {
 		previewContent := make(map[string]string)
 		for _, item := range scan.CommandsSkills.Items {
@@ -529,6 +531,10 @@ func (m Model) updatePicker(msg tea.Msg, cmds *[]tea.Cmd) (tea.Model, tea.Cmd) {
 			m.focusZone = focusMsg.Zone
 		}
 		if extractSearchRequest(cmd) {
+			// Set searching state on the active picker.
+			sp := m.currentPicker()
+			sp.searching = true
+			m.setCurrentPicker(sp)
 			switch m.activeSection {
 			case SectionMCP:
 				return m, SearchMCPConfigs()
@@ -937,6 +943,10 @@ func (m *Model) createProfile(name string) {
 			if basePicker.hasSearchAction {
 				p.SetSearchAction(true)
 			}
+			if basePicker.CollapseReadOnly {
+				p.CollapseReadOnly = true
+				p.autoCollapseReadOnly()
+			}
 			pm[sec] = p
 		}
 	}
@@ -1027,6 +1037,8 @@ func (m *Model) resetToDefaults() {
 	// Reset Commands & Skills picker.
 	csPicker := NewPicker(CommandsSkillsPickerItems(m.scanResult.CommandsSkills))
 	csPicker.SetSearchAction(true)
+	csPicker.CollapseReadOnly = true
+	csPicker.autoCollapseReadOnly()
 	if m.scanResult.CommandsSkills != nil {
 		previewContent := make(map[string]string)
 		for _, item := range m.scanResult.CommandsSkills.Items {
@@ -1443,6 +1455,12 @@ func (m Model) handleSearchDone(msg SearchDoneMsg) Model {
 }
 
 func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
+	// Clear searching state.
+	if p, ok := m.pickers[SectionMCP]; ok {
+		p.searching = false
+		m.pickers[SectionMCP] = p
+	}
+
 	if len(msg.Servers) == 0 {
 		return m
 	}
@@ -1507,6 +1525,12 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 }
 
 func (m Model) handleCmdSkillSearchDone(msg CmdSkillSearchDoneMsg) Model {
+	// Clear searching state.
+	if p, ok := m.pickers[SectionCommandsSkills]; ok {
+		p.searching = false
+		m.pickers[SectionCommandsSkills] = p
+	}
+
 	if len(msg.Items) == 0 {
 		return m
 	}
