@@ -133,6 +133,9 @@ func (p *Preview) SetSize(width, height int) {
 
 	p.viewport.Width = vpWidth
 	p.viewport.Height = vpHeight
+
+	// Re-wrap content for the new width.
+	p.syncViewport()
 }
 
 // SetFocused sets whether this preview currently has keyboard focus.
@@ -226,12 +229,22 @@ func (p Preview) updateViewport(msg tea.KeyMsg) (Preview, tea.Cmd) {
 // section. If the cursor is on the search action, the viewport shows a hint.
 func (p *Preview) syncViewport() {
 	if p.cursor < len(p.sections) {
-		p.viewport.SetContent(p.sections[p.cursor].Content)
+		p.viewport.SetContent(p.wrapContent(p.sections[p.cursor].Content))
 		p.viewport.GotoTop()
 	} else {
-		p.viewport.SetContent("Search for CLAUDE.md files in your projects...")
+		p.viewport.SetContent(p.wrapContent("Search for CLAUDE.md files in your projects..."))
 		p.viewport.GotoTop()
 	}
+}
+
+// wrapContent soft-wraps text to fit within the viewport width so that long
+// lines are not clipped by the viewport boundary.
+func (p *Preview) wrapContent(s string) string {
+	w := p.viewport.Width
+	if w <= 0 {
+		return s
+	}
+	return lipgloss.NewStyle().Width(w).Render(s)
 }
 
 // View renders the two-panel split layout.
