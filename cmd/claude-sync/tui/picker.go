@@ -601,16 +601,16 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 		// When preview is active, handle preview-specific keys first.
 		if p.previewActive {
 			switch msg.String() {
-			case "left", "h", "esc":
+			case "left", "esc":
 				p.previewActive = false
 				p.previewScroll = 0
 				return p, nil
-			case "up", "k":
+			case "up":
 				if p.previewScroll > 0 {
 					p.previewScroll--
 				}
 				return p, nil
-			case "down", "j":
+			case "down":
 				p.previewScroll++
 				return p, nil
 			}
@@ -618,9 +618,9 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "up", "k":
+		case "up":
 			p.moveCursor(-1)
-		case "down", "j":
+		case "down":
 			p.moveCursor(+1)
 		case " ":
 			// Space on the search action row is a no-op.
@@ -635,8 +635,8 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 				}
 			}
 			p.toggleCurrent()
-		case "right", "l":
-			if p.hasPreview && p.cursor >= 0 && p.cursor < len(p.items) {
+		case "right":
+			if p.filterText == "" && p.hasPreview && p.cursor >= 0 && p.cursor < len(p.items) {
 				key := p.items[p.cursor].Key
 				if _, ok := p.previewContent[key]; ok {
 					p.previewActive = true
@@ -644,21 +644,56 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 					return p, nil
 				}
 			}
-		case "a":
-			p.doSelectAll()
-		case "n":
-			p.doSelectNone()
-		case "left", "h":
+		case "left":
+			if p.filterText == "" {
+				return p, func() tea.Msg {
+					return FocusChangeMsg{Zone: FocusSidebar}
+				}
+			}
+		case "esc":
+			if p.filterText != "" {
+				p.filterText = ""
+				p.refilter()
+				p.resetCursorToFirstVisible()
+				return p, nil
+			}
 			return p, func() tea.Msg {
 				return FocusChangeMsg{Zone: FocusSidebar}
 			}
-		case "esc":
-			return p, func() tea.Msg {
-				return FocusChangeMsg{Zone: FocusSidebar}
+		case "ctrl+a":
+			p.doSelectAll()
+		case "ctrl+n":
+			p.doSelectNone()
+		case "backspace":
+			if len(p.filterText) > 0 {
+				p.filterText = p.filterText[:len(p.filterText)-1]
+				p.refilter()
+				p.resetCursorToFirstVisible()
+			}
+		default:
+			// Printable rune input goes to filter.
+			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+				p.filterText += string(msg.Runes)
+				p.refilter()
+				p.resetCursorToFirstVisible()
 			}
 		}
 	}
 	return p, nil
+}
+
+// resetCursorToFirstVisible moves the cursor to the first visible selectable item.
+func (p *Picker) resetCursorToFirstVisible() {
+	for i := range p.items {
+		if !p.isSkippable(i) {
+			p.cursor = i
+			p.offset = 0
+			p.clampScroll()
+			return
+		}
+	}
+	p.cursor = 0
+	p.offset = 0
 }
 
 // View renders the picker list with scrolling support.
@@ -928,24 +963,24 @@ func (p *Picker) toggleCurrent() {
 	}
 }
 
-// doSelectAll selects all selectable items.
+// doSelectAll selects all visible selectable items.
 func (p *Picker) doSelectAll() {
 	for i := range p.items {
-		if isSelectableItem(p.items[i]) {
+		if isSelectableItem(p.items[i]) && !p.isFilteredOut(i) {
 			p.items[i].Selected = true
 		}
 	}
-	p.selectAll = true
+	p.syncSelectAll()
 }
 
-// doSelectNone deselects all selectable items.
+// doSelectNone deselects all visible selectable items.
 func (p *Picker) doSelectNone() {
 	for i := range p.items {
-		if isSelectableItem(p.items[i]) {
+		if isSelectableItem(p.items[i]) && !p.isFilteredOut(i) {
 			p.items[i].Selected = false
 		}
 	}
-	p.selectAll = false
+	p.syncSelectAll()
 }
 
 // syncSelectAll updates the selectAll flag based on current item states.
