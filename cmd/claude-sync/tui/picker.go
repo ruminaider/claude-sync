@@ -703,19 +703,40 @@ func (p Picker) View() string {
 		return p.viewWithPreview()
 	}
 
-	totalRows := len(p.items)
+	var b strings.Builder
+
+	// Render filter bar (always visible, takes 1 line).
+	b.WriteString(p.renderFilterBar())
+	b.WriteString("\n")
+
+	// Determine visible item indices.
+	indices := p.viewIndices()
+	totalRows := len(indices)
 	if p.hasSearchAction {
-		totalRows++ // virtual search action row
+		totalRows++
 	}
 
 	if totalRows == 0 {
-		return ContentPaneStyle.Render("(no items)")
+		if p.filterText != "" {
+			return ContentPaneStyle.Render(b.String() + "  No matches")
+		}
+		return ContentPaneStyle.Render(b.String() + "  (no items)")
 	}
 
-	// Reserve lines for scroll indicators so total output stays within p.height.
-	visibleItems := p.height
-	hasAbove := p.offset > 0
-	hasBelow := p.offset+p.height < totalRows
+	// Available height for items (subtract 1 for filter bar).
+	itemHeight := p.height - 1
+	if itemHeight < 1 {
+		itemHeight = 1
+	}
+
+	// Compute scroll offset based on cursor position within visible list.
+	cursorPos := p.cursorVisiblePos(indices)
+	offset := p.computeScrollOffset(cursorPos, totalRows, itemHeight)
+
+	// Reserve lines for scroll indicators.
+	visibleItems := itemHeight
+	hasAbove := offset > 0
+	hasBelow := offset+itemHeight < totalRows
 	if hasAbove {
 		visibleItems--
 	}
@@ -726,28 +747,27 @@ func (p Picker) View() string {
 		visibleItems = 1
 	}
 
-	var b strings.Builder
-
 	if hasAbove {
 		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↑ more") + "\n")
 	}
 
-	end := p.offset + visibleItems
+	end := offset + visibleItems
 	if end > totalRows {
 		end = totalRows
 	}
 
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 
-	for i := p.offset; i < end; i++ {
-		// Virtual search action row at the end.
-		if i == len(p.items) && p.hasSearchAction {
+	for vi := offset; vi < end; vi++ {
+		// Virtual search action row at the end of visible items.
+		if vi == len(indices) && p.hasSearchAction {
 			cursor := "  "
-			if p.focused && p.cursor == i {
+			realIdx := len(p.items) // virtual row
+			if p.focused && p.cursor == realIdx {
 				cursor = "> "
 			}
 			actionText := "[+ Search projects]"
-			if p.focused && p.cursor == i {
+			if p.focused && p.cursor == realIdx {
 				actionText = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render(actionText)
 			} else if p.focused {
 				actionText = lipgloss.NewStyle().Foreground(colorBlue).Render(actionText)
@@ -758,6 +778,7 @@ func (p Picker) View() string {
 			continue
 		}
 
+		i := indices[vi] // real item index
 		it := p.items[i]
 
 		if it.IsHeader {
@@ -828,6 +849,90 @@ func (p Picker) View() string {
 	}
 
 	return ContentPaneStyle.Render(strings.TrimRight(b.String(), "\n"))
+}
+
+// viewIndices returns the list of item indices to render.
+// When no filter is active, returns all item indices.
+func (p Picker) viewIndices() []int {
+	if p.filterView != nil {
+		return p.filterView
+	}
+	indices := make([]int, len(p.items))
+	for i := range p.items {
+		indices[i] = i
+	}
+	return indices
+}
+
+// cursorVisiblePos returns the cursor's position within the visible indices.
+func (p Picker) cursorVisiblePos(indices []int) int {
+	for vi, i := range indices {
+		if i == p.cursor {
+			return vi
+		}
+	}
+	// Cursor is on search action row.
+	if p.hasSearchAction && p.cursor == len(p.items) {
+		return len(indices)
+	}
+	return 0
+}
+
+// computeScrollOffset computes the scroll offset to keep cursorPos visible.
+func (p Picker) computeScrollOffset(cursorPos, totalRows, viewHeight int) int {
+	effectiveHeight := viewHeight
+	if totalRows > viewHeight {
+		effectiveHeight -= 2 // scroll indicators
+	}
+	if effectiveHeight < 1 {
+		effectiveHeight = 1
+	}
+
+	offset := p.offset
+	if cursorPos < offset {
+		offset = cursorPos
+	}
+	if cursorPos >= offset+effectiveHeight {
+		offset = cursorPos - effectiveHeight + 1
+	}
+	maxOffset := totalRows - effectiveHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	return offset
+}
+
+// renderFilterBar renders the filter input line.
+func (p Picker) renderFilterBar() string {
+	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
+	label := dimStyle.Render("Filter: ")
+
+	filterDisplay := p.filterText
+	cursor := dimStyle.Render("_")
+	if p.focused {
+		cursor = lipgloss.NewStyle().Foreground(colorText).Render("_")
+	}
+
+	right := ""
+	if p.filterText != "" {
+		visible := p.visibleSelectableCount()
+		total := p.TotalCount()
+		right = dimStyle.Render(fmt.Sprintf("%d/%d", visible, total))
+	}
+
+	left := label + filterDisplay + cursor
+	if right != "" {
+		// Right-align the count.
+		gap := p.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
+		if gap < 1 {
+			gap = 1
+		}
+		return " " + left + strings.Repeat(" ", gap) + right
+	}
+	return " " + left
 }
 
 // viewWithPreview renders a split view: list on the left, content preview on the right.
@@ -929,28 +1034,42 @@ func (p *Picker) isSkippable(i int) bool {
 }
 
 // moveCursor advances the cursor in the given direction (+1 or -1), skipping
-// header and description items. It also adjusts the scroll offset to keep the
-// cursor visible.
+// header and description items. It operates on visible indices so filtered-out
+// items are also skipped.
 func (p *Picker) moveCursor(dir int) {
-	maxIndex := len(p.items) - 1
-	if p.hasSearchAction {
-		maxIndex = len(p.items) // virtual row at index len(items)
+	indices := p.viewIndices()
+
+	// Find current position in visible list.
+	curPos := -1
+	for vi, i := range indices {
+		if i == p.cursor {
+			curPos = vi
+			break
+		}
+	}
+	// Handle search action row.
+	if p.hasSearchAction && p.cursor == len(p.items) {
+		curPos = len(indices)
 	}
 
-	next := p.cursor + dir
-	for next >= 0 && next <= maxIndex {
-		// The virtual search action row is always selectable.
-		if next == len(p.items) && p.hasSearchAction {
-			p.cursor = next
+	// Move within visible items, skipping headers/descriptions.
+	nextPos := curPos + dir
+	for nextPos >= 0 && nextPos <= len(indices) {
+		// Search action row.
+		if nextPos == len(indices) && p.hasSearchAction {
+			p.cursor = len(p.items)
 			p.clampScroll()
 			return
 		}
-		if next < len(p.items) && !p.isSkippable(next) {
-			p.cursor = next
-			p.clampScroll()
-			return
+		if nextPos < len(indices) {
+			realIdx := indices[nextPos]
+			if !p.items[realIdx].IsHeader && p.items[realIdx].Description == "" {
+				p.cursor = realIdx
+				p.clampScroll()
+				return
+			}
 		}
-		next += dir
+		nextPos += dir
 	}
 }
 
@@ -995,34 +1114,40 @@ func (p *Picker) syncSelectAll() {
 }
 
 // clampScroll ensures the cursor is within the visible window by adjusting
-// the scroll offset.
+// the scroll offset. Works with visible indices for filter support.
 func (p *Picker) clampScroll() {
 	if p.height <= 0 {
 		return
 	}
-	totalRows := len(p.items)
+
+	indices := p.viewIndices()
+	totalRows := len(indices)
 	if p.hasSearchAction {
 		totalRows++
 	}
 
+	// Filter bar takes 1 line.
+	itemHeight := p.height - 1
+	if itemHeight < 1 {
+		itemHeight = 1
+	}
+
 	// When items overflow, scroll indicators take up to 2 lines.
-	// Use reduced height so the cursor stays within visible items.
-	effectiveHeight := p.height
-	if totalRows > p.height {
+	effectiveHeight := itemHeight
+	if totalRows > itemHeight {
 		effectiveHeight -= 2
 	}
 	if effectiveHeight < 1 {
 		effectiveHeight = 1
 	}
-	// Cursor above viewport: scroll up.
-	if p.cursor < p.offset {
-		p.offset = p.cursor
+
+	cursorPos := p.cursorVisiblePos(indices)
+	if cursorPos < p.offset {
+		p.offset = cursorPos
 	}
-	// Cursor below viewport: scroll down.
-	if p.cursor >= p.offset+effectiveHeight {
-		p.offset = p.cursor - effectiveHeight + 1
+	if cursorPos >= p.offset+effectiveHeight {
+		p.offset = cursorPos - effectiveHeight + 1
 	}
-	// Don't allow offset past the end.
 	maxOffset := totalRows - effectiveHeight
 	if maxOffset < 0 {
 		maxOffset = 0
