@@ -1,11 +1,15 @@
 package marketplace
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -189,6 +193,67 @@ type knownMarketplacesVersionEntry struct {
 	InstallLocation string `json:"installLocation"`
 }
 
+// knownMarketplacesFullEntry represents a marketplace entry with source type and installLocation.
+type knownMarketplacesFullEntry struct {
+	Source struct {
+		Source string `json:"source"`
+	} `json:"source"`
+	InstallLocation string `json:"installLocation"`
+}
+
+// resolveMarketplacePlugin parses a pluginKey ("name@marketplace"), reads
+// known_marketplaces.json, and returns the marketplace's installLocation,
+// the plugin's source path within the marketplace, and the plugin name.
+func resolveMarketplacePlugin(claudeDir, pluginKey string) (installLocation, sourcePath, pluginName string, err error) {
+	parts := strings.SplitN(pluginKey, "@", 2)
+	if len(parts) != 2 {
+		return "", "", "", fmt.Errorf("invalid plugin key: %s", pluginKey)
+	}
+	pluginName = parts[0]
+	marketplaceName := parts[1]
+
+	// Read known_marketplaces.json to get installLocation.
+	kmPath := filepath.Join(claudeDir, "plugins", "known_marketplaces.json")
+	kmData, err := os.ReadFile(kmPath)
+	if err != nil {
+		return "", "", "", fmt.Errorf("reading known_marketplaces.json: %w", err)
+	}
+
+	var entries map[string]knownMarketplacesVersionEntry
+	if err := json.Unmarshal(kmData, &entries); err != nil {
+		return "", "", "", fmt.Errorf("parsing known_marketplaces.json: %w", err)
+	}
+
+	entry, ok := entries[marketplaceName]
+	if !ok {
+		return "", "", "", fmt.Errorf("marketplace %s not found", marketplaceName)
+	}
+	if entry.InstallLocation == "" {
+		return "", "", "", fmt.Errorf("no installLocation for marketplace %s", marketplaceName)
+	}
+
+	// Read marketplace.json to find the plugin's source path.
+	mkplPath := filepath.Join(entry.InstallLocation, ".claude-plugin", "marketplace.json")
+	mkplData, err := os.ReadFile(mkplPath)
+	if err != nil {
+		return "", "", "", fmt.Errorf("reading marketplace.json for %s: %w", marketplaceName, err)
+	}
+
+	var mkpl marketplaceJSON
+	if err := json.Unmarshal(mkplData, &mkpl); err != nil {
+		return "", "", "", fmt.Errorf("parsing marketplace.json for %s: %w", marketplaceName, err)
+	}
+
+	// Find the plugin in the marketplace's plugins array.
+	for _, p := range mkpl.Plugins {
+		if p.Name == pluginName {
+			return entry.InstallLocation, p.Source, pluginName, nil
+		}
+	}
+
+	return "", "", "", fmt.Errorf("plugin %s not found in marketplace %s", pluginName, marketplaceName)
+}
+
 // ReadMarketplacePluginVersion reads the current version for a plugin from its
 // marketplace source on disk. It parses the pluginKey ("name@marketplace") to
 // find the marketplace's installLocation in known_marketplaces.json, then reads
@@ -198,60 +263,13 @@ type knownMarketplacesVersionEntry struct {
 // marketplaces. Returns an error if the marketplace or plugin cannot be found
 // locally; callers should skip gracefully on error.
 func ReadMarketplacePluginVersion(claudeDir, pluginKey string) (string, error) {
-	parts := strings.SplitN(pluginKey, "@", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid plugin key: %s", pluginKey)
-	}
-	pluginName := parts[0]
-	marketplaceName := parts[1]
-
-	// Read known_marketplaces.json to get installLocation.
-	kmPath := filepath.Join(claudeDir, "plugins", "known_marketplaces.json")
-	kmData, err := os.ReadFile(kmPath)
+	installLocation, sourcePath, pluginName, err := resolveMarketplacePlugin(claudeDir, pluginKey)
 	if err != nil {
-		return "", fmt.Errorf("reading known_marketplaces.json: %w", err)
-	}
-
-	var entries map[string]knownMarketplacesVersionEntry
-	if err := json.Unmarshal(kmData, &entries); err != nil {
-		return "", fmt.Errorf("parsing known_marketplaces.json: %w", err)
-	}
-
-	entry, ok := entries[marketplaceName]
-	if !ok {
-		return "", fmt.Errorf("marketplace %s not found", marketplaceName)
-	}
-	if entry.InstallLocation == "" {
-		return "", fmt.Errorf("no installLocation for marketplace %s", marketplaceName)
-	}
-
-	// Read marketplace.json to find the plugin's source path.
-	mkplPath := filepath.Join(entry.InstallLocation, ".claude-plugin", "marketplace.json")
-	mkplData, err := os.ReadFile(mkplPath)
-	if err != nil {
-		return "", fmt.Errorf("reading marketplace.json for %s: %w", marketplaceName, err)
-	}
-
-	var mkpl marketplaceJSON
-	if err := json.Unmarshal(mkplData, &mkpl); err != nil {
-		return "", fmt.Errorf("parsing marketplace.json for %s: %w", marketplaceName, err)
-	}
-
-	// Find the plugin in the marketplace's plugins array.
-	var sourcePath, mkplVersion string
-	for _, p := range mkpl.Plugins {
-		if p.Name == pluginName {
-			sourcePath = p.Source
-			mkplVersion = p.Version
-			break
-		}
-	}
-	if sourcePath == "" {
-		return "", fmt.Errorf("plugin %s not found in marketplace %s", pluginName, marketplaceName)
+		return "", err
 	}
 
 	// Try reading plugin.json at the source path for the authoritative version.
-	pjPath := filepath.Join(entry.InstallLocation, sourcePath, ".claude-plugin", "plugin.json")
+	pjPath := filepath.Join(installLocation, sourcePath, ".claude-plugin", "plugin.json")
 	pjData, err := os.ReadFile(pjPath)
 	if err == nil {
 		var pj pluginJSON
@@ -260,12 +278,108 @@ func ReadMarketplacePluginVersion(claudeDir, pluginKey string) (string, error) {
 		}
 	}
 
-	// Fall back to the version in marketplace.json.
-	if mkplVersion != "" {
-		return mkplVersion, nil
+	// Fall back: re-read marketplace.json for the version field.
+	mkplPath := filepath.Join(installLocation, ".claude-plugin", "marketplace.json")
+	mkplData, err := os.ReadFile(mkplPath)
+	if err != nil {
+		return "", fmt.Errorf("reading marketplace.json: %w", err)
+	}
+	var mkpl marketplaceJSON
+	if err := json.Unmarshal(mkplData, &mkpl); err != nil {
+		return "", fmt.Errorf("parsing marketplace.json: %w", err)
+	}
+	for _, p := range mkpl.Plugins {
+		if p.Name == pluginName && p.Version != "" {
+			return p.Version, nil
+		}
 	}
 
-	return "", fmt.Errorf("no version found for plugin %s in marketplace %s", pluginName, marketplaceName)
+	return "", fmt.Errorf("no version found for plugin %s", pluginName)
+}
+
+// MarketplaceSourceType returns the source type for a marketplace ("directory",
+// "github", "git") by reading known_marketplaces.json. Returns "" if the
+// marketplace is not found or the file cannot be read.
+func MarketplaceSourceType(claudeDir, marketplaceName string) string {
+	kmPath := filepath.Join(claudeDir, "plugins", "known_marketplaces.json")
+	kmData, err := os.ReadFile(kmPath)
+	if err != nil {
+		return ""
+	}
+
+	var entries map[string]knownMarketplacesFullEntry
+	if err := json.Unmarshal(kmData, &entries); err != nil {
+		return ""
+	}
+
+	entry, ok := entries[marketplaceName]
+	if !ok {
+		return ""
+	}
+	return entry.Source.Source
+}
+
+// ResolvePluginSourceDir returns the absolute path to a plugin's source
+// directory on disk. It parses the pluginKey to find the marketplace's
+// installLocation and the plugin's source path within it.
+func ResolvePluginSourceDir(claudeDir, pluginKey string) (string, error) {
+	installLocation, sourcePath, _, err := resolveMarketplacePlugin(claudeDir, pluginKey)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(installLocation, sourcePath), nil
+}
+
+// ComputePluginContentHash walks all files in sourceDir (sorted, excluding
+// .git/, node_modules/, and .DS_Store), hashes relative paths + contents via
+// SHA-256, and returns a 16-char hex prefix matching the claudemd.ContentHash
+// convention.
+func ComputePluginContentHash(sourceDir string) (string, error) {
+	// Collect all file paths relative to sourceDir.
+	var files []string
+	err := filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if name == ".git" || name == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if name == ".DS_Store" {
+			return nil
+		}
+		rel, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("walking source dir: %w", err)
+	}
+
+	sort.Strings(files)
+
+	h := sha256.New()
+	for _, rel := range files {
+		// Hash the relative path.
+		h.Write([]byte(rel))
+		h.Write([]byte{0}) // null separator
+
+		// Hash the file contents.
+		data, err := os.ReadFile(filepath.Join(sourceDir, rel))
+		if err != nil {
+			return "", fmt.Errorf("reading %s: %w", rel, err)
+		}
+		h.Write(data)
+		h.Write([]byte{0}) // null separator
+	}
+
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
 // gitLogLastCommit returns the latest commit SHA that touched the given path

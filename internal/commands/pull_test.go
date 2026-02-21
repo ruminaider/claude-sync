@@ -12,6 +12,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
@@ -979,6 +980,21 @@ func setupStalePluginEnv(t *testing.T, newVersion string) (claudeDir, syncDir st
 	}`
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "plugins", "installed_plugins.json"), []byte(installed), 0644))
 
+	// Store the content hash only when the installed version matches the
+	// marketplace version (simulates a previous successful install+hash).
+	// When versions differ, the empty hash causes staleness (bootstrap).
+	if newVersion == "1.0.0" {
+		hash, hashErr := marketplace.ComputePluginContentHash(marketplaceDir)
+		if hashErr == nil {
+			pch := &claudecode.PluginContentHashes{
+				Hashes: map[string]string{
+					"test-plugin@test-marketplace": hash,
+				},
+			}
+			claudecode.WritePluginContentHashes(claudeDir, pch)
+		}
+	}
+
 	// Create a sync dir with config listing the plugin.
 	syncDir = filepath.Join(t.TempDir(), ".claude-sync")
 	require.NoError(t, os.MkdirAll(syncDir, 0755))
@@ -1026,4 +1042,128 @@ func TestPullResult_HasUpdatedFields(t *testing.T) {
 	}
 	assert.Equal(t, []string{"foo@bar"}, result.Updated)
 	assert.Equal(t, []string{"baz@qux"}, result.UpdateFailed)
+}
+
+// --- Content-hash-based stale plugin detection tests ---
+
+// setupContentHashEnv creates a directory-based marketplace environment with
+// a plugin installed, the sidecar hash file populated, and a sync dir listing
+// the plugin. Returns (claudeDir, syncDir, marketplaceDir) so the caller can
+// modify files in marketplaceDir to test hash change detection.
+func setupContentHashEnv(t *testing.T) (claudeDir, syncDir, marketplaceDir string) {
+	t.Helper()
+
+	claudeDir = t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	// Create a directory-based marketplace with a plugin.
+	marketplaceDir = t.TempDir()
+
+	// Write marketplace.json and plugin.json.
+	mkplDir := filepath.Join(marketplaceDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+
+	mkpl := `{"name": "test-marketplace", "plugins": [{"name": "test-plugin", "source": "./", "version": "1.0.0"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"), []byte(mkpl), 0644))
+
+	pj := `{"name": "test-plugin", "version": "1.0.0"}`
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "plugin.json"), []byte(pj), 0644))
+
+	// Add a source file to the marketplace to hash.
+	require.NoError(t, os.WriteFile(filepath.Join(marketplaceDir, "hook.py"), []byte("print('hello')"), 0644))
+
+	// Write known_marketplaces.json (directory-based).
+	km, _ := json.MarshalIndent(map[string]any{
+		"test-marketplace": map[string]any{
+			"source":          map[string]string{"source": "directory", "path": marketplaceDir},
+			"installLocation": marketplaceDir,
+		},
+	}, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "plugins", "known_marketplaces.json"), km, 0644))
+
+	// Write installed_plugins.json with plugin at version 1.0.0.
+	installed := `{
+		"version": 2,
+		"plugins": {
+			"test-plugin@test-marketplace": [{
+				"scope": "user",
+				"installPath": "` + filepath.Join(claudeDir, "plugins", "cache", "test-marketplace", "test-plugin") + `",
+				"version": "1.0.0",
+				"installedAt": "2026-01-01T00:00:00Z",
+				"lastUpdated": "2026-01-01T00:00:00Z"
+			}]
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "plugins", "installed_plugins.json"), []byte(installed), 0644))
+
+	// Compute and store the content hash for the current state.
+	hash, err := marketplace.ComputePluginContentHash(marketplaceDir)
+	require.NoError(t, err)
+
+	pch := &claudecode.PluginContentHashes{
+		Hashes: map[string]string{
+			"test-plugin@test-marketplace": hash,
+		},
+	}
+	require.NoError(t, claudecode.WritePluginContentHashes(claudeDir, pch))
+
+	// Create a sync dir with config listing the plugin.
+	syncDir = filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - test-plugin@test-marketplace
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	return claudeDir, syncDir, marketplaceDir
+}
+
+func TestPull_DetectsStalePluginByContentHash(t *testing.T) {
+	claudeDir, syncDir, marketplaceDir := setupContentHashEnv(t)
+
+	// Modify a file in the marketplace WITHOUT changing the version.
+	require.NoError(t, os.WriteFile(filepath.Join(marketplaceDir, "hook.py"), []byte("print('changed!')"), 0644))
+
+	// Pull should detect the stale plugin via content hash mismatch.
+	// Note: the actual reinstall will fail since `claude plugin install` isn't
+	// available in tests, but the detection (Updated/UpdateFailed) proves it works.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	// The plugin should be detected as stale. Since `claude plugin install`
+	// won't succeed in tests, it will appear in UpdateFailed.
+	staleDetected := len(result.Updated) > 0 || len(result.UpdateFailed) > 0
+	assert.True(t, staleDetected, "plugin should be detected as stale when content hash changes")
+}
+
+func TestPull_NoStaleWhenContentHashMatches(t *testing.T) {
+	claudeDir, syncDir, _ := setupContentHashEnv(t)
+
+	// Pull without modifying any files — hash should match.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Updated, "no updates when content hash matches")
+	assert.Empty(t, result.UpdateFailed, "no failures when content hash matches")
+}
+
+func TestPull_StaleWhenNoStoredHash(t *testing.T) {
+	claudeDir, syncDir, _ := setupContentHashEnv(t)
+
+	// Remove the sidecar file to simulate first run.
+	os.Remove(filepath.Join(claudeDir, "plugins", "plugin_content_hashes.json"))
+
+	// Pull should treat plugin as stale (empty stored hash = bootstrap).
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	staleDetected := len(result.Updated) > 0 || len(result.UpdateFailed) > 0
+	assert.True(t, staleDetected, "plugin should be stale when no stored hash exists")
 }

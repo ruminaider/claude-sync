@@ -200,6 +200,43 @@ func WriteKeybindings(claudeDir string, kb map[string]any) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// PluginContentHashes stores content hashes for directory-based plugins.
+// File location: ~/.claude/plugins/plugin_content_hashes.json
+type PluginContentHashes struct {
+	Hashes map[string]string `json:"hashes"` // pluginKey -> 16-char hex hash
+}
+
+// ReadPluginContentHashes reads plugin_content_hashes.json.
+// Returns an empty map if the file is missing.
+func ReadPluginContentHashes(claudeDir string) (*PluginContentHashes, error) {
+	path := filepath.Join(claudeDir, "plugins", "plugin_content_hashes.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &PluginContentHashes{Hashes: map[string]string{}}, nil
+		}
+		return nil, fmt.Errorf("reading plugin content hashes: %w", err)
+	}
+	var pch PluginContentHashes
+	if err := json.Unmarshal(data, &pch); err != nil {
+		return nil, fmt.Errorf("parsing plugin content hashes: %w", err)
+	}
+	if pch.Hashes == nil {
+		pch.Hashes = map[string]string{}
+	}
+	return &pch, nil
+}
+
+// WritePluginContentHashes writes plugin_content_hashes.json.
+func WritePluginContentHashes(claudeDir string, pch *PluginContentHashes) error {
+	data, err := json.MarshalIndent(pch, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling plugin content hashes: %w", err)
+	}
+	path := filepath.Join(claudeDir, "plugins", "plugin_content_hashes.json")
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // Bootstrap creates minimal Claude Code directory structure for fresh machines.
 func Bootstrap(claudeDir string) error {
 	pluginDir := filepath.Join(claudeDir, "plugins")

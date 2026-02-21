@@ -464,6 +464,128 @@ func TestReadMarketplacePluginVersion_Errors(t *testing.T) {
 	})
 }
 
+// ─── MarketplaceSourceType ─────────────────────────────────────────────────
+
+func TestMarketplaceSourceType(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	km := `{
+		"dir-marketplace": {"source": {"source": "directory", "path": "/some/path"}, "installLocation": "/some/path"},
+		"gh-marketplace": {"source": {"source": "github", "repo": "org/repo"}, "installLocation": "/cache/gh"}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+	assert.Equal(t, "directory", marketplace.MarketplaceSourceType(claudeDir, "dir-marketplace"))
+	assert.Equal(t, "github", marketplace.MarketplaceSourceType(claudeDir, "gh-marketplace"))
+	assert.Equal(t, "", marketplace.MarketplaceSourceType(claudeDir, "missing"))
+	assert.Equal(t, "", marketplace.MarketplaceSourceType("/nonexistent", "anything"))
+}
+
+// ─── ResolvePluginSourceDir ────────────────────────────────────────────────
+
+func TestResolvePluginSourceDir(t *testing.T) {
+	claudeDir, marketplaceDir := setupMarketplaceEnv(t, "my-plugin", "1.0.0")
+
+	t.Run("single plugin marketplace", func(t *testing.T) {
+		dir, err := marketplace.ResolvePluginSourceDir(claudeDir, "my-plugin@test-marketplace")
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(marketplaceDir, "."), dir)
+	})
+
+	t.Run("invalid key", func(t *testing.T) {
+		_, err := marketplace.ResolvePluginSourceDir(claudeDir, "no-at-sign")
+		assert.Error(t, err)
+	})
+
+	t.Run("missing plugin", func(t *testing.T) {
+		_, err := marketplace.ResolvePluginSourceDir(claudeDir, "nonexistent@test-marketplace")
+		assert.Error(t, err)
+	})
+}
+
+// ─── ComputePluginContentHash ──────────────────────────────────────────────
+
+func TestComputePluginContentHash(t *testing.T) {
+	t.Run("deterministic", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0644))
+
+		hash1, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+		hash2, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		assert.Equal(t, hash1, hash2)
+		assert.Len(t, hash1, 16, "hash should be 16 hex chars")
+	})
+
+	t.Run("detects content change", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0644))
+
+		hashBefore, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("world"), 0644))
+
+		hashAfter, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, hashBefore, hashAfter)
+	})
+
+	t.Run("detects file addition", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644))
+
+		hashBefore, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0644))
+
+		hashAfter, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, hashBefore, hashAfter)
+	})
+
+	t.Run("excludes .git and .DS_Store", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "code.py"), []byte("print('hi')"), 0644))
+
+		hashBefore, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		// Add .git dir and .DS_Store — should not change hash.
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git", "objects"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/main"), 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte("binary junk"), 0644))
+
+		hashAfter, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		assert.Equal(t, hashBefore, hashAfter)
+	})
+
+	t.Run("excludes node_modules", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "index.js"), []byte("module.exports = {}"), 0644))
+
+		hashBefore, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "node_modules", "dep"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "node_modules", "dep", "index.js"), []byte("exports.x = 1"), 0644))
+
+		hashAfter, err := marketplace.ComputePluginContentHash(dir)
+		require.NoError(t, err)
+
+		assert.Equal(t, hashBefore, hashAfter)
+	})
+}
+
 // ─── QueryRemoteVersion (skipped by default — requires network) ────────────
 
 func TestQueryRemoteVersion_InvalidURL(t *testing.T) {
