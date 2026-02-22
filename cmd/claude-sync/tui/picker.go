@@ -348,7 +348,7 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 				Display:    item.Name,
 				Selected:   true,
 				IsReadOnly: true,
-				Tag:        typeTag + " " + item.SourceLabel,
+				Tag:        typeTag + " via " + item.SourceLabel,
 			})
 		}
 	}
@@ -800,40 +800,22 @@ func (p Picker) View() string {
 		end = totalRows
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
-
 	for vi := offset; vi < end; vi++ {
 		// Virtual search action row at the end of visible items.
 		if vi == len(indices) && p.hasSearchAction {
 			cursor := "  "
 			realIdx := len(p.items) // virtual row
-			if p.focused && p.cursor == realIdx {
+			isCurrent := p.focused && p.cursor == realIdx
+			if isCurrent {
 				cursor = "> "
 			}
-			var actionText string
-			if p.searching {
-				actionText = "Searching..."
-				if p.focused && p.cursor == realIdx {
-					actionText = lipgloss.NewStyle().Bold(true).Foreground(colorOverlay0).Render(actionText)
-				} else {
-					actionText = dimStyle.Render(actionText)
-				}
-			} else {
-				actionText = "[+ Search projects]"
-				if p.focused && p.cursor == realIdx {
-					actionText = lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render(actionText)
-				} else if p.focused {
-					actionText = lipgloss.NewStyle().Foreground(colorBlue).Render(actionText)
-				} else {
-					actionText = dimStyle.Render(actionText)
-				}
-			}
-			b.WriteString(cursor + actionText + "\n")
+			b.WriteString(cursor + RenderSearchAction(p.focused, isCurrent, p.searching) + "\n")
 			continue
 		}
 
 		i := indices[vi] // real item index
 		it := p.items[i]
+		isCurrent := p.focused && i == p.cursor
 
 		if it.IsHeader {
 			indicator := "▾"
@@ -841,65 +823,37 @@ func (p Picker) View() string {
 				indicator = "▸"
 			}
 			line := fmt.Sprintf("── %s %s ──", indicator, it.Display)
-			if p.focused && i == p.cursor {
-				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(line))
-			} else if p.focused {
-				b.WriteString(HeaderStyle.Render(line))
-			} else {
-				b.WriteString(dimStyle.Render(line))
-			}
+			b.WriteString(RenderHeader(line, p.focused, isCurrent))
 			b.WriteString("\n")
 			continue
 		}
 
 		if it.Description != "" {
-			b.WriteString("  " + dimStyle.Render(it.Description) + "\n")
+			b.WriteString("  " + DimStyle.Render(it.Description) + "\n")
 			continue
 		}
 
 		// Cursor indicator: only show when focused.
 		cursor := "  "
-		if p.focused && i == p.cursor {
+		if isCurrent {
 			cursor = "> "
 		}
 
-		// Checkbox.
-		var checkbox string
-		if p.focused {
-			if it.Selected {
-				checkbox = SelectedStyle.Render("[x]")
-			} else {
-				checkbox = UnselectedStyle.Render("[ ]")
-			}
-		} else {
-			if it.Selected {
-				checkbox = dimStyle.Render("[x]")
-			} else {
-				checkbox = dimStyle.Render("[ ]")
-			}
+		// Removed inherited item: muted red strikethrough.
+		if it.IsBase && !it.Selected {
+			b.WriteString(cursor + RenderRemovedBaseLine(it.Display, it.Tag, p.focused) + "\n")
+			continue
 		}
 
-		// Display text.
-		var display string
-		if p.focused && i == p.cursor {
-			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(it.Display)
-		} else if p.focused {
-			display = it.Display
-		} else {
-			display = dimStyle.Render(it.Display)
+		// Read-only (plugin-controlled) item: lock icon, muted style.
+		if it.IsReadOnly {
+			b.WriteString(cursor + RenderLockedLine(it.Display, it.Tag, p.focused) + "\n")
+			continue
 		}
 
-		// Tag (e.g. ● for inherited items).
-		tag := ""
-		if it.Tag != "" {
-			if p.focused && p.tagColor != "" {
-				tag = "  " + lipgloss.NewStyle().Foreground(p.tagColor).Render(it.Tag)
-			} else if p.focused {
-				tag = "  " + BaseTagStyle.Render(it.Tag)
-			} else {
-				tag = "  " + dimStyle.Render(it.Tag)
-			}
-		}
+		checkbox := RenderCheckbox(p.focused, it.Selected)
+		display := RenderItemText(it.Display, p.focused, isCurrent)
+		tag := RenderTag(it.Tag, p.focused, p.tagColor)
 
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
 	}
@@ -977,7 +931,6 @@ func (p Picker) computeScrollOffset(cursorPos, totalRows, viewHeight int) int {
 
 // renderFilterBar renders the filter input line with a distinct background.
 func (p Picker) renderFilterBar() string {
-	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 	barBg := colorSurface0
 
 	// Build inner content.
@@ -998,7 +951,7 @@ func (p Picker) renderFilterBar() string {
 	if p.filterText != "" {
 		visible := p.visibleSelectableCount()
 		total := p.TotalCount()
-		right = dimStyle.Background(barBg).Render(fmt.Sprintf("%d/%d", visible, total))
+		right = DimStyle.Background(barBg).Render(fmt.Sprintf("%d/%d", visible, total))
 	}
 
 	if right != "" {
@@ -1068,32 +1021,27 @@ func (p Picker) viewWithPreview() string {
 	// Render filter bar if filter is active.
 	var topBar string
 	if p.filterText != "" {
-		dimFilter := lipgloss.NewStyle().Foreground(colorOverlay0)
-		topBar = " " + dimFilter.Render("Filter: ") + p.filterText + "\n"
+		topBar = " " + DimStyle.Render("Filter: ") + p.filterText + "\n"
 	}
 
 	// Render a compact list on the left showing only visible item names.
 	indices := p.viewIndices()
 	var listB strings.Builder
-	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 	for _, idx := range indices {
 		it := p.items[idx]
 		if it.IsHeader || it.Description != "" {
 			continue
 		}
+		isCurrent := p.focused && idx == p.cursor
 		cursor := "  "
-		if p.focused && idx == p.cursor {
+		if isCurrent {
 			cursor = "> "
 		}
 		display := it.Display
 		if len(display) > listWidth-4 {
 			display = display[:listWidth-7] + "..."
 		}
-		if p.focused && idx == p.cursor {
-			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(display)
-		} else if !p.focused {
-			display = dimStyle.Render(display)
-		}
+		display = RenderItemText(display, p.focused, isCurrent)
 		listB.WriteString(cursor + display + "\n")
 	}
 	listView := lipgloss.NewStyle().Width(listWidth).Render(

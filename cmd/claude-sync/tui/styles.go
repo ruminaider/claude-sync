@@ -29,6 +29,7 @@ var (
 	colorPink     = lipgloss.Color(flavor.Pink().Hex)
 	colorLavender = lipgloss.Color(flavor.Lavender().Hex)
 	colorOverlay0 = lipgloss.Color(flavor.Overlay0().Hex)
+	colorMaroon   = lipgloss.Color(flavor.Maroon().Hex)
 )
 
 // ProfileTheme holds the accent color for a profile tab.
@@ -119,6 +120,20 @@ var (
 	BaseTagStyle = lipgloss.NewStyle().
 			Foreground(colorOverlay0).
 			Italic(true)
+
+	// DimStyle is used for unfocused items across picker and preview panels.
+	DimStyle = lipgloss.NewStyle().
+			Foreground(colorOverlay0)
+
+	// RemovedBaseStyle is used for inherited items that the user has deselected
+	// (explicitly removed from this profile). Maroon + strikethrough.
+	RemovedBaseStyle = lipgloss.NewStyle().
+				Foreground(colorMaroon).
+				Strikethrough(true)
+
+	// LockedStyle is used for plugin-controlled items that cannot be toggled.
+	LockedStyle = lipgloss.NewStyle().
+			Foreground(colorOverlay0)
 )
 
 // Status bar styles.

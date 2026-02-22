@@ -207,9 +207,105 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, fmt.Errorf("%s already exists. Run 'claude-sync pull' to update, or remove it first", syncDir)
 	}
 
+	if err := os.MkdirAll(syncDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating sync directory: %w", err)
+	}
+
+	result, forkedNames, err := buildAndWriteConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n"
+	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+		return nil, fmt.Errorf("writing .gitignore: %w", err)
+	}
+
+	if err := git.Init(syncDir); err != nil {
+		return nil, fmt.Errorf("initializing git repo: %w", err)
+	}
+
+	if err := git.Add(syncDir, "."); err != nil {
+		return nil, fmt.Errorf("staging files: %w", err)
+	}
+	if err := git.Commit(syncDir, "Initial claude-sync config"); err != nil {
+		return nil, fmt.Errorf("creating initial commit: %w", err)
+	}
+
+	if len(forkedNames) > 0 {
+		if err := forkedplugins.RegisterLocalMarketplace(claudeDir, syncDir); err != nil {
+			return nil, fmt.Errorf("registering local marketplace: %w", err)
+		}
+	}
+
+	if opts.RemoteURL != "" {
+		if err := git.RemoteAdd(syncDir, "origin", opts.RemoteURL); err != nil {
+			return nil, fmt.Errorf("adding remote: %w", err)
+		}
+		branch, err := git.CurrentBranch(syncDir)
+		if err != nil {
+			return nil, fmt.Errorf("detecting branch: %w", err)
+		}
+		if err := git.PushWithUpstream(syncDir, "origin", branch); err != nil {
+			return nil, fmt.Errorf("pushing to remote: %w", err)
+		}
+		result.RemotePushed = true
+	}
+
+	return result, nil
+}
+
+// Update updates an existing ~/.claude-sync/ config in place.
+// Unlike Init, it does not create the directory, write .gitignore, or init git.
+func Update(opts InitOptions) (*InitResult, error) {
+	syncDir := opts.SyncDir
+
+	if _, err := os.Stat(syncDir); os.IsNotExist(err) {
+		return nil, fmt.Errorf("no config found at %s", syncDir)
+	}
+
+	if !claudecode.DirExists(opts.ClaudeDir) {
+		return nil, fmt.Errorf("Claude Code directory not found at %s. Run Claude Code at least once first", opts.ClaudeDir)
+	}
+
+	// Clean up old profile files that are no longer in the new config.
+	profilesDir := filepath.Join(syncDir, "profiles")
+	if existingNames, err := profiles.ListProfiles(syncDir); err == nil {
+		newProfileSet := make(map[string]bool)
+		for name := range opts.Profiles {
+			newProfileSet[name] = true
+		}
+		for _, name := range existingNames {
+			if !newProfileSet[name] {
+				os.Remove(filepath.Join(profilesDir, name+".yaml"))
+			}
+		}
+	}
+
+	result, forkedNames, err := buildAndWriteConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(forkedNames) > 0 {
+		if err := forkedplugins.RegisterLocalMarketplace(opts.ClaudeDir, syncDir); err != nil {
+			return nil, fmt.Errorf("registering local marketplace: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
+// buildAndWriteConfig contains the shared config-building logic used by both
+// Init and Update. It categorizes plugins, filters settings/hooks, writes
+// config.yaml, imports CLAUDE.md, writes profiles, and copies commands/skills.
+func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
+	claudeDir := opts.ClaudeDir
+	syncDir := opts.SyncDir
+
 	plugins, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
-		return nil, fmt.Errorf("reading plugins: %w", err)
+		return nil, nil, fmt.Errorf("reading plugins: %w", err)
 	}
 
 	pluginKeys := plugins.PluginKeys()
@@ -226,10 +322,6 @@ func Init(opts InitOptions) (*InitResult, error) {
 		for _, k := range opts.IncludePlugins {
 			includeSet[k] = true
 		}
-	}
-
-	if err := os.MkdirAll(syncDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating sync directory: %w", err)
 	}
 
 	for _, key := range pluginKeys {
@@ -364,10 +456,10 @@ func Init(opts InitOptions) (*InitResult, error) {
 
 	cfgData, err := config.Marshal(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling config: %w", err)
+		return nil, nil, fmt.Errorf("marshaling config: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644); err != nil {
-		return nil, fmt.Errorf("writing config: %w", err)
+		return nil, nil, fmt.Errorf("writing config: %w", err)
 	}
 
 	// Import CLAUDE.md if requested.
@@ -378,7 +470,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 			// Always import all sections to disk (fragment files + manifest).
 			importResult, importErr := claudemd.ImportClaudeMD(syncDir, string(claudeMDData))
 			if importErr != nil {
-				return nil, fmt.Errorf("importing CLAUDE.md: %w", importErr)
+				return nil, nil, fmt.Errorf("importing CLAUDE.md: %w", importErr)
 			}
 			// Determine which fragments to include in config.
 			if opts.ClaudeMDFragments == nil {
@@ -393,10 +485,10 @@ func Init(opts InitOptions) (*InitResult, error) {
 			// Re-write config with updated ClaudeMD.Include.
 			cfgData, err = config.Marshal(cfg)
 			if err != nil {
-				return nil, fmt.Errorf("marshaling config with CLAUDE.md: %w", err)
+				return nil, nil, fmt.Errorf("marshaling config with CLAUDE.md: %w", err)
 			}
 			if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644); err != nil {
-				return nil, fmt.Errorf("writing config with CLAUDE.md: %w", err)
+				return nil, nil, fmt.Errorf("writing config with CLAUDE.md: %w", err)
 			}
 		}
 	}
@@ -457,16 +549,11 @@ func Init(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n"
-	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
-		return nil, fmt.Errorf("writing .gitignore: %w", err)
-	}
-
 	// Write profile files if provided.
 	if len(opts.Profiles) > 0 {
 		profilesDir := filepath.Join(syncDir, "profiles")
 		if err := os.MkdirAll(profilesDir, 0755); err != nil {
-			return nil, fmt.Errorf("creating profiles directory: %w", err)
+			return nil, nil, fmt.Errorf("creating profiles directory: %w", err)
 		}
 
 		var profileNames []string
@@ -478,10 +565,10 @@ func Init(opts InitOptions) (*InitResult, error) {
 		for _, name := range profileNames {
 			data, err := profiles.MarshalProfile(opts.Profiles[name])
 			if err != nil {
-				return nil, fmt.Errorf("marshaling profile %q: %w", name, err)
+				return nil, nil, fmt.Errorf("marshaling profile %q: %w", name, err)
 			}
 			if err := os.WriteFile(filepath.Join(profilesDir, name+".yaml"), data, 0644); err != nil {
-				return nil, fmt.Errorf("writing profile %q: %w", name, err)
+				return nil, nil, fmt.Errorf("writing profile %q: %w", name, err)
 			}
 		}
 		result.ProfileNames = profileNames
@@ -490,43 +577,12 @@ func Init(opts InitOptions) (*InitResult, error) {
 	// Write active profile if specified.
 	if opts.ActiveProfile != "" {
 		if err := profiles.WriteActiveProfile(syncDir, opts.ActiveProfile); err != nil {
-			return nil, fmt.Errorf("writing active profile: %w", err)
+			return nil, nil, fmt.Errorf("writing active profile: %w", err)
 		}
 	}
 	result.ActiveProfile = opts.ActiveProfile
 
-	if err := git.Init(syncDir); err != nil {
-		return nil, fmt.Errorf("initializing git repo: %w", err)
-	}
-
-	if err := git.Add(syncDir, "."); err != nil {
-		return nil, fmt.Errorf("staging files: %w", err)
-	}
-	if err := git.Commit(syncDir, "Initial claude-sync config"); err != nil {
-		return nil, fmt.Errorf("creating initial commit: %w", err)
-	}
-
-	if len(forkedNames) > 0 {
-		if err := forkedplugins.RegisterLocalMarketplace(claudeDir, syncDir); err != nil {
-			return nil, fmt.Errorf("registering local marketplace: %w", err)
-		}
-	}
-
-	if opts.RemoteURL != "" {
-		if err := git.RemoteAdd(syncDir, "origin", opts.RemoteURL); err != nil {
-			return nil, fmt.Errorf("adding remote: %w", err)
-		}
-		branch, err := git.CurrentBranch(syncDir)
-		if err != nil {
-			return nil, fmt.Errorf("detecting branch: %w", err)
-		}
-		if err := git.PushWithUpstream(syncDir, "origin", branch); err != nil {
-			return nil, fmt.Errorf("pushing to remote: %w", err)
-		}
-		result.RemotePushed = true
-	}
-
-	return result, nil
+	return result, forkedNames, nil
 }
 
 // findInstallPath returns the first non-empty InstallPath from the installations.

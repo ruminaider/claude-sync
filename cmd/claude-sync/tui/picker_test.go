@@ -546,7 +546,7 @@ func TestPickerSearchAction_Renders(t *testing.T) {
 	p.SetHeight(10)
 
 	view := p.View()
-	assert.Contains(t, view, "[+ Search projects]", "search action should be rendered")
+	assert.Contains(t, view, "[↻ Re-scan]", "search action should be rendered")
 }
 
 func TestPickerSearchAction_CursorCanReach(t *testing.T) {
@@ -893,7 +893,7 @@ func TestViewSearchActionAlwaysVisible(t *testing.T) {
 	p.refilter()
 
 	view := p.View()
-	assert.Contains(t, view, "Search projects", "search action should always be visible")
+	assert.Contains(t, view, "Re-scan", "search action should always be visible")
 }
 
 // --- Collapse toggle tests ---
@@ -1021,19 +1021,19 @@ func TestSearchStatusRendering(t *testing.T) {
 
 	// Default: shows search action text.
 	view := p.View()
-	assert.Contains(t, view, "Search projects")
+	assert.Contains(t, view, "Re-scan")
 	assert.NotContains(t, view, "Searching...")
 
 	// Set searching.
 	p.SetSearching(true)
 	view = p.View()
 	assert.Contains(t, view, "Searching...", "should show searching indicator")
-	assert.NotContains(t, view, "Search projects", "should not show action text while searching")
+	assert.NotContains(t, view, "Re-scan", "should not show action text while searching")
 
 	// Clear searching.
 	p.SetSearching(false)
 	view = p.View()
-	assert.Contains(t, view, "Search projects")
+	assert.Contains(t, view, "Re-scan")
 	assert.NotContains(t, view, "Searching...")
 }
 
