@@ -514,7 +514,7 @@ func TestProfilePluginsSyncWithBase(t *testing.T) {
 	assert.Equal(t, 3, workPlugins.SelectedCount(), "profile should inherit all 3 base plugins")
 
 	// Switch back to Base and deselect "b@m".
-	m.saveProfilePluginDiff("work")
+	m.saveAllProfileDiffs("work")
 	m.activeTab = "Base"
 	basePicker := m.pickers[SectionPlugins]
 	for i := range basePicker.items {
@@ -525,7 +525,7 @@ func TestProfilePluginsSyncWithBase(t *testing.T) {
 	m.pickers[SectionPlugins] = basePicker
 
 	// Switch back to work — should reflect updated base (b@m deselected).
-	m.rebuildProfilePluginPicker("work")
+	m.rebuildAllProfilePickers("work")
 	m.activeTab = "work"
 
 	workPlugins = m.profilePickers["work"][SectionPlugins]
@@ -569,12 +569,12 @@ func TestProfilePluginDiff_Preserved(t *testing.T) {
 	m.profilePickers["work"] = pm
 
 	// Switch away — saves the diff (removes: a@m).
-	m.saveProfilePluginDiff("work")
-	diff := m.profilePluginDiffs["work"]
+	m.saveAllProfileDiffs("work")
+	diff := m.profileDiffs["work"][SectionPlugins]
 	assert.True(t, diff.removes["a@m"], "a@m should be in removes")
 
 	// Switch back — rebuild preserves the removal.
-	m.rebuildProfilePluginPicker("work")
+	m.rebuildAllProfilePickers("work")
 
 	workPlugins := m.profilePickers["work"][SectionPlugins]
 	for _, it := range workPlugins.items {
@@ -2086,8 +2086,9 @@ func TestNewModel_EditMode_RestoresProfiles(t *testing.T) {
 	}
 
 	// Profile plugin diff should be stored.
-	require.Contains(t, m.profilePluginDiffs, "work")
-	assert.True(t, m.profilePluginDiffs["work"].removes["b@m"], "b@m should be in profile removes")
+	require.Contains(t, m.profileDiffs, "work")
+	require.Contains(t, m.profileDiffs["work"], SectionPlugins)
+	assert.True(t, m.profileDiffs["work"][SectionPlugins].removes["b@m"], "b@m should be in profile removes")
 }
 
 func TestBuildInitOptions_EditMode(t *testing.T) {
