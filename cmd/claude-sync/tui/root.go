@@ -84,8 +84,8 @@ type Model struct {
 	quitting      bool
 	skipFlags     SkipFlags
 
-	// Profile plugin diffs: tracks explicit add/remove overrides relative to base.
-	profilePluginDiffs map[string]*pluginDiff
+	// Profile diffs: tracks explicit add/remove overrides relative to base per section.
+	profileDiffs map[string]map[Section]*sectionDiff
 
 	// Discovered MCP servers from project-level .mcp.json files.
 	discoveredMCP  map[string]json.RawMessage // server name → config
@@ -115,7 +115,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		pickers:            make(map[Section]Picker),
 		profilePickers:     make(map[string]map[Section]Picker),
 		profilePreviews:    make(map[string]Preview),
-		profilePluginDiffs: make(map[string]*pluginDiff),
+		profileDiffs: make(map[string]map[Section]*sectionDiff),
 		activeTab:          "Base",
 		activeSection:      SectionPlugins,
 		focusZone:          FocusSidebar,
@@ -267,23 +267,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "tab":
-			// Save current profile diff before switching away.
-			m.saveProfilePluginDiff(m.activeTab)
+			// Save current profile diffs before switching away.
+			m.saveAllProfileDiffs(m.activeTab)
 			m.tabBar.CycleNext()
 			if !m.tabBar.OnPlus() {
 				m.activeTab = m.tabBar.ActiveTab()
-				m.rebuildProfilePluginPicker(m.activeTab)
+				m.rebuildAllProfilePickers(m.activeTab)
 				m.syncSidebarCounts()
 			}
 			m.syncStatusBar()
 			return m, nil
 		case "shift+tab":
-			// Save current profile diff before switching away.
-			m.saveProfilePluginDiff(m.activeTab)
+			// Save current profile diffs before switching away.
+			m.saveAllProfileDiffs(m.activeTab)
 			m.tabBar.CyclePrev()
 			if !m.tabBar.OnPlus() {
 				m.activeTab = m.tabBar.ActiveTab()
-				m.rebuildProfilePluginPicker(m.activeTab)
+				m.rebuildAllProfilePickers(m.activeTab)
 				m.syncSidebarCounts()
 			}
 			m.syncStatusBar()
@@ -890,145 +890,21 @@ func (m *Model) syncStatusBar() {
 
 // --- Profile management ---
 
-// pluginDiff tracks explicit profile plugin overrides relative to base.
-type pluginDiff struct {
-	adds    map[string]bool // plugins to add (not in base, user selected in profile)
-	removes map[string]bool // plugins to remove (in base, user deselected in profile)
-}
-
-// saveProfilePluginDiff computes and stores the plugin diff for a profile by
-// comparing its current picker selections against current base selections.
-func (m *Model) saveProfilePluginDiff(profileName string) {
-	if profileName == "Base" {
-		return
-	}
-	pm, ok := m.profilePickers[profileName]
-	if !ok {
-		return
-	}
-	picker := pm[SectionPlugins]
-	baseSelected := toSet(m.pickers[SectionPlugins].SelectedKeys())
-	profileSelected := toSet(picker.SelectedKeys())
-
-	diff := &pluginDiff{
-		adds:    make(map[string]bool),
-		removes: make(map[string]bool),
-	}
-	for k := range profileSelected {
-		if !baseSelected[k] {
-			diff.adds[k] = true
-		}
-	}
-	for k := range baseSelected {
-		if !profileSelected[k] {
-			diff.removes[k] = true
-		}
-	}
-	m.profilePluginDiffs[profileName] = diff
-}
-
-// rebuildProfilePluginPicker rebuilds a profile's plugin picker from current
-// base selections plus stored overrides. This keeps profiles in sync with base.
-func (m *Model) rebuildProfilePluginPicker(profileName string) {
-	if profileName == "Base" {
-		return
-	}
-	pm, ok := m.profilePickers[profileName]
-	if !ok {
-		return
-	}
-	diff := m.profilePluginDiffs[profileName]
-	if diff == nil {
-		diff = &pluginDiff{adds: make(map[string]bool), removes: make(map[string]bool)}
-	}
-
-	baseSelected := toSet(m.pickers[SectionPlugins].SelectedKeys())
-
-	// Effective selection = (base - removes) + adds.
-	effective := make(map[string]bool)
-	for k := range baseSelected {
-		if !diff.removes[k] {
-			effective[k] = true
-		}
-	}
-	for k := range diff.adds {
-		effective[k] = true
-	}
-
-	items := PluginPickerItemsForProfile(m.scanResult, effective, baseSelected)
-	p := NewPicker(items)
-	p.SetTagColor(m.tabBar.ActiveTheme().Accent)
-	// Preserve height/width from existing picker.
-	old := pm[SectionPlugins]
-	p.SetHeight(old.height)
-	p.SetWidth(old.width)
-	pm[SectionPlugins] = p
-	m.profilePickers[profileName] = pm
-}
-
 func (m *Model) createProfile(name string) {
-	// Initialize profile pickers as copies of base selections.
-	pm := make(map[Section]Picker)
-	baseSelected := toSet(m.pickers[SectionPlugins].SelectedKeys())
-	for sec, basePicker := range m.pickers {
-		if sec == SectionPlugins {
-			// Build profile plugin items from current base selections.
-			items := PluginPickerItemsForProfile(m.scanResult, baseSelected, baseSelected)
-			pm[sec] = NewPicker(items)
-		} else {
-			// Copy base picker items and mark selectable ones as inherited.
-			items := copyPickerItems(basePicker)
-			for i := range items {
-				if isSelectableItem(items[i]) && items[i].Selected {
-					items[i].IsBase = true
-					if items[i].Tag != "" {
-						items[i].Tag = "● " + items[i].Tag
-					} else {
-						items[i].Tag = "●"
-					}
-				}
-			}
-			p := NewPicker(items)
-			if basePicker.hasSearchAction {
-				p.SetSearchAction(true)
-			}
-			if basePicker.CollapseReadOnly {
-				p.CollapseReadOnly = true
-				p.autoCollapseReadOnly()
-			}
-			pm[sec] = p
-		}
+	// Initialize empty pickers and diffs — rebuildAll will populate from base.
+	m.profilePickers[name] = make(map[Section]Picker)
+	m.profileDiffs[name] = make(map[Section]*sectionDiff)
+	for _, sec := range AllSections {
+		m.profileDiffs[name][sec] = newSectionDiff()
 	}
-	m.profilePickers[name] = pm
-
-	// Initialize empty plugin diff for this profile.
-	m.profilePluginDiffs[name] = &pluginDiff{
-		adds:    make(map[string]bool),
-		removes: make(map[string]bool),
-	}
-
-	// Copy preview sections for profile.
-	baseFragKeys := m.preview.SelectedFragmentKeys()
-	baseFragSet := toSet(baseFragKeys)
-	profileSections := make([]PreviewSection, len(m.preview.sections))
-	copy(profileSections, m.preview.sections)
-	for i := range profileSections {
-		profileSections[i].IsBase = baseFragSet[profileSections[i].FragmentKey]
-	}
-	pp := NewPreview(profileSections)
-	m.profilePreviews[name] = pp
 
 	// Update tab bar and switch to new profile.
 	m.tabBar.AddTab(name)
 	m.activeTab = name
 	m.useProfiles = true
 
-	// Set tag color on all profile pickers to match the profile's accent.
-	accent := m.tabBar.ActiveTheme().Accent
-	for sec, p := range pm {
-		p.SetTagColor(accent)
-		pm[sec] = p
-	}
+	// Rebuild all sections from base + empty diffs (effective == base).
+	m.rebuildAllProfilePickers(name)
 
 	m.syncSidebarCounts()
 	m.syncStatusBar()
@@ -1041,7 +917,7 @@ func (m *Model) createProfile(name string) {
 func (m *Model) deleteProfile(name string) {
 	delete(m.profilePickers, name)
 	delete(m.profilePreviews, name)
-	delete(m.profilePluginDiffs, name)
+	delete(m.profileDiffs, name)
 	m.tabBar.RemoveTab(name)
 	m.activeTab = m.tabBar.ActiveTab()
 
@@ -1103,7 +979,7 @@ func (m *Model) resetToDefaults() {
 	m.mcpSources = make(map[string]string)
 	m.mcpPluginKeys = make(map[string]string)
 	m.discoveredCmdSkills = nil
-	m.profilePluginDiffs = make(map[string]*pluginDiff)
+	m.profileDiffs = make(map[string]map[Section]*sectionDiff)
 
 	previewSections := ClaudeMDPreviewSections(m.scanResult.ClaudeMDSections, "~/.claude/CLAUDE.md")
 	m.preview = NewPreview(previewSections)
@@ -1302,186 +1178,9 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 // buildProfiles computes profile diffs relative to base selections.
 func (m Model) buildProfiles() map[string]profiles.Profile {
 	profs := make(map[string]profiles.Profile)
-
-	basePlugins := m.pickers[SectionPlugins].SelectedKeys()
-	basePluginSet := toSet(basePlugins)
-
-	baseSettings := m.pickers[SectionSettings].SelectedKeys()
-	baseSettingsSet := toSet(baseSettings)
-
-	basePermKeys := m.pickers[SectionPermissions].SelectedKeys()
-	basePermSet := toSet(basePermKeys)
-
-	baseFragKeys := m.preview.SelectedFragmentKeys()
-	baseFragSet := toSet(baseFragKeys)
-
-	baseMCPKeys := m.pickers[SectionMCP].SelectedKeys()
-	baseMCPSet := toSet(baseMCPKeys)
-
-	baseHookKeys := m.pickers[SectionHooks].SelectedKeys()
-	baseHookSet := toSet(baseHookKeys)
-
-	baseKBKeys := m.pickers[SectionKeybindings].SelectedKeys()
-	baseKBSet := toSet(baseKBKeys)
-
-	baseCSKeys := m.pickers[SectionCommandsSkills].SelectedKeys()
-	baseCmdKeys, baseSkillKeys := splitCmdSkillKeys(baseCSKeys)
-	baseCmdSet := toSet(baseCmdKeys)
-	baseSkillSet := toSet(baseSkillKeys)
-
-	for name, pickerMap := range m.profilePickers {
-		p := profiles.Profile{}
-
-		// Plugins diff.
-		profPlugins := pickerMap[SectionPlugins].SelectedKeys()
-		profPluginSet := toSet(profPlugins)
-		for _, k := range profPlugins {
-			if !basePluginSet[k] {
-				p.Plugins.Add = append(p.Plugins.Add, k)
-			}
-		}
-		for _, k := range basePlugins {
-			if !profPluginSet[k] {
-				p.Plugins.Remove = append(p.Plugins.Remove, k)
-			}
-		}
-
-		// Settings diff: profile can override settings values.
-		profSettings := pickerMap[SectionSettings].SelectedKeys()
-		profSettingsSet := toSet(profSettings)
-		// Removed settings (in base but not in profile).
-		for _, k := range baseSettings {
-			if !profSettingsSet[k] {
-				// Can't represent removal in Profile struct; skip.
-				_ = k
-			}
-		}
-		// Added settings (in profile but not in base).
-		for _, k := range profSettings {
-			if !baseSettingsSet[k] {
-				// Profile adds a setting not in base.
-				if p.Settings == nil {
-					p.Settings = make(map[string]any)
-				}
-				if v, ok := m.scanResult.Settings[k]; ok {
-					p.Settings[k] = v
-				}
-			}
-		}
-
-		// Permissions diff.
-		profPermKeys := pickerMap[SectionPermissions].SelectedKeys()
-		for _, k := range profPermKeys {
-			if !basePermSet[k] {
-				if strings.HasPrefix(k, "allow:") {
-					p.Permissions.AddAllow = append(p.Permissions.AddAllow, strings.TrimPrefix(k, "allow:"))
-				} else if strings.HasPrefix(k, "deny:") {
-					p.Permissions.AddDeny = append(p.Permissions.AddDeny, strings.TrimPrefix(k, "deny:"))
-				}
-			}
-		}
-
-		// CLAUDE.md diff.
-		if profPreview, ok := m.profilePreviews[name]; ok {
-			profFragKeys := profPreview.SelectedFragmentKeys()
-			profFragSet := toSet(profFragKeys)
-			for _, k := range profFragKeys {
-				if !baseFragSet[k] {
-					p.ClaudeMD.Add = append(p.ClaudeMD.Add, k)
-				}
-			}
-			for _, k := range baseFragKeys {
-				if !profFragSet[k] {
-					p.ClaudeMD.Remove = append(p.ClaudeMD.Remove, k)
-				}
-			}
-		}
-
-		// MCP diff.
-		profMCPKeys := pickerMap[SectionMCP].SelectedKeys()
-		profMCPSet := toSet(profMCPKeys)
-		mcpAdd := make(map[string]json.RawMessage)
-		for _, k := range profMCPKeys {
-			if !baseMCPSet[k] {
-				if raw, ok := m.scanResult.MCP[k]; ok {
-					mcpAdd[k] = raw
-				} else if raw, ok := m.discoveredMCP[k]; ok {
-					mcpAdd[k] = raw
-				}
-			}
-		}
-		var mcpRemoves []string
-		for _, k := range baseMCPKeys {
-			if !profMCPSet[k] {
-				mcpRemoves = append(mcpRemoves, k)
-			}
-		}
-		if len(mcpAdd) > 0 || len(mcpRemoves) > 0 {
-			p.MCP = profiles.ProfileMCP{Add: mcpAdd, Remove: mcpRemoves}
-		}
-
-		// Hooks diff.
-		profHookKeys := pickerMap[SectionHooks].SelectedKeys()
-		profHookSet := toSet(profHookKeys)
-		hookAdd := make(map[string]json.RawMessage)
-		for _, k := range profHookKeys {
-			if !baseHookSet[k] {
-				if raw, ok := m.scanResult.Hooks[k]; ok {
-					hookAdd[k] = raw
-				}
-			}
-		}
-		var hookRemoves []string
-		for _, k := range baseHookKeys {
-			if !profHookSet[k] {
-				hookRemoves = append(hookRemoves, k)
-			}
-		}
-		if len(hookAdd) > 0 || len(hookRemoves) > 0 {
-			p.Hooks = profiles.ProfileHooks{Add: hookAdd, Remove: hookRemoves}
-		}
-
-		// Keybindings diff.
-		profKBKeys := pickerMap[SectionKeybindings].SelectedKeys()
-		profKBSet := toSet(profKBKeys)
-		if !setsEqual(baseKBSet, profKBSet) {
-			// If profile has keybindings enabled but base does not, or vice versa.
-			if len(profKBKeys) > 0 {
-				p.Keybindings = profiles.ProfileKeybindings{
-					Override: m.scanResult.Keybindings,
-				}
-			}
-		}
-
-		// Commands & Skills diff.
-		profCSKeys := pickerMap[SectionCommandsSkills].SelectedKeys()
-		profCmdKeys, profSkillKeys := splitCmdSkillKeys(profCSKeys)
-		profCmdSet := toSet(profCmdKeys)
-		profSkillSet := toSet(profSkillKeys)
-		for _, k := range profCmdKeys {
-			if !baseCmdSet[k] {
-				p.Commands.Add = append(p.Commands.Add, k)
-			}
-		}
-		for _, k := range baseCmdKeys {
-			if !profCmdSet[k] {
-				p.Commands.Remove = append(p.Commands.Remove, k)
-			}
-		}
-		for _, k := range profSkillKeys {
-			if !baseSkillSet[k] {
-				p.Skills.Add = append(p.Skills.Add, k)
-			}
-		}
-		for _, k := range baseSkillKeys {
-			if !profSkillSet[k] {
-				p.Skills.Remove = append(p.Skills.Remove, k)
-			}
-		}
-
-		profs[name] = p
+	for name := range m.profilePickers {
+		profs[name] = m.diffsToProfile(name)
 	}
-
 	return profs
 }
 
@@ -1917,156 +1616,14 @@ func (m *Model) restoreProfiles(cfg *config.Config, existingProfiles map[string]
 	for _, name := range names {
 		profile := existingProfiles[name]
 
-		// createProfile copies base selections into the profile.
+		// createProfile initializes empty diffs and rebuilds from base.
 		m.createProfile(name)
 
-		pm := m.profilePickers[name]
+		// Populate diffs from the saved profile YAML.
+		m.profileDiffs[name] = profileToSectionDiffs(profile)
 
-		// Plugins: apply add/remove diffs to base selection.
-		basePlugins := toSet(cfg.AllPluginKeys())
-		effectivePlugins := make(map[string]bool)
-		for k := range basePlugins {
-			effectivePlugins[k] = true
-		}
-		for _, k := range profile.Plugins.Add {
-			effectivePlugins[k] = true
-		}
-		for _, k := range profile.Plugins.Remove {
-			delete(effectivePlugins, k)
-		}
-		applyPickerSelection(pickerPtr(pm, SectionPlugins), effectivePlugins)
-		pm[SectionPlugins] = *pickerPtr(pm, SectionPlugins)
-
-		// Store the plugin diff so it persists across tab switches.
-		diff := &pluginDiff{
-			adds:    make(map[string]bool),
-			removes: make(map[string]bool),
-		}
-		for _, k := range profile.Plugins.Add {
-			diff.adds[k] = true
-		}
-		for _, k := range profile.Plugins.Remove {
-			diff.removes[k] = true
-		}
-		m.profilePluginDiffs[name] = diff
-
-		// Settings: base settings + profile overrides.
-		baseSettings := mapKeys(cfg.Settings)
-		effectiveSettings := make(map[string]bool)
-		for k := range baseSettings {
-			effectiveSettings[k] = true
-		}
-		for k := range profile.Settings {
-			effectiveSettings[k] = true
-		}
-		applyPickerSelection(pickerPtr(pm, SectionSettings), effectiveSettings)
-
-		// Permissions: base + profile additions.
-		basePerm := make(map[string]bool)
-		for _, rule := range cfg.Permissions.Allow {
-			basePerm["allow:"+rule] = true
-		}
-		for _, rule := range cfg.Permissions.Deny {
-			basePerm["deny:"+rule] = true
-		}
-		effectivePerm := make(map[string]bool)
-		for k := range basePerm {
-			effectivePerm[k] = true
-		}
-		for _, rule := range profile.Permissions.AddAllow {
-			effectivePerm["allow:"+rule] = true
-		}
-		for _, rule := range profile.Permissions.AddDeny {
-			effectivePerm["deny:"+rule] = true
-		}
-		applyPickerSelection(pickerPtr(pm, SectionPermissions), effectivePerm)
-
-		// MCP: base + add - remove.
-		baseMCP := make(map[string]bool)
-		for k := range cfg.MCP {
-			baseMCP[k] = true
-		}
-		effectiveMCP := make(map[string]bool)
-		for k := range baseMCP {
-			effectiveMCP[k] = true
-		}
-		for k := range profile.MCP.Add {
-			effectiveMCP[k] = true
-		}
-		for _, k := range profile.MCP.Remove {
-			delete(effectiveMCP, k)
-		}
-		applyPickerSelection(pickerPtr(pm, SectionMCP), effectiveMCP)
-
-		// Hooks: base + add - remove.
-		baseHooks := make(map[string]bool)
-		for k := range cfg.Hooks {
-			baseHooks[k] = true
-		}
-		effectiveHooks := make(map[string]bool)
-		for k := range baseHooks {
-			effectiveHooks[k] = true
-		}
-		for k := range profile.Hooks.Add {
-			effectiveHooks[k] = true
-		}
-		for _, k := range profile.Hooks.Remove {
-			delete(effectiveHooks, k)
-		}
-		applyPickerSelection(pickerPtr(pm, SectionHooks), effectiveHooks)
-
-		// Keybindings: if profile has override, keep base selection; otherwise inherit base.
-		if len(profile.Keybindings.Override) > 0 {
-			kbSet := mapKeys(profile.Keybindings.Override)
-			applyPickerSelection(pickerPtr(pm, SectionKeybindings), kbSet)
-		}
-
-		// CLAUDE.md: base + add - remove.
-		if pp, ok := m.profilePreviews[name]; ok {
-			baseFrags := toSet(cfg.ClaudeMD.Include)
-			effectiveFrags := make(map[string]bool)
-			for k := range baseFrags {
-				effectiveFrags[k] = true
-			}
-			for _, k := range profile.ClaudeMD.Add {
-				effectiveFrags[k] = true
-			}
-			for _, k := range profile.ClaudeMD.Remove {
-				delete(effectiveFrags, k)
-			}
-			for i, sec := range pp.sections {
-				pp.selected[i] = effectiveFrags[sec.FragmentKey]
-			}
-			m.profilePreviews[name] = pp
-		}
-
-		// Commands & Skills: base + add - remove.
-		baseCS := make(map[string]bool)
-		for _, k := range cfg.Commands {
-			baseCS[k] = true
-		}
-		for _, k := range cfg.Skills {
-			baseCS[k] = true
-		}
-		effectiveCS := make(map[string]bool)
-		for k := range baseCS {
-			effectiveCS[k] = true
-		}
-		for _, k := range profile.Commands.Add {
-			effectiveCS[k] = true
-		}
-		for _, k := range profile.Commands.Remove {
-			delete(effectiveCS, k)
-		}
-		for _, k := range profile.Skills.Add {
-			effectiveCS[k] = true
-		}
-		for _, k := range profile.Skills.Remove {
-			delete(effectiveCS, k)
-		}
-		applyPickerSelection(pickerPtr(pm, SectionCommandsSkills), effectiveCS)
-
-		m.profilePickers[name] = pm
+		// Rebuild all sections with the restored diffs applied.
+		m.rebuildAllProfilePickers(name)
 	}
 
 	// Switch back to Base tab after restoring all profiles.
