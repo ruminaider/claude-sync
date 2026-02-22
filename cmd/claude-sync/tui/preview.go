@@ -23,12 +23,23 @@ type PreviewSection struct {
 	IsBase      bool   // inherited from base (profile view)
 }
 
+// previewRow represents a single navigable entry in the virtual row list.
+// It is either a group header or a reference to a section.
+type previewRow struct {
+	isHeader   bool
+	source     string // group label (headers only)
+	count      int    // number of sections in group (headers only)
+	sectionIdx int    // index into p.sections (non-headers only)
+}
+
 // Preview shows a two-panel layout for CLAUDE.md: section list on the left
 // and content preview on the right. The last entry in the left panel is a
 // [+ Search projects] action.
 type Preview struct {
 	sections    []PreviewSection
-	cursor      int
+	rows        []previewRow     // computed virtual row list
+	rowCursor   int              // cursor position in rows
+	collapsed   map[string]bool  // collapsed groups keyed by Source
 	selected    map[int]bool
 	viewport    viewport.Model
 	listWidth   int
@@ -48,18 +59,17 @@ func NewPreview(sections []PreviewSection) Preview {
 	}
 
 	vp := viewport.New(40, 10)
-	if len(sections) > 0 {
-		vp.SetContent(sections[0].Content)
-	}
 
 	p := Preview{
 		sections:  sections,
-		cursor:    0,
+		collapsed: make(map[string]bool),
 		selected:  sel,
 		viewport:  vp,
 		listWidth: 30,
 		focusLeft: true,
 	}
+	p.rebuildRows()
+	p.syncViewport()
 	return p
 }
 
@@ -80,6 +90,51 @@ func ClaudeMDPreviewSections(sections []claudemd.Section, source string) []Previ
 		})
 	}
 	return result
+}
+
+// rebuildRows computes the virtual row list from p.sections, grouping by Source
+// and respecting the collapsed state. Must be called whenever sections change
+// or a group is toggled.
+func (p *Preview) rebuildRows() {
+	p.rows = p.rows[:0]
+	if len(p.sections) == 0 {
+		return
+	}
+
+	// Group sections by source in order of first appearance.
+	type group struct {
+		source  string
+		indices []int
+	}
+	var groups []group
+	seen := make(map[string]int) // source -> index in groups
+
+	for i, sec := range p.sections {
+		if idx, ok := seen[sec.Source]; ok {
+			groups[idx].indices = append(groups[idx].indices, i)
+		} else {
+			seen[sec.Source] = len(groups)
+			groups = append(groups, group{
+				source:  sec.Source,
+				indices: []int{i},
+			})
+		}
+	}
+
+	for _, g := range groups {
+		p.rows = append(p.rows, previewRow{
+			isHeader: true,
+			source:   g.source,
+			count:    len(g.indices),
+		})
+		if !p.collapsed[g.source] {
+			for _, idx := range g.indices {
+				p.rows = append(p.rows, previewRow{
+					sectionIdx: idx,
+				})
+			}
+		}
+	}
 }
 
 // --- Methods ---
@@ -163,6 +218,8 @@ func (p *Preview) AddSections(sections []PreviewSection) {
 		p.sections = append(p.sections, s)
 		p.selected[idx] = true
 	}
+
+	p.rebuildRows()
 }
 
 // Update handles key messages for the preview model.
@@ -178,36 +235,57 @@ func (p Preview) Update(msg tea.Msg) (Preview, tea.Cmd) {
 }
 
 func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
-	// The "virtual" last entry is [+ Search projects].
-	totalEntries := len(p.sections) + 1 // +1 for the search action
+	// The "virtual" last entry after all rows is [+ Search projects].
+	totalEntries := len(p.rows) + 1 // +1 for the search action
 
 	switch msg.String() {
 	case "up", "k":
-		if p.cursor > 0 {
-			p.cursor--
+		if p.rowCursor > 0 {
+			p.rowCursor--
 			p.syncViewport()
 		}
 	case "down", "j":
-		if p.cursor < totalEntries-1 {
-			p.cursor++
+		if p.rowCursor < totalEntries-1 {
+			p.rowCursor++
 			p.syncViewport()
 		}
 	case " ":
-		// Toggle selection — only on real sections, not the search action.
-		if p.cursor < len(p.sections) {
-			p.selected[p.cursor] = !p.selected[p.cursor]
+		if p.rowCursor < len(p.rows) {
+			row := p.rows[p.rowCursor]
+			if row.isHeader {
+				p.toggleCollapse(row.source)
+			} else {
+				p.selected[row.sectionIdx] = !p.selected[row.sectionIdx]
+			}
 		}
 	case "enter":
-		// If on the search action, emit SearchRequestMsg (unless already searching).
-		if p.cursor == len(p.sections) && !p.searching {
+		// If on the search action, emit SearchRequestMsg.
+		if p.rowCursor == len(p.rows) && !p.searching {
 			return p, func() tea.Msg { return SearchRequestMsg{} }
 		}
-		// Otherwise toggle selection.
-		if p.cursor < len(p.sections) {
-			p.selected[p.cursor] = !p.selected[p.cursor]
+		if p.rowCursor < len(p.rows) {
+			row := p.rows[p.rowCursor]
+			if row.isHeader {
+				p.toggleCollapse(row.source)
+			} else {
+				p.selected[row.sectionIdx] = !p.selected[row.sectionIdx]
+			}
+		}
+	case "a":
+		// Select all sections regardless of collapse state.
+		for i := range p.sections {
+			p.selected[i] = true
+		}
+	case "n":
+		// Deselect all sections regardless of collapse state.
+		for i := range p.sections {
+			p.selected[i] = false
 		}
 	case "right", "l":
-		p.focusLeft = false
+		// Only switch to viewport focus on section rows, not headers.
+		if p.rowCursor < len(p.rows) && !p.rows[p.rowCursor].isHeader {
+			p.focusLeft = false
+		}
 	case "left", "h":
 		return p, func() tea.Msg {
 			return FocusChangeMsg{Zone: FocusSidebar}
@@ -218,6 +296,17 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 		}
 	}
 	return p, nil
+}
+
+// toggleCollapse flips the collapsed state for a source group and rebuilds rows.
+func (p *Preview) toggleCollapse(source string) {
+	p.collapsed[source] = !p.collapsed[source]
+	p.rebuildRows()
+	// Clamp cursor if it fell past the end.
+	maxCursor := len(p.rows) // search action is at len(p.rows)
+	if p.rowCursor > maxCursor {
+		p.rowCursor = maxCursor
+	}
 }
 
 func (p Preview) updateViewport(msg tea.KeyMsg) (Preview, tea.Cmd) {
@@ -238,10 +327,17 @@ func (p Preview) updateViewport(msg tea.KeyMsg) (Preview, tea.Cmd) {
 }
 
 // syncViewport updates the viewport content to match the currently highlighted
-// section. If the cursor is on the search action, the viewport shows a hint.
+// row. Headers show a summary; section rows show content; the search action
+// shows a hint.
 func (p *Preview) syncViewport() {
-	if p.cursor < len(p.sections) {
-		p.viewport.SetContent(p.wrapContent(p.sections[p.cursor].Content))
+	if p.rowCursor < len(p.rows) {
+		row := p.rows[p.rowCursor]
+		if row.isHeader {
+			info := fmt.Sprintf("%s\n\n%d section(s)", row.source, row.count)
+			p.viewport.SetContent(p.wrapContent(info))
+		} else {
+			p.viewport.SetContent(p.wrapContent(p.sections[row.sectionIdx].Content))
+		}
 		p.viewport.GotoTop()
 	} else {
 		p.viewport.SetContent(p.wrapContent("Search for CLAUDE.md files in your projects..."))
@@ -279,28 +375,37 @@ func (p Preview) viewList() string {
 		Width(p.listWidth).
 		PaddingLeft(1)
 
-	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
+	for ri, row := range p.rows {
+		isCurrent := p.focused && ri == p.rowCursor && p.focusLeft
 
-	for i, sec := range p.sections {
+		if row.isHeader {
+			// Render group header: ── ▾ source (N) ──
+			indicator := "▾"
+			if p.collapsed[row.source] {
+				indicator = "▸"
+			}
+			line := fmt.Sprintf("── %s %s (%d) ──", indicator, row.source, row.count)
+
+			cursor := "  "
+			if isCurrent {
+				cursor = "> "
+			}
+
+			b.WriteString(cursor + RenderHeader(line, p.focused, isCurrent))
+			b.WriteString("\n")
+			continue
+		}
+
+		// Section row.
+		i := row.sectionIdx
+		sec := p.sections[i]
+
 		cursor := "  "
-		if p.focused && i == p.cursor && p.focusLeft {
+		if isCurrent {
 			cursor = "> "
 		}
 
-		var checkbox string
-		if p.focused {
-			if p.selected[i] {
-				checkbox = SelectedStyle.Render("[x]")
-			} else {
-				checkbox = UnselectedStyle.Render("[ ]")
-			}
-		} else {
-			if p.selected[i] {
-				checkbox = dimStyle.Render("[x]")
-			} else {
-				checkbox = dimStyle.Render("[ ]")
-			}
-		}
+		checkbox := RenderCheckbox(p.focused, p.selected[i])
 
 		header := sec.Header
 		// Truncate long headers to fit the list width.
@@ -312,47 +417,29 @@ func (p Preview) viewList() string {
 			header = header[:maxHeaderLen-1] + "…"
 		}
 
-		var display string
-		if p.focused && i == p.cursor && p.focusLeft {
-			display = lipgloss.NewStyle().Bold(true).Foreground(colorText).Render(header)
-		} else if p.focused {
-			display = header
-		} else {
-			display = dimStyle.Render(header)
+		// Removed inherited section: muted red strikethrough.
+		if sec.IsBase && !p.selected[i] {
+			b.WriteString(cursor + RenderRemovedBaseLine(header, "●", p.focused) + "\n")
+			continue
 		}
+
+		display := RenderItemText(header, p.focused, isCurrent)
 
 		tag := ""
 		if sec.IsBase {
-			if p.focused {
-				tag = "  " + BaseTagStyle.Render("[base]")
-			} else {
-				tag = "  " + dimStyle.Render("[base]")
-			}
+			tag = RenderTag("●", p.focused, "")
 		}
 
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
 	}
 
 	// [+ Search projects] action row.
+	searchIsCurrent := p.focused && p.rowCursor == len(p.rows) && p.focusLeft
 	searchCursor := "  "
-	if p.focused && p.cursor == len(p.sections) && p.focusLeft {
+	if searchIsCurrent {
 		searchCursor = "> "
 	}
-	var searchLabel string
-	if p.searching {
-		searchLabel = "Searching..."
-		if p.focused && p.cursor == len(p.sections) && p.focusLeft {
-			searchLabel = lipgloss.NewStyle().Bold(true).Foreground(colorOverlay0).Render(searchLabel)
-		} else {
-			searchLabel = dimStyle.Render(searchLabel)
-		}
-	} else {
-		searchLabel = lipgloss.NewStyle().Foreground(colorBlue).Render("[+ Search projects]")
-		if !p.focused {
-			searchLabel = dimStyle.Render("[+ Search projects]")
-		}
-	}
-	b.WriteString(searchCursor + searchLabel + "\n")
+	b.WriteString(searchCursor + RenderSearchAction(p.focused, searchIsCurrent, p.searching) + "\n")
 
 	return listStyle.Height(p.totalHeight).Render(b.String())
 }
@@ -360,13 +447,18 @@ func (p Preview) viewList() string {
 func (p Preview) viewPreview() string {
 	// Header for the preview panel.
 	var header string
-	if p.cursor < len(p.sections) {
-		sec := p.sections[p.cursor]
-		title := sec.Header
-		if sec.Source != "" {
-			title = fmt.Sprintf("%s  (%s)", title, sec.Source)
+	if p.rowCursor < len(p.rows) {
+		row := p.rows[p.rowCursor]
+		if row.isHeader {
+			header = HeaderStyle.Render(row.source) + "\n"
+		} else {
+			sec := p.sections[row.sectionIdx]
+			title := sec.Header
+			if sec.Source != "" {
+				title = fmt.Sprintf("%s  (%s)", title, sec.Source)
+			}
+			header = HeaderStyle.Render(title) + "\n"
 		}
-		header = HeaderStyle.Render(title) + "\n"
 	} else {
 		header = HeaderStyle.Render("Search") + "\n"
 	}

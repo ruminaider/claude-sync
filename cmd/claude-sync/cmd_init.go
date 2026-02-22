@@ -2,12 +2,16 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ruminaider/claude-sync/cmd/claude-sync/tui"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/paths"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
@@ -59,6 +63,29 @@ var configCreateCmd = &cobra.Command{
 			return nil
 		}
 
+		// Detect existing config for edit mode.
+		var existingConfig *config.Config
+		var existingProfiles map[string]profiles.Profile
+		if _, err := os.Stat(syncDir); err == nil {
+			data, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+			if err == nil {
+				cfg, err := config.Parse(data)
+				if err == nil {
+					existingConfig = &cfg
+				}
+			}
+			names, _ := profiles.ListProfiles(syncDir)
+			if len(names) > 0 {
+				existingProfiles = make(map[string]profiles.Profile)
+				for _, name := range names {
+					p, err := profiles.ReadProfile(syncDir, name)
+					if err == nil {
+						existingProfiles[name] = p
+					}
+				}
+			}
+		}
+
 		// Phase 2: Launch TUI.
 		skip := tui.SkipFlags{
 			Plugins:     initSkipPlugins,
@@ -70,7 +97,8 @@ var configCreateCmd = &cobra.Command{
 			Keybindings:    initSkipKeybindings,
 			CommandsSkills: initSkipCommandsSkills,
 		}
-		model := tui.NewModel(scan, claudeDir, syncDir, initRemote, initSkipProfiles, skip)
+		model := tui.NewModel(scan, claudeDir, syncDir, initRemote, initSkipProfiles, skip,
+			existingConfig, existingProfiles)
 		p := tea.NewProgram(model, tea.WithAltScreen())
 		finalModel, err := p.Run()
 		if err != nil {
@@ -84,23 +112,34 @@ var configCreateCmd = &cobra.Command{
 		}
 
 		// Phase 3: Apply.
-		initResult, err := commands.Init(*result)
+		isUpdate := existingConfig != nil
+		var initResult *commands.InitResult
+		if isUpdate {
+			initResult, err = commands.Update(*result)
+		} else {
+			initResult, err = commands.Init(*result)
+		}
 		if err != nil {
 			return err
 		}
 
 		// Phase 4: Print results.
-		printInitResult(initResult, scan)
+		printInitResult(initResult, scan, isUpdate)
 		return nil
 	},
 }
 
 // printInitResult displays the result of the init command.
-func printInitResult(result *commands.InitResult, scan *commands.InitScanResult) {
+func printInitResult(result *commands.InitResult, scan *commands.InitScanResult, isUpdate bool) {
 	fmt.Println()
-	fmt.Println("Created ~/.claude-sync/")
-	fmt.Println("Generated config.yaml from current Claude Code setup")
-	fmt.Println("Initialized git repository")
+	if isUpdate {
+		fmt.Println("Updated ~/.claude-sync/")
+		fmt.Println("Updated config.yaml from current Claude Code setup")
+	} else {
+		fmt.Println("Created ~/.claude-sync/")
+		fmt.Println("Generated config.yaml from current Claude Code setup")
+		fmt.Println("Initialized git repository")
+	}
 
 	if len(result.Upstream) > 0 {
 		fmt.Printf("\n  Upstream:    %d plugin(s)\n", len(result.Upstream))
@@ -153,6 +192,11 @@ func printInitResult(result *commands.InitResult, scan *commands.InitScanResult)
 		fmt.Println()
 		fmt.Println("Next steps:")
 		fmt.Printf("  On another machine: claude-sync join %s\n", initRemote)
+	} else if isUpdate {
+		fmt.Println()
+		fmt.Println("Next steps:")
+		fmt.Println("  1. Review config: cat ~/.claude-sync/config.yaml")
+		fmt.Println("  2. Push: claude-sync push -m \"Update config\"")
 	} else {
 		fmt.Println()
 		fmt.Println("Next steps:")

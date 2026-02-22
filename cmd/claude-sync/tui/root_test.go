@@ -12,6 +12,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ import (
 // testModel creates a Model from a scan result with the overlay dismissed
 // so buildInitOptions can be tested directly.
 func testModel(scan *commands.InitScanResult) Model {
-	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{})
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, nil, nil)
 	// Dismiss any initial overlay so tests can call buildInitOptions.
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
@@ -316,7 +317,7 @@ func TestSkipFlags_Plugins(t *testing.T) {
 	}
 	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{
 		Plugins: true,
-	})
+	}, nil, nil)
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
@@ -330,7 +331,7 @@ func TestSkipFlags_Settings(t *testing.T) {
 	}
 	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{
 		Settings: true,
-	})
+	}, nil, nil)
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
@@ -347,7 +348,7 @@ func TestSkipFlags_Multiple(t *testing.T) {
 		Hooks:       true,
 		Keybindings: true,
 		ClaudeMD:    true,
-	})
+	}, nil, nil)
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
@@ -365,7 +366,7 @@ func TestSkipFlags_VerifyBuildInitOptions(t *testing.T) {
 	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{
 		Plugins:  true,
 		Settings: true,
-	})
+	}, nil, nil)
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
@@ -395,6 +396,41 @@ func TestCreateProfile(t *testing.T) {
 	assert.Equal(t, "work", m.activeTab)
 	assert.Contains(t, m.profilePickers, "work")
 	assert.Contains(t, m.profilePreviews, "work")
+}
+
+func TestCreateProfile_BaseMarkersOnAllSections(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	m.createProfile("work")
+
+	pm := m.profilePickers["work"]
+
+	// Commands & Skills: selectable items from base should have ● prefix.
+	csPicker := pm[SectionCommandsSkills]
+	for _, it := range csPicker.items {
+		if isSelectableItem(it) && it.Selected && !it.IsReadOnly {
+			assert.True(t, it.IsBase, "%s should be marked as base", it.Key)
+			assert.Contains(t, it.Tag, "●", "%s tag should contain ●", it.Key)
+		}
+	}
+
+	// Settings: selectable items should have ● tag.
+	settingsPicker := pm[SectionSettings]
+	for _, it := range settingsPicker.items {
+		if isSelectableItem(it) && it.Selected {
+			assert.True(t, it.IsBase, "%s should be marked as base", it.Key)
+			assert.Equal(t, "●", it.Tag)
+		}
+	}
+
+	// MCP: selectable items should have ● tag.
+	mcpPicker := pm[SectionMCP]
+	for _, it := range mcpPicker.items {
+		if isSelectableItem(it) && it.Selected {
+			assert.True(t, it.IsBase, "%s should be marked as base", it.Key)
+			assert.Equal(t, "●", it.Tag)
+		}
+	}
 }
 
 func TestDeleteProfile(t *testing.T) {
@@ -684,7 +720,7 @@ func TestNewModel_DefaultState(t *testing.T) {
 
 func TestNewModel_RemoteURL(t *testing.T) {
 	scan := &commands.InitScanResult{}
-	m := NewModel(scan, "/c", "/s", "https://git.example.com/repo", true, SkipFlags{})
+	m := NewModel(scan, "/c", "/s", "https://git.example.com/repo", true, SkipFlags{}, nil, nil)
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
@@ -813,7 +849,7 @@ func TestResetToDefaults_ReappliesSkipFlags(t *testing.T) {
 	scan := fullScan()
 	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{
 		Plugins: true,
-	})
+	}, nil, nil)
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
@@ -855,7 +891,7 @@ func TestDeselectPicker(t *testing.T) {
 func TestProfileCreationFlow_ViewHasSidebarAndTabBar(t *testing.T) {
 	scan := fullScan()
 	// Create model WITH the config style overlay (skipProfiles=false).
-	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{})
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{}, nil, nil)
 
 	// Simulate WindowSizeMsg.
 	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -939,7 +975,7 @@ func TestProfileCreationFlow_ViewHasSidebarAndTabBar(t *testing.T) {
 
 func TestFullFlowThenNavigation(t *testing.T) {
 	scan := fullScan()
-	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{})
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{}, nil, nil)
 
 	// WindowSizeMsg.
 	result, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -1726,5 +1762,357 @@ func TestResetToDefaults_ClearsDiscoveredMCP(t *testing.T) {
 
 	assert.Empty(t, m.discoveredMCP, "discovered MCP should be cleared on reset")
 	assert.Empty(t, m.mcpSources, "MCP sources should be cleared on reset")
+	assert.Empty(t, m.mcpPluginKeys, "mcpPluginKeys should be cleared on reset")
 	assert.True(t, m.pickers[SectionMCP].hasSearchAction, "search action should be preserved on reset")
+}
+
+// --- Plugin-aware MCP tests ---
+
+func TestPluginKeyFromSource(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"figma-minimal@figma-marketplace"},
+		PluginKeys: []string{"figma-minimal@figma-marketplace"},
+	}
+	m := testModel(scan)
+
+	// Plugin path should resolve to full key.
+	assert.Equal(t, "figma-minimal@figma-marketplace",
+		m.pluginKeyFromSource("~/.claude/plugins/figma-minimal"))
+
+	// Non-plugin path should return "".
+	assert.Equal(t, "", m.pluginKeyFromSource("~/Repos/myproject"))
+
+	// Different plugin name should not match.
+	assert.Equal(t, "", m.pluginKeyFromSource("~/.claude/plugins/unknown-plugin"))
+
+	// Path without the prefix should return "".
+	assert.Equal(t, "", m.pluginKeyFromSource("/absolute/path/figma-minimal"))
+}
+
+func TestMCPPluginServers_ReadOnlyWhenPluginSelected(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"figma-minimal@figma-marketplace"},
+		PluginKeys: []string{"figma-minimal@figma-marketplace"},
+		MCP:        map[string]json.RawMessage{},
+	}
+	m := testModel(scan)
+
+	// Simulate MCP search discovering a server from the plugin directory.
+	msg := MCPSearchDoneMsg{
+		Servers: map[string]json.RawMessage{
+			"figma-mcp": json.RawMessage(`{"url":"http://figma"}`),
+		},
+		Sources: map[string]string{
+			"figma-mcp": "~/.claude/plugins/figma-minimal",
+		},
+	}
+	m = m.handleMCPSearchDone(msg)
+
+	// The server should be mapped to the plugin key.
+	assert.Equal(t, "figma-minimal@figma-marketplace", m.mcpPluginKeys["figma-mcp"])
+
+	// Plugin is selected → server should be read-only and selected.
+	p := m.pickers[SectionMCP]
+	for _, it := range p.items {
+		if it.Key == "figma-mcp" {
+			assert.True(t, it.IsReadOnly, "plugin-provided MCP should be read-only when plugin is selected")
+			assert.True(t, it.Selected, "plugin-provided MCP should be selected when plugin is selected")
+			assert.Equal(t, "via figma-minimal", it.Tag, "should have plugin tag")
+			return
+		}
+	}
+	t.Fatal("figma-mcp item not found in picker")
+}
+
+func TestMCPPluginServers_SelectableWhenPluginDeselected(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"figma-minimal@figma-marketplace"},
+		PluginKeys: []string{"figma-minimal@figma-marketplace"},
+		MCP:        map[string]json.RawMessage{},
+	}
+	m := testModel(scan)
+
+	// Simulate MCP search discovering a plugin server.
+	msg := MCPSearchDoneMsg{
+		Servers: map[string]json.RawMessage{
+			"figma-mcp": json.RawMessage(`{"url":"http://figma"}`),
+		},
+		Sources: map[string]string{
+			"figma-mcp": "~/.claude/plugins/figma-minimal",
+		},
+	}
+	m = m.handleMCPSearchDone(msg)
+
+	// Verify initially read-only (plugin is selected).
+	p := m.pickers[SectionMCP]
+	found := false
+	for _, it := range p.items {
+		if it.Key == "figma-mcp" {
+			assert.True(t, it.IsReadOnly, "should start as read-only")
+			found = true
+		}
+	}
+	require.True(t, found)
+
+	// Deselect the plugin.
+	pluginPicker := m.pickers[SectionPlugins]
+	for i := range pluginPicker.items {
+		if pluginPicker.items[i].Key == "figma-minimal@figma-marketplace" {
+			pluginPicker.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionPlugins] = pluginPicker
+
+	// Trigger sync (normally happens via syncSidebarCounts after picker update).
+	m.syncMCPPluginState()
+
+	// Server should now be toggleable (not read-only).
+	p = m.pickers[SectionMCP]
+	for _, it := range p.items {
+		if it.Key == "figma-mcp" {
+			assert.False(t, it.IsReadOnly, "should be toggleable when plugin is deselected")
+			return
+		}
+	}
+	t.Fatal("figma-mcp item not found in picker after deselect")
+}
+
+func TestBuildInitOptions_ExcludesPluginMCP(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"figma-minimal@figma-marketplace"},
+		PluginKeys: []string{"figma-minimal@figma-marketplace"},
+		MCP:        map[string]json.RawMessage{"global-server": json.RawMessage(`{"url":"http://g"}`)},
+	}
+	m := testModel(scan)
+
+	// Simulate discovered plugin MCP server.
+	m.discoveredMCP["figma-mcp"] = json.RawMessage(`{"url":"http://figma"}`)
+	m.mcpSources["figma-mcp"] = "~/.claude/plugins/figma-minimal"
+	m.mcpPluginKeys["figma-mcp"] = "figma-minimal@figma-marketplace"
+
+	// Add the server to the picker (selected but NOT read-only for this test —
+	// buildInitOptions should still exclude it based on mcpPluginKeys + selected plugins).
+	p := m.pickers[SectionMCP]
+	p.AddItems([]PickerItem{
+		{Key: "figma-mcp", Display: "figma-mcp", Selected: true, Tag: "[figma-minimal]"},
+	})
+	m.pickers[SectionMCP] = p
+
+	opts := m.buildInitOptions()
+
+	// Plugin is selected → plugin MCP server should NOT be in the output.
+	assert.Contains(t, opts.MCP, "global-server", "global server should be in output")
+	assert.NotContains(t, opts.MCP, "figma-mcp", "plugin-provided MCP should be excluded when plugin is selected")
+}
+
+func TestBuildInitOptions_IncludesPluginMCP_WhenPluginDeselected(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"figma-minimal@figma-marketplace"},
+		PluginKeys: []string{"figma-minimal@figma-marketplace"},
+		MCP:        map[string]json.RawMessage{"global-server": json.RawMessage(`{"url":"http://g"}`)},
+	}
+	m := testModel(scan)
+
+	// Simulate discovered plugin MCP server.
+	m.discoveredMCP["figma-mcp"] = json.RawMessage(`{"url":"http://figma"}`)
+	m.mcpSources["figma-mcp"] = "~/.claude/plugins/figma-minimal"
+	m.mcpPluginKeys["figma-mcp"] = "figma-minimal@figma-marketplace"
+
+	// Add to picker.
+	p := m.pickers[SectionMCP]
+	p.AddItems([]PickerItem{
+		{Key: "figma-mcp", Display: "figma-mcp", Selected: true, Tag: "[figma-minimal]"},
+	})
+	m.pickers[SectionMCP] = p
+
+	// Deselect the plugin.
+	pluginPicker := m.pickers[SectionPlugins]
+	for i := range pluginPicker.items {
+		if pluginPicker.items[i].Key == "figma-minimal@figma-marketplace" {
+			pluginPicker.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionPlugins] = pluginPicker
+
+	opts := m.buildInitOptions()
+
+	// Plugin is NOT selected → plugin MCP server SHOULD be in the output.
+	assert.Contains(t, opts.MCP, "global-server", "global server should be in output")
+	assert.Contains(t, opts.MCP, "figma-mcp", "plugin MCP should be included when plugin is deselected")
+}
+
+// --- Edit Mode Tests ---
+
+func TestNewModel_EditMode_PrePopulatesSelections(t *testing.T) {
+	scan := fullScan()
+
+	// Existing config with only a subset selected.
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m"}, // only a@m, not b@m
+		Settings: map[string]any{"model": "opus"}, // only model, not env
+		Hooks:    map[string]json.RawMessage{"PreToolUse": json.RawMessage(`[{"hooks":[{"command":"lint"}]}]`)},
+		Permissions: config.Permissions{
+			Allow: []string{"Bash(git *)"},
+			// no deny rules
+		},
+		ClaudeMD: config.ClaudeMDConfig{
+			Include: []string{"test.md"},
+		},
+		MCP:         map[string]json.RawMessage{"server1": json.RawMessage(`{"url":"http://s1"}`)},
+		Keybindings: map[string]any{"ctrl+s": "save"},
+		Commands:    []string{"review-pr"},
+		// no skills
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	// Plugins: only a@m selected, not b@m or c@local.
+	pluginPicker := m.pickers[SectionPlugins]
+	for _, it := range pluginPicker.items {
+		if it.Key == "a@m" {
+			assert.True(t, it.Selected, "a@m should be selected")
+		}
+		if it.Key == "b@m" {
+			assert.False(t, it.Selected, "b@m should NOT be selected")
+		}
+	}
+
+	// Settings: only "model" selected, not "env".
+	settingsPicker := m.pickers[SectionSettings]
+	for _, it := range settingsPicker.items {
+		if it.Key == "model" {
+			assert.True(t, it.Selected, "model should be selected")
+		}
+		if it.Key == "env" {
+			assert.False(t, it.Selected, "env should NOT be selected")
+		}
+	}
+
+	// Permissions: allow rule selected, deny not.
+	permPicker := m.pickers[SectionPermissions]
+	for _, it := range permPicker.items {
+		if it.Key == "allow:Bash(git *)" {
+			assert.True(t, it.Selected, "allow rule should be selected")
+		}
+		if it.Key == "deny:Bash(rm *)" {
+			assert.False(t, it.Selected, "deny rule should NOT be selected")
+		}
+	}
+
+	// Commands selected, skills not.
+	csPicker := m.pickers[SectionCommandsSkills]
+	for _, it := range csPicker.items {
+		if it.Key == "review-pr" {
+			assert.True(t, it.Selected, "review-pr command should be selected")
+		}
+		if it.Key == "tdd" {
+			assert.False(t, it.Selected, "tdd skill should NOT be selected")
+		}
+	}
+
+	// editMode flag should be set.
+	assert.True(t, m.editMode, "editMode should be true")
+}
+
+func TestNewModel_EditMode_SkipsOverlay(t *testing.T) {
+	scan := fullScan()
+
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m"},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{}, existingCfg, nil)
+
+	// With skipProfiles=false and scan data, overlay would normally show.
+	// But in edit mode, it should be skipped.
+	assert.Equal(t, overlayNone, m.overlayCtx, "overlay should not show in edit mode")
+}
+
+func TestNewModel_EditMode_NilConfig_ShowsOverlay(t *testing.T) {
+	scan := fullScan()
+
+	// No existing config — fresh create.
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{}, nil, nil)
+
+	// Overlay should show for fresh creates.
+	assert.Equal(t, overlayConfigStyle, m.overlayCtx, "overlay should show for fresh creates")
+}
+
+func TestNewModel_EditMode_RestoresProfiles(t *testing.T) {
+	scan := fullScan()
+
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m", "b@m"},
+		Forked:   []string{"c@local"},
+		Settings: map[string]any{"model": "opus", "env": "prod"},
+	}
+
+	existingProfs := map[string]profiles.Profile{
+		"work": {
+			Plugins: profiles.ProfilePlugins{
+				Remove: []string{"b@m"},
+			},
+			Settings: map[string]any{"debug": true},
+		},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, existingProfs)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	// useProfiles should be true.
+	assert.True(t, m.useProfiles, "useProfiles should be true")
+
+	// Profile "work" should exist.
+	require.Contains(t, m.profilePickers, "work", "work profile should exist")
+
+	// Check profile plugin selections: a@m yes, b@m no (removed), c@local yes.
+	workPlugins := m.profilePickers["work"][SectionPlugins]
+	for _, it := range workPlugins.items {
+		if it.Key == "a@m" {
+			assert.True(t, it.Selected, "work profile: a@m should be selected")
+		}
+		if it.Key == "b@m" {
+			assert.False(t, it.Selected, "work profile: b@m should NOT be selected (removed)")
+		}
+		if it.Key == "c@local" {
+			assert.True(t, it.Selected, "work profile: c@local should be selected")
+		}
+	}
+
+	// Profile plugin diff should be stored.
+	require.Contains(t, m.profilePluginDiffs, "work")
+	assert.True(t, m.profilePluginDiffs["work"].removes["b@m"], "b@m should be in profile removes")
+}
+
+func TestBuildInitOptions_EditMode(t *testing.T) {
+	scan := fullScan()
+
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m"},
+		Settings: map[string]any{"model": "opus"},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	opts := m.buildInitOptions()
+
+	// Only a@m selected, so IncludePlugins should contain just "a@m".
+	require.NotNil(t, opts.IncludePlugins, "IncludePlugins should not be nil when subset selected")
+	assert.Contains(t, opts.IncludePlugins, "a@m")
+	assert.NotContains(t, opts.IncludePlugins, "b@m")
+
+	// Settings: only "model" selected.
+	assert.True(t, opts.IncludeSettings)
+	require.NotNil(t, opts.SettingsFilter)
+	assert.Contains(t, opts.SettingsFilter, "model")
+	assert.NotContains(t, opts.SettingsFilter, "env")
 }

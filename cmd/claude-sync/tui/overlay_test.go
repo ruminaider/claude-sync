@@ -123,7 +123,7 @@ func TestNewTextInputOverlay(t *testing.T) {
 }
 
 func TestNewSummaryOverlay(t *testing.T) {
-	o := NewSummaryOverlay("Summary", "body text")
+	o := NewSummaryOverlay("Summary", "body text", "Initialize")
 	assert.True(t, o.Active())
 	assert.Equal(t, OverlaySummary, o.overlayType)
 	assert.Equal(t, 1, o.cursor) // defaults to Initialize

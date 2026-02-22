@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -51,6 +52,10 @@ type Model struct {
 	syncDir    string
 	remoteURL  string
 
+	// Edit mode: true when editing an existing config.
+	editMode       bool
+	existingConfig *config.Config
+
 	// User selections per section for base config.
 	pickers map[Section]Picker // for plugins, settings, permissions, mcp, hooks, keybindings
 	preview Preview            // for CLAUDE.md
@@ -83,8 +88,9 @@ type Model struct {
 	profilePluginDiffs map[string]*pluginDiff
 
 	// Discovered MCP servers from project-level .mcp.json files.
-	discoveredMCP map[string]json.RawMessage // server name → config
-	mcpSources    map[string]string          // server name → shortened source path
+	discoveredMCP  map[string]json.RawMessage // server name → config
+	mcpSources     map[string]string          // server name → shortened source path
+	mcpPluginKeys  map[string]string          // MCP server name → plugin key (for plugin-provided servers)
 
 	// Discovered commands/skills from project-level .claude/ directories.
 	discoveredCmdSkills []cmdskill.Item
@@ -94,13 +100,19 @@ type Model struct {
 }
 
 // NewModel creates the root TUI model from scan results.
-func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL string, skipProfiles bool, skip SkipFlags) Model {
+// If existingConfig is non-nil, the TUI enters edit mode: selections are
+// pre-populated from the config, the initial overlay is skipped, and profiles
+// are restored from existingProfiles.
+func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL string, skipProfiles bool, skip SkipFlags,
+	existingConfig *config.Config, existingProfiles map[string]profiles.Profile) Model {
 	m := Model{
-		scanResult:      scan,
-		claudeDir:       claudeDir,
-		syncDir:         syncDir,
-		remoteURL:       remoteURL,
-		pickers:         make(map[Section]Picker),
+		scanResult:         scan,
+		claudeDir:          claudeDir,
+		syncDir:            syncDir,
+		remoteURL:          remoteURL,
+		editMode:           existingConfig != nil,
+		existingConfig:     existingConfig,
+		pickers:            make(map[Section]Picker),
 		profilePickers:     make(map[string]map[Section]Picker),
 		profilePreviews:    make(map[string]Preview),
 		profilePluginDiffs: make(map[string]*pluginDiff),
@@ -110,6 +122,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		skipFlags:          skip,
 		discoveredMCP:      make(map[string]json.RawMessage),
 		mcpSources:         make(map[string]string),
+		mcpPluginKeys:      make(map[string]string),
 	}
 
 	// Build pickers for each section from scan data.
@@ -118,6 +131,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	m.pickers[SectionPermissions] = NewPicker(PermissionPickerItems(scan.Permissions))
 	mcpPicker := NewPicker(MCPPickerItems(scan.MCP, "~/.claude/.mcp.json"))
 	mcpPicker.SetSearchAction(true)
+	mcpPicker.searching = true
 	m.pickers[SectionMCP] = mcpPicker
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(scan.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(scan.Keybindings))
@@ -125,6 +139,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	// Build Commands & Skills picker.
 	csPicker := NewPicker(CommandsSkillsPickerItems(scan.CommandsSkills))
 	csPicker.SetSearchAction(true)
+	csPicker.searching = true
 	csPicker.CollapseReadOnly = true
 	csPicker.autoCollapseReadOnly()
 	if scan.CommandsSkills != nil {
@@ -139,6 +154,12 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	// Build CLAUDE.md preview.
 	previewSections := ClaudeMDPreviewSections(scan.ClaudeMDSections, "~/.claude/CLAUDE.md")
 	m.preview = NewPreview(previewSections)
+	m.preview.searching = true
+
+	// In edit mode, pre-populate selections from existing config.
+	if existingConfig != nil {
+		m.applyExistingConfig(existingConfig, existingProfiles)
+	}
 
 	// Apply skip flags: deselect everything for skipped sections.
 	if skip.Plugins {
@@ -183,8 +204,8 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	// Initialize status bar.
 	m.statusBar = NewStatusBar()
 
-	// If not skipping profiles, show the config style choice overlay on first render.
-	if !skipProfiles && hasScanData(scan) {
+	// Show the config style choice overlay only for fresh creates (not edit mode).
+	if !skipProfiles && hasScanData(scan) && existingConfig == nil {
 		m.overlay = NewChoiceOverlay("Configuration style", []string{
 			"Simple (single config)",
 			"With profiles (e.g., work, personal)",
@@ -192,11 +213,19 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		m.overlayCtx = overlayConfigStyle
 	}
 
+	// In edit mode, restore profiles after tab bar is initialized.
+	if existingConfig != nil && len(existingProfiles) > 0 {
+		m.restoreProfiles(existingConfig, existingProfiles)
+	}
+
 	return m
 }
 
-// Init satisfies tea.Model.
-func (m Model) Init() tea.Cmd { return nil }
+// Init satisfies tea.Model. Triggers auto-search for CLAUDE.md, MCP, and
+// Commands/Skills so discovered items appear without requiring a manual button press.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(SearchClaudeMD(), SearchMCPConfigs(), SearchCommandsSkills())
+}
 
 // Update satisfies tea.Model. Routes messages to the correct child component.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -671,21 +700,21 @@ func helperText(section Section, isProfile bool) (string, string) {
 	if isProfile {
 		switch section {
 		case SectionPlugins:
-			line1 = "● = inherited from base. Toggle to add or remove."
+			line1 = "● = from base. Toggle to add or remove."
 		case SectionSettings:
-			line1 = "Override base settings for this profile."
+			line1 = "● = from base. Override settings for this profile."
 		case SectionClaudeMD:
-			line1 = "Add or exclude CLAUDE.md sections for this profile."
+			line1 = "● = from base. Add or exclude sections for this profile."
 		case SectionPermissions:
-			line1 = "Adjust permission rules for this profile."
+			line1 = "● = from base. Adjust rules for this profile."
 		case SectionMCP:
-			line1 = "Add or remove MCP servers for this profile."
+			line1 = "● = from base. Add or remove servers for this profile."
 		case SectionKeybindings:
-			line1 = "Override keybindings for this profile."
+			line1 = "● = from base. Override keybindings for this profile."
 		case SectionHooks:
-			line1 = "Add or remove hooks for this profile."
+			line1 = "● = from base. Add or remove hooks for this profile."
 		case SectionCommandsSkills:
-			line1 = "Add or remove commands and skills for this profile."
+			line1 = "● = from base. Add or remove for this profile."
 		default:
 			line1 = "Configure this section."
 		}
@@ -809,6 +838,10 @@ func (m *Model) distributeSize() {
 // --- Sync helpers ---
 
 func (m *Model) syncSidebarCounts() {
+	// Sync plugin-provided MCP read-only state whenever counts are refreshed,
+	// since this runs after every picker update (including plugin toggles).
+	m.syncMCPPluginState()
+
 	for _, sec := range AllSections {
 		if sec == SectionClaudeMD {
 			preview := m.currentPreview()
@@ -943,8 +976,18 @@ func (m *Model) createProfile(name string) {
 			items := PluginPickerItemsForProfile(m.scanResult, baseSelected, baseSelected)
 			pm[sec] = NewPicker(items)
 		} else {
-			// Copy base picker items.
+			// Copy base picker items and mark selectable ones as inherited.
 			items := copyPickerItems(basePicker)
+			for i := range items {
+				if isSelectableItem(items[i]) && items[i].Selected {
+					items[i].IsBase = true
+					if items[i].Tag != "" {
+						items[i].Tag = "● " + items[i].Tag
+					} else {
+						items[i].Tag = "●"
+					}
+				}
+			}
 			p := NewPicker(items)
 			if basePicker.hasSearchAction {
 				p.SetSearchAction(true)
@@ -980,10 +1023,11 @@ func (m *Model) createProfile(name string) {
 	m.activeTab = name
 	m.useProfiles = true
 
-	// Set tag color on the plugin picker to match the profile's accent.
-	if plugPicker, ok := pm[SectionPlugins]; ok {
-		plugPicker.SetTagColor(m.tabBar.ActiveTheme().Accent)
-		pm[SectionPlugins] = plugPicker
+	// Set tag color on all profile pickers to match the profile's accent.
+	accent := m.tabBar.ActiveTheme().Accent
+	for sec, p := range pm {
+		p.SetTagColor(accent)
+		pm[sec] = p
 	}
 
 	m.syncSidebarCounts()
@@ -1057,6 +1101,7 @@ func (m *Model) resetToDefaults() {
 	// Clear discovered MCP servers, project commands/skills, and profile diffs on reset.
 	m.discoveredMCP = make(map[string]json.RawMessage)
 	m.mcpSources = make(map[string]string)
+	m.mcpPluginKeys = make(map[string]string)
 	m.discoveredCmdSkills = nil
 	m.profilePluginDiffs = make(map[string]*pluginDiff)
 
@@ -1129,7 +1174,13 @@ func (m Model) triggerSave() (tea.Model, tea.Cmd) {
 	}
 
 	body := FormatSummaryBody(stats, profileNames)
-	m.overlay = NewSummaryOverlay("Initialize sync config", body)
+	actionLabel := "Initialize"
+	title := "Initialize sync config"
+	if m.editMode {
+		actionLabel = "Update"
+		title = "Update sync config"
+	}
+	m.overlay = NewSummaryOverlay(title, body, actionLabel)
 	m.overlayCtx = overlaySaveSummary
 	return m, nil
 }
@@ -1188,10 +1239,17 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 	}
 
 	// MCP: map values from scanResult and discoveredMCP. Empty map = none.
+	// Skip plugin-provided servers whose plugin is already selected (they come
+	// with the plugin). SelectedKeys() already excludes IsReadOnly items, but
+	// we guard explicitly in case the state is stale.
+	selectedPlugins := toSet(m.pickers[SectionPlugins].SelectedKeys())
 	mcpKeys := m.pickers[SectionMCP].SelectedKeys()
 	if len(mcpKeys) > 0 {
 		mcp := make(map[string]json.RawMessage)
 		for _, k := range mcpKeys {
+			if pluginKey, ok := m.mcpPluginKeys[k]; ok && selectedPlugins[pluginKey] {
+				continue
+			}
 			if raw, ok := m.scanResult.MCP[k]; ok {
 				mcp[k] = raw
 			} else if raw, ok := m.discoveredMCP[k]; ok {
@@ -1468,10 +1526,17 @@ func (m Model) handleSearchDone(msg SearchDoneMsg) Model {
 }
 
 func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
-	// Clear searching state.
+	// Clear searching state on base and all profile pickers.
 	if p, ok := m.pickers[SectionMCP]; ok {
 		p.searching = false
 		m.pickers[SectionMCP] = p
+	}
+	for name, pm := range m.profilePickers {
+		if p, ok := pm[SectionMCP]; ok {
+			p.searching = false
+			pm[SectionMCP] = p
+		}
+		m.profilePickers[name] = pm
 	}
 
 	if len(msg.Servers) == 0 {
@@ -1531,11 +1596,19 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 			groups = append(groups, group{source: src})
 		}
 
-		groups[idx].items = append(groups[idx].items, PickerItem{
+		// Detect if this server comes from a plugin directory.
+		item := PickerItem{
 			Key:      name,
 			Display:  name,
 			Selected: true,
-		})
+		}
+		if pluginKey := m.pluginKeyFromSource(src); pluginKey != "" {
+			m.mcpPluginKeys[name] = pluginKey
+			pluginName := filepath.Base(src)
+			item.Tag = "via " + pluginName
+		}
+
+		groups[idx].items = append(groups[idx].items, item)
 	}
 
 	// Build newItems: header + items per group.
@@ -1567,16 +1640,26 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 		m.profilePickers[name] = pm
 	}
 
+	// Apply read-only state for plugin-provided servers.
+	m.syncMCPPluginState()
+
 	m.syncSidebarCounts()
 	m.syncStatusBar()
 	return m
 }
 
 func (m Model) handleCmdSkillSearchDone(msg CmdSkillSearchDoneMsg) Model {
-	// Clear searching state.
+	// Clear searching state on base and all profile pickers.
 	if p, ok := m.pickers[SectionCommandsSkills]; ok {
 		p.searching = false
 		m.pickers[SectionCommandsSkills] = p
+	}
+	for name, pm := range m.profilePickers {
+		if p, ok := pm[SectionCommandsSkills]; ok {
+			p.searching = false
+			pm[SectionCommandsSkills] = p
+		}
+		m.profilePickers[name] = pm
 	}
 
 	if len(msg.Items) == 0 {
@@ -1668,6 +1751,343 @@ func sortPickerItems(items []PickerItem) {
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Key < items[j].Key
 	})
+}
+
+// --- Plugin-aware MCP helpers ---
+
+// pluginKeyFromSource returns the full plugin key if the given shortened source
+// path is under ~/.claude/plugins/, or "" otherwise. It matches the directory
+// name against scanResult.PluginKeys entries (format: name@marketplace).
+func (m Model) pluginKeyFromSource(source string) string {
+	if !strings.HasPrefix(source, "~/.claude/plugins/") {
+		return ""
+	}
+	pluginName := filepath.Base(source)
+	for _, key := range m.scanResult.PluginKeys {
+		if idx := strings.Index(key, "@"); idx >= 0 && key[:idx] == pluginName {
+			return key
+		}
+	}
+	return ""
+}
+
+// syncMCPPluginState syncs read-only + selected state for plugin-provided MCP
+// servers based on the current tab's plugin selections. When a plugin is selected,
+// its MCP servers are read-only and auto-selected. When deselected, they become
+// normal toggleable items.
+func (m *Model) syncMCPPluginState() {
+	if len(m.mcpPluginKeys) == 0 {
+		return
+	}
+
+	selectedPlugins := toSet(m.pickers[SectionPlugins].SelectedKeys())
+	if m.activeTab != "Base" {
+		if pm, ok := m.profilePickers[m.activeTab]; ok {
+			selectedPlugins = toSet(pm[SectionPlugins].SelectedKeys())
+		}
+	}
+
+	// Update the MCP picker for the current tab.
+	var mcpPicker *Picker
+	if m.activeTab != "Base" {
+		if pm, ok := m.profilePickers[m.activeTab]; ok {
+			if p, ok := pm[SectionMCP]; ok {
+				mcpPicker = &p
+			}
+		}
+	} else {
+		if p, ok := m.pickers[SectionMCP]; ok {
+			mcpPicker = &p
+		}
+	}
+	if mcpPicker == nil {
+		return
+	}
+
+	for i, it := range mcpPicker.items {
+		pluginKey, isPluginMCP := m.mcpPluginKeys[it.Key]
+		if !isPluginMCP {
+			continue
+		}
+		if selectedPlugins[pluginKey] {
+			mcpPicker.items[i].IsReadOnly = true
+			mcpPicker.items[i].Selected = true
+		} else {
+			mcpPicker.items[i].IsReadOnly = false
+		}
+	}
+
+	// Write back the modified picker.
+	if m.activeTab != "Base" {
+		if pm, ok := m.profilePickers[m.activeTab]; ok {
+			pm[SectionMCP] = *mcpPicker
+			m.profilePickers[m.activeTab] = pm
+		}
+	} else {
+		m.pickers[SectionMCP] = *mcpPicker
+	}
+}
+
+// --- Edit mode helpers ---
+
+// applyPickerSelection sets picker items to match a selected key set.
+// Items whose Key is in selectedSet are selected; others are deselected.
+func applyPickerSelection(p *Picker, selectedSet map[string]bool) {
+	for i, it := range p.items {
+		if isSelectableItem(it) {
+			p.items[i].Selected = selectedSet[it.Key]
+		}
+	}
+	p.syncSelectAll()
+}
+
+// applyExistingConfig pre-populates base picker selections from an existing config.
+func (m *Model) applyExistingConfig(cfg *config.Config, existingProfiles map[string]profiles.Profile) {
+	// Plugins: select only those in the existing config.
+	pluginSet := toSet(cfg.AllPluginKeys())
+	applyPickerSelection(pickerPtr(m.pickers, SectionPlugins), pluginSet)
+
+	// Settings: select only those in the existing config.
+	settingsSet := mapKeys(cfg.Settings)
+	applyPickerSelection(pickerPtr(m.pickers, SectionSettings), settingsSet)
+
+	// Permissions: build key set from allow/deny prefixes.
+	permSet := make(map[string]bool)
+	for _, rule := range cfg.Permissions.Allow {
+		permSet["allow:"+rule] = true
+	}
+	for _, rule := range cfg.Permissions.Deny {
+		permSet["deny:"+rule] = true
+	}
+	applyPickerSelection(pickerPtr(m.pickers, SectionPermissions), permSet)
+
+	// MCP: select only those in the existing config.
+	mcpSet := make(map[string]bool)
+	for k := range cfg.MCP {
+		mcpSet[k] = true
+	}
+	applyPickerSelection(pickerPtr(m.pickers, SectionMCP), mcpSet)
+
+	// Hooks: select only those in the existing config.
+	hookSet := make(map[string]bool)
+	for k := range cfg.Hooks {
+		hookSet[k] = true
+	}
+	applyPickerSelection(pickerPtr(m.pickers, SectionHooks), hookSet)
+
+	// Keybindings: select only if the existing config has keybindings.
+	kbSet := mapKeys(cfg.Keybindings)
+	applyPickerSelection(pickerPtr(m.pickers, SectionKeybindings), kbSet)
+
+	// CLAUDE.md: select only fragments in the existing config's include list.
+	if len(cfg.ClaudeMD.Include) > 0 {
+		fragSet := toSet(cfg.ClaudeMD.Include)
+		for i, sec := range m.preview.sections {
+			m.preview.selected[i] = fragSet[sec.FragmentKey]
+		}
+	} else {
+		// No fragments in config = none selected.
+		for i := range m.preview.sections {
+			m.preview.selected[i] = false
+		}
+	}
+
+	// Commands & Skills: select only those in the existing config.
+	csSet := make(map[string]bool)
+	for _, k := range cfg.Commands {
+		csSet[k] = true
+	}
+	for _, k := range cfg.Skills {
+		csSet[k] = true
+	}
+	applyPickerSelection(pickerPtr(m.pickers, SectionCommandsSkills), csSet)
+}
+
+// restoreProfiles creates profile tabs and applies profile-specific selections.
+func (m *Model) restoreProfiles(cfg *config.Config, existingProfiles map[string]profiles.Profile) {
+	m.useProfiles = true
+
+	// Sort profile names for deterministic order.
+	var names []string
+	for name := range existingProfiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		profile := existingProfiles[name]
+
+		// createProfile copies base selections into the profile.
+		m.createProfile(name)
+
+		pm := m.profilePickers[name]
+
+		// Plugins: apply add/remove diffs to base selection.
+		basePlugins := toSet(cfg.AllPluginKeys())
+		effectivePlugins := make(map[string]bool)
+		for k := range basePlugins {
+			effectivePlugins[k] = true
+		}
+		for _, k := range profile.Plugins.Add {
+			effectivePlugins[k] = true
+		}
+		for _, k := range profile.Plugins.Remove {
+			delete(effectivePlugins, k)
+		}
+		applyPickerSelection(pickerPtr(pm, SectionPlugins), effectivePlugins)
+		pm[SectionPlugins] = *pickerPtr(pm, SectionPlugins)
+
+		// Store the plugin diff so it persists across tab switches.
+		diff := &pluginDiff{
+			adds:    make(map[string]bool),
+			removes: make(map[string]bool),
+		}
+		for _, k := range profile.Plugins.Add {
+			diff.adds[k] = true
+		}
+		for _, k := range profile.Plugins.Remove {
+			diff.removes[k] = true
+		}
+		m.profilePluginDiffs[name] = diff
+
+		// Settings: base settings + profile overrides.
+		baseSettings := mapKeys(cfg.Settings)
+		effectiveSettings := make(map[string]bool)
+		for k := range baseSettings {
+			effectiveSettings[k] = true
+		}
+		for k := range profile.Settings {
+			effectiveSettings[k] = true
+		}
+		applyPickerSelection(pickerPtr(pm, SectionSettings), effectiveSettings)
+
+		// Permissions: base + profile additions.
+		basePerm := make(map[string]bool)
+		for _, rule := range cfg.Permissions.Allow {
+			basePerm["allow:"+rule] = true
+		}
+		for _, rule := range cfg.Permissions.Deny {
+			basePerm["deny:"+rule] = true
+		}
+		effectivePerm := make(map[string]bool)
+		for k := range basePerm {
+			effectivePerm[k] = true
+		}
+		for _, rule := range profile.Permissions.AddAllow {
+			effectivePerm["allow:"+rule] = true
+		}
+		for _, rule := range profile.Permissions.AddDeny {
+			effectivePerm["deny:"+rule] = true
+		}
+		applyPickerSelection(pickerPtr(pm, SectionPermissions), effectivePerm)
+
+		// MCP: base + add - remove.
+		baseMCP := make(map[string]bool)
+		for k := range cfg.MCP {
+			baseMCP[k] = true
+		}
+		effectiveMCP := make(map[string]bool)
+		for k := range baseMCP {
+			effectiveMCP[k] = true
+		}
+		for k := range profile.MCP.Add {
+			effectiveMCP[k] = true
+		}
+		for _, k := range profile.MCP.Remove {
+			delete(effectiveMCP, k)
+		}
+		applyPickerSelection(pickerPtr(pm, SectionMCP), effectiveMCP)
+
+		// Hooks: base + add - remove.
+		baseHooks := make(map[string]bool)
+		for k := range cfg.Hooks {
+			baseHooks[k] = true
+		}
+		effectiveHooks := make(map[string]bool)
+		for k := range baseHooks {
+			effectiveHooks[k] = true
+		}
+		for k := range profile.Hooks.Add {
+			effectiveHooks[k] = true
+		}
+		for _, k := range profile.Hooks.Remove {
+			delete(effectiveHooks, k)
+		}
+		applyPickerSelection(pickerPtr(pm, SectionHooks), effectiveHooks)
+
+		// Keybindings: if profile has override, keep base selection; otherwise inherit base.
+		if len(profile.Keybindings.Override) > 0 {
+			kbSet := mapKeys(profile.Keybindings.Override)
+			applyPickerSelection(pickerPtr(pm, SectionKeybindings), kbSet)
+		}
+
+		// CLAUDE.md: base + add - remove.
+		if pp, ok := m.profilePreviews[name]; ok {
+			baseFrags := toSet(cfg.ClaudeMD.Include)
+			effectiveFrags := make(map[string]bool)
+			for k := range baseFrags {
+				effectiveFrags[k] = true
+			}
+			for _, k := range profile.ClaudeMD.Add {
+				effectiveFrags[k] = true
+			}
+			for _, k := range profile.ClaudeMD.Remove {
+				delete(effectiveFrags, k)
+			}
+			for i, sec := range pp.sections {
+				pp.selected[i] = effectiveFrags[sec.FragmentKey]
+			}
+			m.profilePreviews[name] = pp
+		}
+
+		// Commands & Skills: base + add - remove.
+		baseCS := make(map[string]bool)
+		for _, k := range cfg.Commands {
+			baseCS[k] = true
+		}
+		for _, k := range cfg.Skills {
+			baseCS[k] = true
+		}
+		effectiveCS := make(map[string]bool)
+		for k := range baseCS {
+			effectiveCS[k] = true
+		}
+		for _, k := range profile.Commands.Add {
+			effectiveCS[k] = true
+		}
+		for _, k := range profile.Commands.Remove {
+			delete(effectiveCS, k)
+		}
+		for _, k := range profile.Skills.Add {
+			effectiveCS[k] = true
+		}
+		for _, k := range profile.Skills.Remove {
+			delete(effectiveCS, k)
+		}
+		applyPickerSelection(pickerPtr(pm, SectionCommandsSkills), effectiveCS)
+
+		m.profilePickers[name] = pm
+	}
+
+	// Switch back to Base tab after restoring all profiles.
+	m.activeTab = "Base"
+	m.tabBar.SetActive(0)
+	m.syncSidebarCounts()
+}
+
+// pickerPtr returns a pointer to a picker in a map, allowing in-place mutation.
+func pickerPtr(m map[Section]Picker, sec Section) *Picker {
+	p := m[sec]
+	return &p
+}
+
+// mapKeys returns a set of keys from a map.
+func mapKeys(m map[string]any) map[string]bool {
+	s := make(map[string]bool, len(m))
+	for k := range m {
+		s[k] = true
+	}
+	return s
 }
 
 // --- Utility functions ---

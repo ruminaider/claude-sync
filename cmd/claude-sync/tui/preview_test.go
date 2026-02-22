@@ -169,3 +169,124 @@ func TestPreviewSetSize_Small(t *testing.T) {
 	// listWidth should be at least 20
 	assert.GreaterOrEqual(t, p.listWidth, 20)
 }
+
+func TestPreviewRebuildRows_SingleSource(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "(preamble)", FragmentKey: "_preamble", Source: "~/.claude/CLAUDE.md"},
+		{Header: "Git Commits", FragmentKey: "git-commits", Source: "~/.claude/CLAUDE.md"},
+	}
+	p := NewPreview(sections)
+
+	// Should have 1 header + 2 section rows.
+	require.Len(t, p.rows, 3)
+	assert.True(t, p.rows[0].isHeader)
+	assert.Equal(t, "~/.claude/CLAUDE.md", p.rows[0].source)
+	assert.Equal(t, 2, p.rows[0].count)
+	assert.False(t, p.rows[1].isHeader)
+	assert.Equal(t, 0, p.rows[1].sectionIdx)
+	assert.False(t, p.rows[2].isHeader)
+	assert.Equal(t, 1, p.rows[2].sectionIdx)
+}
+
+func TestPreviewRebuildRows_MultipleSources(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "(preamble)", FragmentKey: "_preamble", Source: "~/.claude/CLAUDE.md"},
+		{Header: "Git Commits", FragmentKey: "git-commits", Source: "~/.claude/CLAUDE.md"},
+		{Header: "API Keys", FragmentKey: "api-keys", Source: "~/project/CLAUDE.md"},
+	}
+	p := NewPreview(sections)
+
+	// Should have 2 headers + 3 section rows = 5 rows.
+	require.Len(t, p.rows, 5)
+
+	// First group header.
+	assert.True(t, p.rows[0].isHeader)
+	assert.Equal(t, "~/.claude/CLAUDE.md", p.rows[0].source)
+	assert.Equal(t, 2, p.rows[0].count)
+	// First group sections.
+	assert.Equal(t, 0, p.rows[1].sectionIdx)
+	assert.Equal(t, 1, p.rows[2].sectionIdx)
+	// Second group header.
+	assert.True(t, p.rows[3].isHeader)
+	assert.Equal(t, "~/project/CLAUDE.md", p.rows[3].source)
+	assert.Equal(t, 1, p.rows[3].count)
+	// Second group section.
+	assert.Equal(t, 2, p.rows[4].sectionIdx)
+}
+
+func TestPreviewCollapse(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "(preamble)", Source: "a.md"},
+		{Header: "Git Commits", Source: "a.md"},
+		{Header: "API Keys", Source: "b.md"},
+	}
+	p := NewPreview(sections)
+	require.Len(t, p.rows, 5) // 2 headers + 3 sections
+
+	// Collapse first group.
+	p.toggleCollapse("a.md")
+
+	// Should have 2 headers + 1 section (from b.md) = 3 rows.
+	require.Len(t, p.rows, 3)
+	assert.True(t, p.rows[0].isHeader)
+	assert.Equal(t, "a.md", p.rows[0].source)
+	assert.Equal(t, 2, p.rows[0].count) // count still 2 even when collapsed
+	assert.True(t, p.rows[1].isHeader)
+	assert.Equal(t, "b.md", p.rows[1].source)
+	assert.Equal(t, 2, p.rows[2].sectionIdx) // API Keys
+
+	// Expand again.
+	p.toggleCollapse("a.md")
+	require.Len(t, p.rows, 5)
+}
+
+func TestPreviewAddSections_RebuildRows(t *testing.T) {
+	initial := []PreviewSection{
+		{Header: "(preamble)", FragmentKey: "_preamble", Source: "a.md"},
+	}
+	p := NewPreview(initial)
+	require.Len(t, p.rows, 2) // 1 header + 1 section
+
+	p.AddSections([]PreviewSection{
+		{Header: "New", FragmentKey: "new", Source: "b.md"},
+	})
+
+	// Now 2 headers + 2 sections = 4 rows.
+	require.Len(t, p.rows, 4)
+	assert.Equal(t, "a.md", p.rows[0].source)
+	assert.Equal(t, "b.md", p.rows[2].source)
+}
+
+func TestPreviewSelectAllNone(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "A", FragmentKey: "a", Source: "a.md"},
+		{Header: "B", FragmentKey: "b", Source: "b.md"},
+	}
+	p := NewPreview(sections)
+
+	// Collapse one group then select none — should still deselect all.
+	p.toggleCollapse("a.md")
+
+	for i := range p.sections {
+		p.selected[i] = false
+	}
+	assert.Equal(t, 0, p.SelectedCount())
+
+	// Select all — should select collapsed sections too.
+	for i := range p.sections {
+		p.selected[i] = true
+	}
+	assert.Equal(t, 2, p.SelectedCount())
+}
+
+func TestPreviewRowCursorOnSearchAction(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "A", FragmentKey: "a", Source: "a.md"},
+	}
+	p := NewPreview(sections)
+	require.Len(t, p.rows, 2) // 1 header + 1 section
+
+	// rowCursor starts at 0 (header). Move to search action = len(rows) = 2.
+	p.rowCursor = len(p.rows)
+	p.syncViewport() // should not panic
+}

@@ -37,6 +37,7 @@ type Overlay struct {
 	scrollOffset int      // scroll position (for Help)
 	scrollLines  []string // pre-rendered content lines (for Help)
 	height       int      // available overlay height (for Help)
+	actionLabel  string   // "Initialize" or "Update" — used in viewSummary
 }
 
 // NewConfirmOverlay creates a confirmation dialog with Cancel/OK buttons.
@@ -65,14 +66,16 @@ func NewTextInputOverlay(title, placeholder string) Overlay {
 	}
 }
 
-// NewSummaryOverlay creates a summary dialog with Cancel/Initialize buttons.
-func NewSummaryOverlay(title, body string) Overlay {
+// NewSummaryOverlay creates a summary dialog with Cancel/action buttons.
+// The actionLabel controls the confirm button text (e.g. "Initialize" or "Update").
+func NewSummaryOverlay(title, body, actionLabel string) Overlay {
 	return Overlay{
 		overlayType: OverlaySummary,
 		title:       title,
 		message:     body,
-		cursor:      1, // default to Initialize
+		cursor:      1, // default to action button
 		active:      true,
+		actionLabel: actionLabel,
 	}
 }
 
@@ -382,7 +385,11 @@ func (o Overlay) viewSummary() string {
 	b.WriteString("\n\n")
 	b.WriteString(o.message)
 	b.WriteString("\n\n")
-	b.WriteString(o.renderButtons("Cancel", "Initialize"))
+	label := o.actionLabel
+	if label == "" {
+		label = "Initialize"
+	}
+	b.WriteString(o.renderButtons("Cancel", label))
 	return b.String()
 }
 
