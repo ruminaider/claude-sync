@@ -326,11 +326,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			if m.focusZone == FocusContent || m.focusZone == FocusPreview {
-				// If the active picker has a filter, let it handle Esc first
-				// (clears filter). Only go to sidebar if filter was already empty.
+				// If the active picker has a filter or chip filter, let it handle Esc first
+				// (clears text → chips → sidebar). Only go to sidebar if both were empty.
 				if m.activeSection != SectionClaudeMD {
 					p := m.currentPicker()
-					if p.filterText != "" {
+					if p.filterText != "" || p.hasActiveChipFilter() {
 						var escCmds []tea.Cmd
 						return m.updatePicker(msg, &escCmds)
 					}
@@ -747,11 +747,11 @@ func helperText(section Section, isProfile bool) (string, string) {
 	case SectionClaudeMD:
 		line2 = "Space: toggle \u00b7 a: all \u00b7 n: none \u00b7 →: preview content"
 	case SectionCommandsSkills:
-		line2 = "Space: toggle \u00b7 Ctrl+A: all \u00b7 Ctrl+N: none \u00b7 →: preview \u00b7 type to filter"
+		line2 = "Space: toggle \u00b7 Ctrl+A: all \u00b7 Ctrl+N: none \u00b7 →: preview \u00b7 ↑: filter chips \u00b7 type to filter"
 	case SectionKeybindings:
-		line2 = "Space: toggle \u00b7 type to filter"
+		line2 = "Space: toggle \u00b7 ↑: filter chips \u00b7 type to filter"
 	default:
-		line2 = "Space: toggle \u00b7 Ctrl+A: all \u00b7 Ctrl+N: none \u00b7 type to filter"
+		line2 = "Space: toggle \u00b7 Ctrl+A: all \u00b7 Ctrl+N: none \u00b7 ↑: filter chips \u00b7 type to filter"
 	}
 
 	return line1, line2
@@ -1103,16 +1103,18 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 		}
 	}
 
-	// CLAUDE.md fragments.
-	fragKeys := m.preview.SelectedFragmentKeys()
+	// CLAUDE.md fragments: global fragments control import; project fragments are
+	// stored separately for edit-mode restoration.
+	fragKeys := m.preview.GlobalSelectedFragmentKeys()
 	if len(fragKeys) > 0 {
 		opts.ImportClaudeMD = true
-		if len(fragKeys) == m.preview.TotalCount() {
+		if len(fragKeys) == m.preview.GlobalTotalCount() {
 			opts.ClaudeMDFragments = nil // nil = all
 		} else {
 			opts.ClaudeMDFragments = fragKeys
 		}
 	}
+	opts.ProjectClaudeMDFragments = m.preview.ProjectSelectedFragmentKeys()
 
 	// MCP: map values from scanResult and discoveredMCP. Empty map = none.
 	// Skip plugin-provided servers whose plugin is already selected (they come
@@ -1211,12 +1213,24 @@ func (m Model) handleSearchDone(msg SearchDoneMsg) Model {
 
 		previewSections := ClaudeMDPreviewSections(sections, shortenPath(path))
 		m.preview.AddSections(previewSections)
+	}
 
-		// Also add to profile previews.
-		for name, pp := range m.profilePreviews {
-			pp.AddSections(previewSections)
-			m.profilePreviews[name] = pp
+	// In edit mode, respect the saved config: deselect discovered sections
+	// that aren't in the existing config's include list.
+	if m.editMode && m.existingConfig != nil {
+		savedSet := toSet(m.existingConfig.ClaudeMD.Include)
+		for i, sec := range m.preview.sections {
+			if strings.Contains(sec.FragmentKey, "::") {
+				// Project fragment: only select if saved in config.
+				m.preview.selected[i] = savedSet[sec.FragmentKey]
+			}
 		}
+	}
+
+	// Rebuild profile previews from base + stored diffs so that
+	// newly discovered sections inherit the correct selection state.
+	for name := range m.profilePreviews {
+		m.rebuildProfileSection(name, SectionClaudeMD)
 	}
 
 	m.syncSidebarCounts()
@@ -1296,15 +1310,20 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 		}
 
 		// Detect if this server comes from a plugin directory.
+		// In edit mode, respect the saved config selection instead of defaulting to true.
+		selected := true
+		if m.editMode && m.existingConfig != nil {
+			_, selected = m.existingConfig.MCP[name]
+		}
 		item := PickerItem{
 			Key:      name,
 			Display:  name,
-			Selected: true,
+			Selected: selected,
 		}
 		if pluginKey := m.pluginKeyFromSource(src); pluginKey != "" {
 			m.mcpPluginKeys[name] = pluginKey
 			pluginName := filepath.Base(src)
-			item.Tag = "via " + pluginName
+			item.ProviderTag = "via " + pluginName
 		}
 
 		groups[idx].items = append(groups[idx].items, item)
@@ -1330,13 +1349,10 @@ func (m Model) handleMCPSearchDone(msg MCPSearchDoneMsg) Model {
 		m.pickers[SectionMCP] = p
 	}
 
-	// Add to profile MCP pickers.
-	for name, pm := range m.profilePickers {
-		if p, ok := pm[SectionMCP]; ok {
-			p.AddItems(newItems)
-			pm[SectionMCP] = p
-		}
-		m.profilePickers[name] = pm
+	// Rebuild profile MCP pickers from base + stored diffs so that
+	// newly discovered items inherit the correct selection state.
+	for name := range m.profilePickers {
+		m.rebuildProfileSection(name, SectionMCP)
 	}
 
 	// Apply read-only state for plugin-provided servers.
@@ -1372,6 +1388,18 @@ func (m Model) handleCmdSkillSearchDone(msg CmdSkillSearchDoneMsg) Model {
 	var newItems []PickerItem
 	existingKeys := toSet(m.pickers[SectionCommandsSkills].AllKeys())
 
+	// In edit mode, build a set of saved command/skill keys for selection lookup.
+	var savedCSSet map[string]bool
+	if m.editMode && m.existingConfig != nil {
+		savedCSSet = make(map[string]bool, len(m.existingConfig.Commands)+len(m.existingConfig.Skills))
+		for _, k := range m.existingConfig.Commands {
+			savedCSSet[k] = true
+		}
+		for _, k := range m.existingConfig.Skills {
+			savedCSSet[k] = true
+		}
+	}
+
 	// Group by project.
 	projectGroups := make(map[string][]cmdskill.Item)
 	for _, item := range msg.Items {
@@ -1401,10 +1429,15 @@ func (m Model) handleCmdSkillSearchDone(msg CmdSkillSearchDoneMsg) Model {
 			if item.Type == cmdskill.TypeSkill {
 				typeTag = "[skill]"
 			}
+			// In edit mode, respect the saved config selection.
+			selected := true
+			if savedCSSet != nil {
+				selected = savedCSSet[item.Key()]
+			}
 			newItems = append(newItems, PickerItem{
 				Key:      item.Key(),
 				Display:  item.Name,
-				Selected: true,
+				Selected: selected,
 				Tag:      typeTag,
 			})
 		}
@@ -1426,18 +1459,10 @@ func (m Model) handleCmdSkillSearchDone(msg CmdSkillSearchDoneMsg) Model {
 		m.pickers[SectionCommandsSkills] = p
 	}
 
-	// Add to profile pickers.
-	for name, pm := range m.profilePickers {
-		if p, ok := pm[SectionCommandsSkills]; ok {
-			p.AddItems(newItems)
-			for _, item := range msg.Items {
-				if p.previewContent != nil {
-					p.previewContent[item.Key()] = item.Content
-				}
-			}
-			pm[SectionCommandsSkills] = p
-		}
-		m.profilePickers[name] = pm
+	// Rebuild profile CommandsSkills pickers from base + stored diffs so that
+	// newly discovered items inherit the correct selection state.
+	for name := range m.profilePickers {
+		m.rebuildProfileSection(name, SectionCommandsSkills)
 	}
 
 	m.syncSidebarCounts()
