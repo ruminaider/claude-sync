@@ -90,12 +90,12 @@ func TestPluginPickerItemsForProfile(t *testing.T) {
 	// Upstream items (a@m and b@m are base-inherited, c@m is not)
 	assert.Equal(t, "a@m", items[2].Key)
 	assert.True(t, items[2].IsBase)
-	assert.Equal(t, "●", items[2].Tag)
+	assert.Empty(t, items[2].Tag)
 	assert.True(t, items[2].Selected)
 
 	assert.Equal(t, "b@m", items[3].Key)
 	assert.True(t, items[3].IsBase)
-	assert.Equal(t, "●", items[3].Tag)
+	assert.Empty(t, items[3].Tag)
 	assert.True(t, items[3].Selected)
 
 	assert.Equal(t, "c@m", items[4].Key)
@@ -130,7 +130,7 @@ func TestPluginPickerItemsForProfile_Deselected(t *testing.T) {
 	// a@m: inherited from base
 	assert.True(t, items[2].Selected)
 	assert.True(t, items[2].IsBase)
-	assert.Equal(t, "●", items[2].Tag)
+	assert.Empty(t, items[2].Tag)
 
 	// b@m: NOT in base, but selected by profile
 	assert.True(t, items[3].Selected)
@@ -648,6 +648,51 @@ func TestPickerSearchAction_WithHeaders(t *testing.T) {
 	assert.Equal(t, 2, p.cursor, "cursor should reach search action row past items")
 }
 
+// --- effectiveTag tests ---
+
+func TestEffectiveTag_ReadOnly(t *testing.T) {
+	it := PickerItem{IsReadOnly: true, Tag: "[cmd]", ProviderTag: "via beads"}
+	assert.Equal(t, "[cmd] via beads", it.effectiveTag())
+}
+
+func TestEffectiveTag_ReadOnly_NoTypeTag(t *testing.T) {
+	it := PickerItem{IsReadOnly: true, ProviderTag: "via figma-minimal"}
+	assert.Equal(t, "via figma-minimal", it.effectiveTag())
+}
+
+func TestEffectiveTag_Base(t *testing.T) {
+	it := PickerItem{IsBase: true}
+	assert.Equal(t, "●", it.effectiveTag())
+}
+
+func TestEffectiveTag_Base_WithTypeTag(t *testing.T) {
+	it := PickerItem{IsBase: true, Tag: "[cmd]"}
+	assert.Equal(t, "● [cmd]", it.effectiveTag())
+}
+
+func TestEffectiveTag_ReadOnlyAndBase(t *testing.T) {
+	// When both ReadOnly and Base are set, ReadOnly takes precedence.
+	// The "via" already explains the lock; "●" would be noise.
+	it := PickerItem{IsReadOnly: true, IsBase: true, Tag: "[cmd]", ProviderTag: "via beads"}
+	assert.Equal(t, "[cmd] via beads", it.effectiveTag())
+}
+
+func TestEffectiveTag_Normal(t *testing.T) {
+	it := PickerItem{Tag: "[skill]"}
+	assert.Equal(t, "[skill]", it.effectiveTag())
+}
+
+func TestEffectiveTag_Normal_NoTag(t *testing.T) {
+	it := PickerItem{}
+	assert.Equal(t, "", it.effectiveTag())
+}
+
+func TestEffectiveTag_ProviderTagIgnoredWhenNotReadOnly(t *testing.T) {
+	// ProviderTag should only be shown when IsReadOnly — otherwise "via X" is misleading.
+	it := PickerItem{Tag: "[cmd]", ProviderTag: "via beads"}
+	assert.Equal(t, "[cmd]", it.effectiveTag())
+}
+
 // --- Filter infrastructure tests ---
 
 func testItems() []PickerItem {
@@ -1083,4 +1128,350 @@ func TestSetItemsAutoCollapsesReadOnly(t *testing.T) {
 
 	assert.True(t, p.collapsed[0], "read-only section should be auto-collapsed after SetItems")
 	assert.False(t, p.collapsed[2], "editable section should not be collapsed")
+}
+
+// --- Chip filter tests ---
+
+// chipTestItems returns a fixture with mixed states for chip filter testing.
+// Index 0: header
+// Index 1: selected, normal
+// Index 2: selected, base-inherited
+// Index 3: unselected, base-inherited
+// Index 4: selected, read-only (locked)
+// Index 5: unselected, normal
+func chipTestItems() []PickerItem {
+	return []PickerItem{
+		{Display: "Section (5)", IsHeader: true},
+		{Key: "a", Display: "alpha", Selected: true},
+		{Key: "b", Display: "bravo", Selected: true, IsBase: true},
+		{Key: "c", Display: "charlie", Selected: false, IsBase: true},
+		{Key: "d", Display: "delta", Selected: true, IsReadOnly: true, Tag: "[cmd]", ProviderTag: "via plugin"},
+		{Key: "e", Display: "echo", Selected: false},
+	}
+}
+
+func TestChipFilter_All(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	// Default: All active → no filtering.
+	assert.True(t, p.activeChips[ChipAll])
+	p.refilter()
+	assert.Nil(t, p.filterView, "All chip should not filter anything")
+}
+
+func TestChipFilter_Selected(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipSelected)
+	p.refilter()
+	assert.NotNil(t, p.filterView)
+	// Should show: header + alpha, bravo, delta (selected items).
+	selectableCount := 0
+	for _, idx := range p.filterView {
+		if !p.items[idx].IsHeader {
+			selectableCount++
+			assert.True(t, p.items[idx].Selected, "only selected items should pass")
+		}
+	}
+	assert.Equal(t, 3, selectableCount)
+}
+
+func TestChipFilter_Unselected(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipUnselected)
+	p.refilter()
+	assert.NotNil(t, p.filterView)
+	selectableCount := 0
+	for _, idx := range p.filterView {
+		if !p.items[idx].IsHeader {
+			selectableCount++
+			assert.False(t, p.items[idx].Selected, "only unselected items should pass")
+		}
+	}
+	assert.Equal(t, 2, selectableCount) // charlie, echo
+}
+
+func TestChipFilter_Base(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.SetProfileTab(true)
+	p.toggleChip(ChipBase)
+	p.refilter()
+	assert.NotNil(t, p.filterView)
+	selectableCount := 0
+	for _, idx := range p.filterView {
+		if !p.items[idx].IsHeader {
+			selectableCount++
+			assert.True(t, p.items[idx].IsBase, "only base items should pass")
+		}
+	}
+	assert.Equal(t, 2, selectableCount) // bravo, charlie
+}
+
+func TestChipFilter_Locked(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipLocked)
+	p.refilter()
+	assert.NotNil(t, p.filterView)
+	selectableCount := 0
+	for _, idx := range p.filterView {
+		if !p.items[idx].IsHeader {
+			selectableCount++
+			assert.True(t, p.items[idx].IsReadOnly, "only locked items should pass")
+		}
+	}
+	assert.Equal(t, 1, selectableCount) // delta
+}
+
+func TestChipFilter_Combined_SelectedAndBase(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.SetProfileTab(true)
+	p.toggleChip(ChipSelected)
+	p.toggleChip(ChipBase) // AND: selected AND base
+	p.refilter()
+	assert.NotNil(t, p.filterView)
+	selectableCount := 0
+	for _, idx := range p.filterView {
+		if !p.items[idx].IsHeader {
+			selectableCount++
+			assert.True(t, p.items[idx].Selected && p.items[idx].IsBase,
+				"only selected+base items should pass")
+		}
+	}
+	assert.Equal(t, 1, selectableCount) // bravo only
+}
+
+func TestChipFilter_MutualExclusion(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipSelected)
+	assert.True(t, p.activeChips[ChipSelected])
+	assert.False(t, p.activeChips[ChipUnselected])
+
+	// Toggling Unselected should deactivate Selected.
+	p.toggleChip(ChipUnselected)
+	assert.False(t, p.activeChips[ChipSelected])
+	assert.True(t, p.activeChips[ChipUnselected])
+
+	// And vice versa.
+	p.toggleChip(ChipSelected)
+	assert.True(t, p.activeChips[ChipSelected])
+	assert.False(t, p.activeChips[ChipUnselected])
+}
+
+func TestChipFilter_AllResetsOthers(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipSelected)
+	p.toggleChip(ChipLocked)
+	assert.True(t, p.activeChips[ChipSelected])
+	assert.True(t, p.activeChips[ChipLocked])
+
+	// Toggling All clears everything else.
+	p.toggleChip(ChipAll)
+	assert.True(t, p.activeChips[ChipAll])
+	assert.False(t, p.activeChips[ChipSelected])
+	assert.False(t, p.activeChips[ChipLocked])
+}
+
+func TestChipFilter_AutoAll(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipSelected) // All off, Selected on.
+	assert.False(t, p.activeChips[ChipAll])
+	assert.True(t, p.activeChips[ChipSelected])
+
+	// Deactivate Selected — nothing active → All auto-activates.
+	p.toggleChip(ChipSelected)
+	assert.True(t, p.activeChips[ChipAll])
+}
+
+func TestChipFilter_WithTextSearch(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipSelected)   // only selected items
+	p.filterText = "bravo"        // AND text match
+	p.refilter()
+
+	// Only bravo passes both: selected AND text match "bravo".
+	selectableCount := 0
+	for _, idx := range p.filterView {
+		if !p.items[idx].IsHeader {
+			selectableCount++
+		}
+	}
+	assert.Equal(t, 1, selectableCount)
+}
+
+func TestChipNavigation_UpFromList(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	// Cursor starts at first selectable item (index 1); header is at 0.
+	assert.Equal(t, 1, p.cursor)
+
+	// First Up: goes to header (index 0) — headers are navigable.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
+	assert.Equal(t, 0, p.cursor, "should move to header first")
+	assert.False(t, p.chipFocused)
+
+	// Second Up: at first visible item, enters chip bar.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyUp})
+	assert.True(t, p.chipFocused, "should enter chip bar from first visible item")
+}
+
+func TestChipNavigation_DownFromChips(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.chipFocused = true
+
+	// Press down: should return to item list.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyDown})
+	assert.False(t, p.chipFocused, "down from chip bar should return to item list")
+}
+
+func TestChipNavigation_LeftRight(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.chipFocused = true
+	p.chipCursor = 0
+
+	// Move right.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRight})
+	assert.Equal(t, 1, p.chipCursor)
+
+	// Move right again.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRight})
+	assert.Equal(t, 2, p.chipCursor)
+
+	// Move left.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	assert.Equal(t, 1, p.chipCursor)
+
+	// Move all the way left.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	assert.Equal(t, 0, p.chipCursor)
+
+	// Can't go past 0.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	assert.Equal(t, 0, p.chipCursor)
+}
+
+func TestChipNavigation_SpaceToggles(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.chipFocused = true
+	p.chipCursor = 1 // ChipSelected
+
+	// Space toggles the chip.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	assert.True(t, p.activeChips[ChipSelected])
+	assert.False(t, p.activeChips[ChipAll])
+}
+
+func TestChipFilter_EscCascade(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.filterText = "alpha"
+	p.toggleChip(ChipSelected)
+	p.refilter()
+
+	// First Esc: clears text filter, chips remain.
+	p, cmd := p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	assert.Equal(t, "", p.filterText, "first esc should clear text")
+	assert.True(t, p.activeChips[ChipSelected], "chips should remain after first esc")
+	assert.Nil(t, cmd, "should not emit focus change yet")
+
+	// Re-filter to update filterView after text clear.
+	p.refilter()
+
+	// Second Esc: clears chip filter.
+	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	assert.True(t, p.activeChips[ChipAll], "second esc should reset to All")
+	assert.Nil(t, cmd, "should not emit focus change yet")
+
+	// Third Esc: goes to sidebar.
+	p, cmd = p.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	assert.NotNil(t, cmd, "third esc should emit focus change")
+	msg := cmd()
+	focusMsg, ok := msg.(FocusChangeMsg)
+	assert.True(t, ok)
+	assert.Equal(t, FocusSidebar, focusMsg.Zone)
+}
+
+func TestAvailableChips_BaseTab(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	// Default: isProfileTab = false → no Base chip.
+	chips := p.availableChips()
+	assert.Len(t, chips, 4) // All, Selected, Unselected, Locked
+	for _, c := range chips {
+		assert.NotEqual(t, ChipBase, c, "base tab should not have Base chip")
+	}
+}
+
+func TestAvailableChips_ProfileTab(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.SetProfileTab(true)
+	chips := p.availableChips()
+	assert.Len(t, chips, 5) // All, Selected, Unselected, Base, Locked
+	found := false
+	for _, c := range chips {
+		if c == ChipBase {
+			found = true
+		}
+	}
+	assert.True(t, found, "profile tab should have Base chip")
+}
+
+func TestChipFilter_ResetOnSetItems(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.toggleChip(ChipSelected)
+	p.chipFocused = true
+	p.chipCursor = 2
+
+	p.SetItems(chipTestItems())
+	assert.True(t, p.activeChips[ChipAll], "SetItems should reset chips to All")
+	assert.False(t, p.chipFocused, "SetItems should unfocus chip bar")
+	assert.Equal(t, 0, p.chipCursor, "SetItems should reset chip cursor")
+}
+
+func TestChipFilter_ChipBarRendering(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+
+	view := p.View()
+	assert.Contains(t, view, "Filters:", "should render Filters: prefix")
+	// Active chip (All) gets padded pill; inactive chips get round parens.
+	assert.Contains(t, view, "All", "should render All chip")
+	assert.Contains(t, view, "(✓ Sel)", "should render Selected chip in parens")
+	assert.Contains(t, view, "(○ Unsel)", "should render Unselected chip in parens")
+	assert.Contains(t, view, "(⊘ Lock)", "should render Locked chip in parens")
+
+	// Profile tab should also show Base chip.
+	p.SetProfileTab(true)
+	view = p.View()
+	assert.Contains(t, view, "(● Base)", "profile tab should render Base chip in parens")
+}
+
+func TestChipFilter_PrintableExitsChipBar(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.chipFocused = true
+
+	// Typing a letter should exit chip bar and start text search.
+	p, _ = p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	assert.False(t, p.chipFocused, "printable rune should exit chip bar")
+	assert.Equal(t, "x", p.filterText, "printable rune should start text search")
+}
+
+func TestChipFilter_CountReflectsBothFilters(t *testing.T) {
+	p := NewPicker(chipTestItems())
+	p.focused = true
+	p.SetHeight(20)
+	p.SetWidth(60)
+
+	// Chip filter: only selected. visibleSelectableCount excludes read-only items,
+	// so delta (read-only) doesn't count → alpha and bravo.
+	p.toggleChip(ChipSelected)
+	p.refilter()
+	assert.Equal(t, 2, p.visibleSelectableCount())
+
+	// Add text filter narrowing further.
+	p.filterText = "alpha"
+	p.refilter()
+	assert.Equal(t, 1, p.visibleSelectableCount())
 }

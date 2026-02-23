@@ -14,6 +14,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// FilterChip represents a toggleable filter chip in the chip bar.
+type FilterChip int
+
+const (
+	ChipAll        FilterChip = iota
+	ChipSelected              // matches Selected == true
+	ChipUnselected            // matches Selected == false
+	ChipBase                  // matches IsBase == true (profile tabs only)
+	ChipLocked                // matches IsReadOnly == true
+)
+
 // PickerItem represents a single row in the multi-select picker.
 type PickerItem struct {
 	Key         string // unique identifier (plugin key, setting key, etc.)
@@ -22,8 +33,35 @@ type PickerItem struct {
 	IsHeader    bool   // section header, not selectable
 	IsBase      bool   // inherited from base config (profile view)
 	IsReadOnly  bool   // read-only items cannot be toggled (e.g. plugin-provided commands)
-	Tag         string // e.g. "[base]" for inherited items
+	Tag         string // type indicator: "[cmd]", "[skill]", etc.
+	ProviderTag string // provenance: "via plugin-name" (only shown when IsReadOnly)
 	Description string // optional description rendered below headers
+}
+
+// effectiveTag computes the display tag based on the item's state.
+// Read-only items show Tag + ProviderTag (explains why locked).
+// Base-inherited items show "●" + Tag (indicates inheritance).
+// Normal items show Tag only.
+func (it PickerItem) effectiveTag() string {
+	var parts []string
+	if it.IsReadOnly {
+		if it.Tag != "" {
+			parts = append(parts, it.Tag)
+		}
+		if it.ProviderTag != "" {
+			parts = append(parts, it.ProviderTag)
+		}
+	} else if it.IsBase {
+		parts = append(parts, "●")
+		if it.Tag != "" {
+			parts = append(parts, it.Tag)
+		}
+	} else {
+		if it.Tag != "" {
+			parts = append(parts, it.Tag)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // Picker is an enhanced multi-select list used for Plugins, Permissions, MCP,
@@ -55,15 +93,22 @@ type Picker struct {
 
 	// Search status indicator.
 	searching bool
+
+	// Chip bar: toggleable filter chips above the text search bar.
+	chipFocused  bool                // true when chip bar has focus (vs item list)
+	chipCursor   int                 // index of focused chip in availableChips()
+	activeChips  map[FilterChip]bool // which chips are toggled on
+	isProfileTab bool                // controls whether Base chip is shown
 }
 
 // NewPicker creates a Picker with the given items. The cursor is placed on the
 // first selectable (non-header, non-description) item.
 func NewPicker(items []PickerItem) Picker {
 	p := Picker{
-		items:     items,
-		height:    20, // sensible default
-		collapsed: make(map[int]bool),
+		items:       items,
+		height:      20, // sensible default
+		collapsed:   make(map[int]bool),
+		activeChips: map[FilterChip]bool{ChipAll: true},
 	}
 	// Advance cursor to the first selectable item.
 	for i := range p.items {
@@ -143,7 +188,6 @@ func PluginPickerItemsForProfile(scan *commands.InitScanResult, effectiveSelecte
 			}
 			if baseSelected[key] {
 				it.IsBase = true
-				it.Tag = "●"
 			}
 			items = append(items, it)
 		}
@@ -165,7 +209,6 @@ func PluginPickerItemsForProfile(scan *commands.InitScanResult, effectiveSelecte
 			}
 			if baseSelected[key] {
 				it.IsBase = true
-				it.Tag = "●"
 			}
 			items = append(items, it)
 		}
@@ -344,11 +387,12 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 				typeTag = "[skill]"
 			}
 			items = append(items, PickerItem{
-				Key:        item.Key(),
-				Display:    item.Name,
-				Selected:   true,
-				IsReadOnly: true,
-				Tag:        typeTag + " via " + item.SourceLabel,
+				Key:         item.Key(),
+				Display:     item.Name,
+				Selected:    true,
+				IsReadOnly:  true,
+				Tag:         typeTag,
+				ProviderTag: "via " + item.SourceLabel,
 			})
 		}
 	}
@@ -456,6 +500,80 @@ func (p *Picker) SetTagColor(c lipgloss.Color) {
 	p.tagColor = c
 }
 
+// SetProfileTab controls whether the Base chip is available (profile tabs show it).
+func (p *Picker) SetProfileTab(isProfile bool) {
+	p.isProfileTab = isProfile
+}
+
+// availableChips returns the chips visible for the current context.
+func (p Picker) availableChips() []FilterChip {
+	chips := []FilterChip{ChipAll, ChipSelected, ChipUnselected}
+	if p.isProfileTab {
+		chips = append(chips, ChipBase)
+	}
+	chips = append(chips, ChipLocked)
+	return chips
+}
+
+// toggleChip handles mutual exclusion and auto-All logic.
+func (p *Picker) toggleChip(chip FilterChip) {
+	if chip == ChipAll {
+		p.activeChips = map[FilterChip]bool{ChipAll: true}
+		return
+	}
+
+	delete(p.activeChips, ChipAll)
+
+	if p.activeChips[chip] {
+		delete(p.activeChips, chip)
+	} else {
+		p.activeChips[chip] = true
+		if chip == ChipSelected {
+			delete(p.activeChips, ChipUnselected)
+		} else if chip == ChipUnselected {
+			delete(p.activeChips, ChipSelected)
+		}
+	}
+
+	if len(p.activeChips) == 0 {
+		p.activeChips[ChipAll] = true
+	}
+}
+
+// itemPassesChipFilter checks if an item passes the active chip filters (AND logic).
+func (p Picker) itemPassesChipFilter(it PickerItem) bool {
+	if p.activeChips[ChipAll] {
+		return true
+	}
+	if p.activeChips[ChipSelected] && !it.Selected {
+		return false
+	}
+	if p.activeChips[ChipUnselected] && it.Selected {
+		return false
+	}
+	if p.activeChips[ChipBase] && !it.IsBase {
+		return false
+	}
+	if p.activeChips[ChipLocked] && !it.IsReadOnly {
+		return false
+	}
+	return true
+}
+
+// hasActiveChipFilter returns true when chips are filtering (not All).
+func (p Picker) hasActiveChipFilter() bool {
+	return !p.activeChips[ChipAll]
+}
+
+// isAtFirstVisible returns true if the cursor is on or before the first visible item.
+func (p Picker) isAtFirstVisible() bool {
+	indices := p.viewIndices()
+	if len(indices) == 0 {
+		return true
+	}
+	return p.cursor <= indices[0]
+}
+
 // AddItems appends new items to the picker and marks them as selected.
 func (p *Picker) AddItems(items []PickerItem) {
 	p.items = append(p.items, items...)
@@ -491,26 +609,37 @@ func (p Picker) AllKeys() []string {
 	return keys
 }
 
-// refilter recomputes filterView based on current filterText.
-// When filterText is empty, filterView is set to nil (show all).
+// refilter recomputes filterView based on current filterText and active chip filters.
+// When both are inactive, filterView is set to nil (show all).
 func (p *Picker) refilter() {
-	if p.filterText == "" {
+	hasTextFilter := p.filterText != ""
+	hasChipFilter := p.hasActiveChipFilter()
+
+	if !hasTextFilter && !hasChipFilter {
 		p.filterView = nil
 		return
 	}
 
 	needle := strings.ToLower(p.filterText)
 
-	// First pass: determine which selectable items match.
+	// First pass: determine which selectable items match both filters.
 	matches := make([]bool, len(p.items))
 	for i, it := range p.items {
 		if it.IsHeader || it.Description != "" {
 			continue
 		}
-		haystack := strings.ToLower(it.Display + " " + it.Tag)
-		if strings.Contains(haystack, needle) {
-			matches[i] = true
+		// Chip filter.
+		if hasChipFilter && !p.itemPassesChipFilter(it) {
+			continue
 		}
+		// Text filter.
+		if hasTextFilter {
+			haystack := strings.ToLower(it.Display + " " + it.effectiveTag())
+			if !strings.Contains(haystack, needle) {
+				continue
+			}
+		}
+		matches[i] = true
 	}
 
 	// Second pass: build visible indices, including headers/descriptions
@@ -613,6 +742,9 @@ func (p *Picker) SetItems(items []PickerItem) {
 	p.filterText = ""
 	p.filterView = nil
 	p.collapsed = make(map[int]bool)
+	p.activeChips = map[FilterChip]bool{ChipAll: true}
+	p.chipFocused = false
+	p.chipCursor = 0
 	if p.CollapseReadOnly {
 		p.autoCollapseReadOnly()
 	}
@@ -650,8 +782,50 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 			return p, nil
 		}
 
+		// When chip bar is focused, handle chip navigation.
+		if p.chipFocused {
+			switch msg.String() {
+			case "left":
+				if p.chipCursor > 0 {
+					p.chipCursor--
+				}
+			case "right":
+				chips := p.availableChips()
+				if p.chipCursor < len(chips)-1 {
+					p.chipCursor++
+				}
+			case " ", "enter":
+				chips := p.availableChips()
+				if p.chipCursor >= 0 && p.chipCursor < len(chips) {
+					p.toggleChip(chips[p.chipCursor])
+					p.refilter()
+					p.resetCursorToFirstVisible()
+				}
+			case "down":
+				p.chipFocused = false
+			case "esc":
+				p.activeChips = map[FilterChip]bool{ChipAll: true}
+				p.chipFocused = false
+				p.refilter()
+				p.resetCursorToFirstVisible()
+			default:
+				// Printable runes start text search and return to item list.
+				if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+					p.chipFocused = false
+					p.filterText += string(msg.Runes)
+					p.refilter()
+					p.resetCursorToFirstVisible()
+				}
+			}
+			return p, nil
+		}
+
 		switch msg.String() {
 		case "up":
+			if p.isAtFirstVisible() {
+				p.chipFocused = true
+				return p, nil
+			}
 			p.moveCursor(-1)
 		case "down":
 			p.moveCursor(+1)
@@ -697,6 +871,12 @@ func (p Picker) Update(msg tea.Msg) (Picker, tea.Cmd) {
 		case "esc":
 			if p.filterText != "" {
 				p.filterText = ""
+				p.refilter()
+				p.resetCursorToFirstVisible()
+				return p, nil
+			}
+			if p.hasActiveChipFilter() {
+				p.activeChips = map[FilterChip]bool{ChipAll: true}
 				p.refilter()
 				p.resetCursorToFirstVisible()
 				return p, nil
@@ -749,7 +929,9 @@ func (p Picker) View() string {
 
 	var b strings.Builder
 
-	// Render filter bar (always visible, takes 1 line).
+	// Render chip bar + filter bar (2 lines total).
+	b.WriteString(p.renderChipBar())
+	b.WriteString("\n")
 	b.WriteString(p.renderFilterBar())
 	b.WriteString("\n")
 
@@ -761,14 +943,14 @@ func (p Picker) View() string {
 	}
 
 	if totalRows == 0 {
-		if p.filterText != "" {
+		if p.filterText != "" || p.hasActiveChipFilter() {
 			return ContentPaneStyle.Render(b.String() + "  No matches")
 		}
 		return ContentPaneStyle.Render(b.String() + "  (no items)")
 	}
 
-	// Available height for items (subtract 1 for filter bar).
-	itemHeight := p.height - 1
+	// Available height for items (subtract 2 for chip bar + filter bar).
+	itemHeight := p.height - 2
 	if itemHeight < 1 {
 		itemHeight = 1
 	}
@@ -841,19 +1023,19 @@ func (p Picker) View() string {
 
 		// Removed inherited item: muted red strikethrough.
 		if it.IsBase && !it.Selected {
-			b.WriteString(cursor + RenderRemovedBaseLine(it.Display, it.Tag, p.focused) + "\n")
+			b.WriteString(cursor + RenderRemovedBaseLine(it.Display, it.effectiveTag(), p.focused) + "\n")
 			continue
 		}
 
 		// Read-only (plugin-controlled) item: lock icon, muted style.
 		if it.IsReadOnly {
-			b.WriteString(cursor + RenderLockedLine(it.Display, it.Tag, p.focused) + "\n")
+			b.WriteString(cursor + RenderLockedLine(it.Display, it.effectiveTag(), p.focused) + "\n")
 			continue
 		}
 
 		checkbox := RenderCheckbox(p.focused, it.Selected)
 		display := RenderItemText(it.Display, p.focused, isCurrent)
-		tag := RenderTag(it.Tag, p.focused, p.tagColor)
+		tag := RenderTag(it.effectiveTag(), p.focused, p.tagColor)
 
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
 	}
@@ -929,6 +1111,79 @@ func (p Picker) computeScrollOffset(cursorPos, totalRows, viewHeight int) int {
 	return offset
 }
 
+// chipLabel returns the display label for a filter chip.
+func chipLabel(c FilterChip) string {
+	switch c {
+	case ChipAll:
+		return "All"
+	case ChipSelected:
+		return "✓ Sel"
+	case ChipUnselected:
+		return "○ Unsel"
+	case ChipBase:
+		return "● Base"
+	case ChipLocked:
+		return "⊘ Lock"
+	}
+	return ""
+}
+
+// chipStyle returns the lipgloss style for a chip based on its state.
+// Active chips get a green filled pill. Focused chips get peach (orange) bg
+// when inactive, or bold green when active. Arrow markers are added in render.
+func chipStyle(active, focused, pickerFocused bool) lipgloss.Style {
+	if focused {
+		if active {
+			return lipgloss.NewStyle().
+				Foreground(colorBase).
+				Background(colorGreen).
+				Bold(true)
+		}
+		return lipgloss.NewStyle().
+			Foreground(colorBase).
+			Background(colorPeach).
+			Bold(true)
+	}
+	if active {
+		return lipgloss.NewStyle().
+			Foreground(colorBase).
+			Background(colorGreen)
+	}
+	if pickerFocused {
+		return lipgloss.NewStyle().
+			Foreground(colorOverlay0)
+	}
+	return lipgloss.NewStyle().
+		Foreground(colorSurface1)
+}
+
+// renderChipBar renders the row of filter chips above the text search bar.
+// Focused chip gets ▸◂ arrow markers for clear cursor indication.
+func (p Picker) renderChipBar() string {
+	chips := p.availableChips()
+	var parts []string
+	for i, chip := range chips {
+		label := chipLabel(chip)
+		active := p.activeChips[chip]
+		focused := p.chipFocused && p.chipCursor == i
+		style := chipStyle(active, focused, p.focused)
+
+		pill := style.Render(" " + label + " ")
+		if focused {
+			// Arrow markers around the focused chip.
+			arrow := lipgloss.NewStyle().Foreground(colorPeach)
+			parts = append(parts, arrow.Render("▸")+pill+arrow.Render("◂"))
+		} else if active {
+			parts = append(parts, pill)
+		} else {
+			parts = append(parts, style.Render("("+label+")"))
+		}
+	}
+	row := strings.Join(parts, " ")
+	prefix := DimStyle.Render("Filters:")
+	return " " + prefix + " " + row
+}
+
 // renderFilterBar renders the filter input line with a distinct background.
 func (p Picker) renderFilterBar() string {
 	barBg := colorSurface0
@@ -946,9 +1201,9 @@ func (p Picker) renderFilterBar() string {
 		inner = " " + label + text + cursor
 	}
 
-	// Right-aligned match count when filter is active.
+	// Right-aligned match count when any filter is active.
 	right := ""
-	if p.filterText != "" {
+	if p.filterText != "" || p.hasActiveChipFilter() {
 		visible := p.visibleSelectableCount()
 		total := p.TotalCount()
 		right = DimStyle.Background(barBg).Render(fmt.Sprintf("%d/%d", visible, total))
@@ -1209,8 +1464,8 @@ func (p *Picker) clampScroll() {
 		totalRows++
 	}
 
-	// Filter bar takes 1 line.
-	itemHeight := p.height - 1
+	// Chip bar + filter bar take 2 lines.
+	itemHeight := p.height - 2
 	if itemHeight < 1 {
 		itemHeight = 1
 	}

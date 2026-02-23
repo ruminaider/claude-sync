@@ -161,6 +161,7 @@ func (m *Model) rebuildProfilePluginSection(profileName string, diff *sectionDif
 	items := PluginPickerItemsForProfile(m.scanResult, effective, baseSelected)
 	p := NewPicker(items)
 	p.SetTagColor(m.tabBar.ActiveTheme().Accent)
+	p.SetProfileTab(true)
 
 	// Preserve dimensions from existing picker.
 	if old, ok := pm[SectionPlugins]; ok {
@@ -223,23 +224,18 @@ func (m *Model) rebuildProfileGenericSection(profileName string, sec Section, di
 		}
 		items[i].Selected = effective[items[i].Key]
 
-		// Reset IsBase and Tag to clean state before reapplying.
+		// Reset IsBase to clean state before reapplying.
 		items[i].IsBase = false
-		items[i].Tag = stripBaseMarker(items[i].Tag)
 
 		// Mark items that come from base.
 		if baseSet[items[i].Key] {
 			items[i].IsBase = true
-			if items[i].Tag != "" {
-				items[i].Tag = "● " + items[i].Tag
-			} else {
-				items[i].Tag = "●"
-			}
 		}
 	}
 
 	p := NewPicker(items)
 	p.SetTagColor(m.tabBar.ActiveTheme().Accent)
+	p.SetProfileTab(true)
 
 	// Preserve picker properties from existing picker.
 	if old, ok := pm[sec]; ok {
@@ -260,17 +256,6 @@ func (m *Model) rebuildProfileGenericSection(profileName string, sec Section, di
 
 	pm[sec] = p
 	m.profilePickers[profileName] = pm
-}
-
-// stripBaseMarker removes the "● " prefix from a tag if present.
-func stripBaseMarker(tag string) string {
-	if strings.HasPrefix(tag, "● ") {
-		return strings.TrimPrefix(tag, "● ")
-	}
-	if tag == "●" {
-		return ""
-	}
-	return tag
 }
 
 // --- Profile <-> sectionDiff conversion ---
