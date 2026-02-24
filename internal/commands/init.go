@@ -63,8 +63,9 @@ type InitOptions struct {
 	Profiles          map[string]profiles.Profile // nil = no profiles, non-nil = write profile files
 	ActiveProfile     string                      // profile to activate on this machine (empty = none)
 	Permissions       config.Permissions          // permissions to include
-	ImportClaudeMD    bool                        // whether to import CLAUDE.md
-	ClaudeMDFragments []string                    // fragment names to include (nil = all when ImportClaudeMD is true)
+	ImportClaudeMD             bool                        // whether to import CLAUDE.md
+	ClaudeMDFragments          []string                    // fragment names to include (nil = all when ImportClaudeMD is true)
+	ProjectClaudeMDFragments   []string                    // selected project CLAUDE.md fragment keys (qualified with "::")
 	MCP               map[string]json.RawMessage  // MCP server configs to include
 	Keybindings       map[string]any              // keybindings to include
 	Commands          []string                    // selected command keys to include
@@ -452,6 +453,8 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 		Permissions: opts.Permissions,
 		MCP:         opts.MCP,
 		Keybindings: opts.Keybindings,
+		Commands:    opts.Commands,
+		Skills:      opts.Skills,
 	}
 
 	cfgData, err := config.Marshal(cfg)
@@ -490,6 +493,19 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 			if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644); err != nil {
 				return nil, nil, fmt.Errorf("writing config with CLAUDE.md: %w", err)
 			}
+		}
+	}
+
+	// Append project CLAUDE.md fragment selections to config. These are qualified
+	// keys (with "::") that track which project fragments the user selected.
+	if len(opts.ProjectClaudeMDFragments) > 0 {
+		cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, opts.ProjectClaudeMDFragments...)
+		cfgData, err = config.Marshal(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshaling config with project CLAUDE.md: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644); err != nil {
+			return nil, nil, fmt.Errorf("writing config with project CLAUDE.md: %w", err)
 		}
 	}
 

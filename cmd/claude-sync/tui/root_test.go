@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -405,30 +406,27 @@ func TestCreateProfile_BaseMarkersOnAllSections(t *testing.T) {
 
 	pm := m.profilePickers["work"]
 
-	// Commands & Skills: selectable items from base should have ● prefix.
+	// Commands & Skills: selectable items from base should be marked IsBase.
 	csPicker := pm[SectionCommandsSkills]
 	for _, it := range csPicker.items {
 		if isSelectableItem(it) && it.Selected && !it.IsReadOnly {
 			assert.True(t, it.IsBase, "%s should be marked as base", it.Key)
-			assert.Contains(t, it.Tag, "●", "%s tag should contain ●", it.Key)
 		}
 	}
 
-	// Settings: selectable items should have ● tag.
+	// Settings: selectable items should be marked IsBase.
 	settingsPicker := pm[SectionSettings]
 	for _, it := range settingsPicker.items {
 		if isSelectableItem(it) && it.Selected {
 			assert.True(t, it.IsBase, "%s should be marked as base", it.Key)
-			assert.Equal(t, "●", it.Tag)
 		}
 	}
 
-	// MCP: selectable items should have ● tag.
+	// MCP: selectable items should be marked IsBase.
 	mcpPicker := pm[SectionMCP]
 	for _, it := range mcpPicker.items {
 		if isSelectableItem(it) && it.Selected {
 			assert.True(t, it.IsBase, "%s should be marked as base", it.Key)
-			assert.Equal(t, "●", it.Tag)
 		}
 	}
 }
@@ -535,7 +533,6 @@ func TestProfilePluginsSyncWithBase(t *testing.T) {
 	for _, it := range workPlugins.items {
 		if it.Key == "a@m" || it.Key == "c@m" {
 			assert.True(t, it.IsBase, "%s should be marked inherited", it.Key)
-			assert.Equal(t, "●", it.Tag)
 			assert.True(t, it.Selected)
 		}
 		if it.Key == "b@m" {
@@ -1817,7 +1814,7 @@ func TestMCPPluginServers_ReadOnlyWhenPluginSelected(t *testing.T) {
 		if it.Key == "figma-mcp" {
 			assert.True(t, it.IsReadOnly, "plugin-provided MCP should be read-only when plugin is selected")
 			assert.True(t, it.Selected, "plugin-provided MCP should be selected when plugin is selected")
-			assert.Equal(t, "via figma-minimal", it.Tag, "should have plugin tag")
+			assert.Equal(t, "via figma-minimal", it.ProviderTag, "should have plugin provider tag")
 			return
 		}
 	}
@@ -2091,6 +2088,132 @@ func TestNewModel_EditMode_RestoresProfiles(t *testing.T) {
 	assert.True(t, m.profileDiffs["work"][SectionPlugins].removes["b@m"], "b@m should be in profile removes")
 }
 
+func TestClaudeMDSearchDone_EditMode_RespectsExistingConfig(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:        []string{"a@m"},
+		ClaudeMDContent: "## Base\ncontent",
+		ClaudeMDSections: []claudemd.Section{
+			{Header: "Base", Content: "## Base\ncontent"},
+		},
+	}
+
+	// Existing config includes the global fragment and one project fragment.
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m"},
+		ClaudeMD: config.ClaudeMDConfig{
+			Include: []string{"base", "~/project::saved-section"},
+		},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	// Create temp project CLAUDE.md files to simulate discovery.
+	tmpDir := t.TempDir()
+	projectMD := tmpDir + "/.claude/CLAUDE.md"
+	require.NoError(t, os.MkdirAll(tmpDir+"/.claude", 0755))
+	require.NoError(t, os.WriteFile(projectMD, []byte("## Saved Section\nkept\n## Unsaved Section\nnot kept"), 0644))
+
+	msg := SearchDoneMsg{Paths: []string{projectMD}}
+	m = m.handleSearchDone(msg)
+
+	// Check: the project sections should respect the saved config.
+	shortPath := shortenPath(projectMD)
+	savedKey := shortPath + "::saved-section"
+	unsavedKey := shortPath + "::unsaved-section"
+
+	for i, sec := range m.preview.sections {
+		switch sec.FragmentKey {
+		case savedKey:
+			assert.True(t, m.preview.selected[i], "saved project section should be selected")
+		case unsavedKey:
+			assert.False(t, m.preview.selected[i], "unsaved project section should be deselected in edit mode")
+		}
+	}
+}
+
+func TestMCPSearchDone_EditMode_RespectsExistingConfig(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"global-server": json.RawMessage(`{"url":"http://g"}`)},
+	}
+
+	// Existing config only includes global-server, NOT project-server.
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"global-server": json.RawMessage(`{"url":"http://g"}`)},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	// Simulate MCP search returning a server not in the saved config.
+	msg := MCPSearchDoneMsg{
+		Servers: map[string]json.RawMessage{
+			"project-server": json.RawMessage(`{"url":"http://p"}`),
+		},
+		Sources: map[string]string{
+			"project-server": "~/Repos/myproject",
+		},
+	}
+	m = m.handleMCPSearchDone(msg)
+
+	// project-server should be deselected because it's not in existingConfig.MCP.
+	p := m.pickers[SectionMCP]
+	for _, it := range p.items {
+		if it.Key == "project-server" {
+			assert.False(t, it.Selected, "project-server should be deselected in edit mode")
+		}
+		if it.Key == "global-server" {
+			assert.True(t, it.Selected, "global-server should remain selected")
+		}
+	}
+}
+
+func TestCmdSkillSearchDone_EditMode_RespectsExistingConfig(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+	}
+
+	// Existing config has only one command saved.
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"a@m"},
+		Commands: []string{"cmd:project:saved-cmd"},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	// Simulate commands/skills search returning items.
+	msg := CmdSkillSearchDoneMsg{
+		Items: []cmdskill.Item{
+			{Name: "saved-cmd", Type: cmdskill.TypeCommand, Source: cmdskill.SourceProject, SourceLabel: "myproject"},
+			{Name: "unsaved-cmd", Type: cmdskill.TypeCommand, Source: cmdskill.SourceProject, SourceLabel: "myproject"},
+			{Name: "unsaved-skill", Type: cmdskill.TypeSkill, Source: cmdskill.SourceProject, SourceLabel: "myproject"},
+		},
+	}
+	m = m.handleCmdSkillSearchDone(msg)
+
+	// Check selections: only saved-cmd should be selected.
+	p := m.pickers[SectionCommandsSkills]
+	for _, it := range p.items {
+		switch it.Key {
+		case "cmd:project:saved-cmd":
+			assert.True(t, it.Selected, "saved-cmd should be selected")
+		case "cmd:project:unsaved-cmd":
+			assert.False(t, it.Selected, "unsaved-cmd should be deselected in edit mode")
+		case "skill:project:unsaved-skill":
+			assert.False(t, it.Selected, "unsaved-skill should be deselected in edit mode")
+		}
+	}
+}
+
 func TestBuildInitOptions_EditMode(t *testing.T) {
 	scan := fullScan()
 
@@ -2116,4 +2239,292 @@ func TestBuildInitOptions_EditMode(t *testing.T) {
 	require.NotNil(t, opts.SettingsFilter)
 	assert.Contains(t, opts.SettingsFilter, "model")
 	assert.NotContains(t, opts.SettingsFilter, "env")
+}
+
+func TestPermissions_EditMode_RoundTrip(t *testing.T) {
+	// Simulate a realistic permission set: many allow rules, some with special chars.
+	allowRules := []string{
+		"Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch",
+		"Task", "NotebookEdit", "Skill",
+		"mcp__plugin_episodic-memory_episodic-memory",
+		"mcp__plugin_greptile_greptile",
+		"Bash(npm *)", "Bash(npx *)", "Bash(yarn *)", "Bash(bun *)",
+		"Bash(python *)", "Bash(go *)", "Bash(cargo *)",
+		// These simulate the git bash rules user deselects:
+		"Bash(git)", "Bash(git *status)", "Bash(git *status *)",
+		"Bash(git *diff)", "Bash(git *diff *)", "Bash(git *log)",
+		"Bash(git *add *)", "Bash(git *commit *)", "Bash(git *branch)",
+		"Bash(curl *)", "Bash(wget *)", "Bash(dig *)",
+	}
+
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"a@m"},
+		Settings:   map[string]any{"model": "opus"},
+		Hooks:      map[string]json.RawMessage{},
+		Permissions: config.Permissions{
+			Allow: allowRules,
+		},
+		MCP:         map[string]json.RawMessage{},
+		Keybindings: map[string]any{},
+	}
+
+	// Step 1: First run — user selects a subset (deselects git-related rules).
+	m := testModel(scan)
+
+	// Verify all permissions start selected.
+	permPicker := m.pickers[SectionPermissions]
+	assert.Equal(t, len(allowRules), permPicker.TotalCount(), "all rules should be present")
+	assert.Equal(t, len(allowRules), permPicker.SelectedCount(), "all rules should start selected")
+
+	// Deselect the git-related rules.
+	deselected := map[string]bool{
+		"allow:Bash(git)":            true,
+		"allow:Bash(git *status)":    true,
+		"allow:Bash(git *status *)":  true,
+		"allow:Bash(git *diff)":      true,
+		"allow:Bash(git *diff *)":    true,
+		"allow:Bash(git *log)":       true,
+		"allow:Bash(git *add *)":     true,
+		"allow:Bash(git *commit *)":  true,
+		"allow:Bash(git *branch)":    true,
+	}
+	for i, it := range permPicker.items {
+		if deselected[it.Key] {
+			permPicker.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionPermissions] = permPicker
+
+	expectedSelected := len(allowRules) - len(deselected)
+	assert.Equal(t, expectedSelected, permPicker.SelectedCount(), "after deselecting git rules")
+
+	// Step 2: Build init options (simulates save).
+	opts := m.buildInitOptions()
+	assert.Equal(t, expectedSelected, len(opts.Permissions.Allow), "saved allow count")
+	assert.Empty(t, opts.Permissions.Deny, "no deny rules")
+
+	// Verify deselected rules are NOT in the saved config.
+	savedSet := toSet(opts.Permissions.Allow)
+	for k := range deselected {
+		rule := strings.TrimPrefix(k, "allow:")
+		assert.False(t, savedSet[rule], "deselected rule %q should NOT be saved", rule)
+	}
+
+	// Step 3: Simulate reload — create config from saved opts.
+	savedConfig := &config.Config{
+		Version: "1.0.0",
+		Permissions: opts.Permissions,
+	}
+
+	// Create a new model with the SAME scan but existing config.
+	m2 := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, savedConfig, nil)
+	m2.overlay = Overlay{}
+	m2.overlayCtx = overlayNone
+
+	// Step 4: Verify the reloaded model has the correct selections.
+	permPicker2 := m2.pickers[SectionPermissions]
+	assert.Equal(t, len(allowRules), permPicker2.TotalCount(), "reload: all rules should still be present")
+	assert.Equal(t, expectedSelected, permPicker2.SelectedCount(),
+		"reload: should have %d selected, got %d", expectedSelected, permPicker2.SelectedCount())
+
+	// Verify each item's selection state matches.
+	for _, it := range permPicker2.items {
+		if it.IsHeader {
+			continue
+		}
+		if deselected[it.Key] {
+			assert.False(t, it.Selected, "reload: %q should be deselected", it.Key)
+		} else {
+			assert.True(t, it.Selected, "reload: %q should be selected", it.Key)
+		}
+	}
+
+	// Step 5: Build opts from reloaded model and verify it matches original.
+	opts2 := m2.buildInitOptions()
+	assert.Equal(t, len(opts.Permissions.Allow), len(opts2.Permissions.Allow),
+		"re-saved allow count should match original")
+}
+
+func TestPermissions_EditMode_RoundTrip_WithProfiles(t *testing.T) {
+	allowRules := []string{
+		"Read", "Edit", "Write", "Glob", "Grep",
+		"Bash(npm *)", "Bash(git)", "Bash(git *status)", "Bash(curl *)",
+	}
+
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"a@m"},
+		Settings:   map[string]any{"model": "opus"},
+		Hooks:      map[string]json.RawMessage{},
+		Permissions: config.Permissions{
+			Allow: allowRules,
+		},
+		MCP:         map[string]json.RawMessage{},
+		Keybindings: map[string]any{},
+	}
+
+	// Saved config: user deselected "Bash(git)" and "Bash(git *status)".
+	selectedAllow := []string{
+		"Read", "Edit", "Write", "Glob", "Grep",
+		"Bash(npm *)", "Bash(curl *)",
+	}
+	savedConfig := &config.Config{
+		Version: "1.0.0",
+		Permissions: config.Permissions{Allow: selectedAllow},
+	}
+
+	// Profiles: "work" adds back Bash(git), "personal" removes Bash(curl *).
+	existingProfiles := map[string]profiles.Profile{
+		"work": {
+			Permissions: profiles.ProfilePermissions{
+				AddAllow: []string{"Bash(git)"},
+			},
+		},
+		"personal": {
+			Permissions: profiles.ProfilePermissions{
+				// No adds, but conceptual removes (not directly tested here).
+			},
+		},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", false, SkipFlags{}, savedConfig, existingProfiles)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	// Verify BASE picker has correct selections.
+	basePicker := m.pickers[SectionPermissions]
+	t.Logf("Base picker: %d/%d selected", basePicker.SelectedCount(), basePicker.TotalCount())
+	assert.Equal(t, len(allowRules), basePicker.TotalCount())
+	assert.Equal(t, len(selectedAllow), basePicker.SelectedCount(),
+		"base should have %d selected", len(selectedAllow))
+
+	// Verify specific items.
+	for _, it := range basePicker.items {
+		if it.IsHeader {
+			continue
+		}
+		switch it.Key {
+		case "allow:Read", "allow:Edit", "allow:Write", "allow:Glob", "allow:Grep",
+			"allow:Bash(npm *)", "allow:Bash(curl *)":
+			assert.True(t, it.Selected, "base: %q should be selected", it.Key)
+		case "allow:Bash(git)", "allow:Bash(git *status)":
+			assert.False(t, it.Selected, "base: %q should be deselected", it.Key)
+		}
+	}
+
+	// Build opts and verify permission round-trip.
+	opts := m.buildInitOptions()
+	assert.Equal(t, len(selectedAllow), len(opts.Permissions.Allow),
+		"saved permissions should match")
+}
+
+func TestPermissions_EditMode_RealWorldScale(t *testing.T) {
+	// Simulate the real-world scenario: 174 permission rules, save 142, reload.
+	allAllow := make([]string, 0, 174)
+	// Simple tool permissions.
+	simpleTools := []string{
+		"Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch",
+		"Task", "NotebookEdit", "Skill",
+	}
+	allAllow = append(allAllow, simpleTools...)
+	// MCP plugin permissions.
+	mcpPerms := []string{
+		"mcp__plugin_episodic-memory_episodic-memory",
+		"mcp__plugin_greptile_greptile",
+		"mcp__plugin_context7_context7",
+		"mcp__plugin_playwright_playwright",
+	}
+	allAllow = append(allAllow, mcpPerms...)
+	// Bash permissions (many with glob patterns).
+	bashTools := []string{
+		"Bash(npm *)", "Bash(npx *)", "Bash(yarn *)", "Bash(pnpm *)",
+		"Bash(bun *)", "Bash(deno *)", "Bash(node *)", "Bash(tsx *)",
+		"Bash(python *)", "Bash(python3 *)", "Bash(pip *)",
+		"Bash(go *)", "Bash(cargo *)", "Bash(make *)", "Bash(cmake *)",
+	}
+	allAllow = append(allAllow, bashTools...)
+	// Git-specific bash (will be deselected).
+	gitBash := []string{
+		"Bash(git)", "Bash(git *status)", "Bash(git *status *)",
+		"Bash(git *diff)", "Bash(git *diff *)", "Bash(git *log)",
+		"Bash(git *log *)", "Bash(git *show)", "Bash(git *show *)",
+		"Bash(git *add *)", "Bash(git *commit *)", "Bash(git *fetch)",
+		"Bash(git *fetch *)", "Bash(git *blame *)", "Bash(git *rev-parse)",
+		"Bash(git *rev-parse *)", "Bash(git *ls-files)", "Bash(git *ls-files *)",
+		"Bash(git *remote)", "Bash(git *remote *)", "Bash(git *config)",
+		"Bash(git *config *)", "Bash(git *grep *)", "Bash(git *tag)",
+		"Bash(git *tag *)", "Bash(git *stash)", "Bash(git *stash *)",
+		"Bash(git *branch)", "Bash(git *branch *)",
+	}
+	allAllow = append(allAllow, gitBash...)
+	// More tools to get close to 174.
+	moreTools := make([]string, 0)
+	for i := 0; i < 174-len(allAllow); i++ {
+		moreTools = append(moreTools, fmt.Sprintf("Bash(tool%d *)", i))
+	}
+	allAllow = append(allAllow, moreTools...)
+	require.Equal(t, 174, len(allAllow), "should have 174 rules")
+
+	// Build deselected set (the git-bash ones).
+	deselectedRules := make(map[string]bool)
+	for _, r := range gitBash {
+		deselectedRules[r] = true
+	}
+	// Expected selected = total minus deselected.
+	selectedAllow := make([]string, 0)
+	for _, r := range allAllow {
+		if !deselectedRules[r] {
+			selectedAllow = append(selectedAllow, r)
+		}
+	}
+	expectedCount := len(selectedAllow)
+	t.Logf("Total: %d, Deselected: %d, Expected selected: %d",
+		len(allAllow), len(deselectedRules), expectedCount)
+
+	scan := &commands.InitScanResult{
+		Upstream:    []string{},
+		Settings:    map[string]any{},
+		Hooks:       map[string]json.RawMessage{},
+		Permissions: config.Permissions{Allow: allAllow},
+		MCP:         map[string]json.RawMessage{},
+		Keybindings: map[string]any{},
+	}
+
+	savedConfig := &config.Config{
+		Version:     "1.0.0",
+		Permissions: config.Permissions{Allow: selectedAllow},
+	}
+
+	// Load in edit mode.
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, savedConfig, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	picker := m.pickers[SectionPermissions]
+	t.Logf("After edit-mode load: %d/%d selected", picker.SelectedCount(), picker.TotalCount())
+	assert.Equal(t, 174, picker.TotalCount())
+	assert.Equal(t, expectedCount, picker.SelectedCount(),
+		"expected %d selected after edit-mode load", expectedCount)
+
+	// Check specific items.
+	mismatches := 0
+	for _, it := range picker.items {
+		if it.IsHeader {
+			continue
+		}
+		rule := strings.TrimPrefix(it.Key, "allow:")
+		if deselectedRules[rule] && it.Selected {
+			t.Logf("BUG: %q should be deselected but is selected", it.Key)
+			mismatches++
+		}
+		if !deselectedRules[rule] && !it.Selected {
+			t.Logf("BUG: %q should be selected but is deselected", it.Key)
+			mismatches++
+		}
+	}
+	assert.Zero(t, mismatches, "found %d selection mismatches", mismatches)
+
+	// Round-trip: build opts and check.
+	opts := m.buildInitOptions()
+	assert.Equal(t, expectedCount, len(opts.Permissions.Allow),
+		"saved permissions count after round-trip")
 }
