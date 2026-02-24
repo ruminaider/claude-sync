@@ -587,6 +587,63 @@ func TestComputePluginContentHash(t *testing.T) {
 	})
 }
 
+// ─── CollectCustomMarketplaceSources ────────────────────────────────────────
+
+func TestCollectCustomMarketplaceSources(t *testing.T) {
+	t.Run("returns custom github marketplace", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		km := `{
+			"my-marketplace": {"source": {"source": "github", "repo": "myorg/my-marketplace"}, "installLocation": "/some/path"},
+			"claude-plugins-official": {"source": {"source": "github", "repo": "anthropics/claude-plugins-official"}, "installLocation": "/other"}
+		}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+		result := marketplace.CollectCustomMarketplaceSources(claudeDir, []string{"my-marketplace", "claude-plugins-official"})
+		require.Len(t, result, 1, "should only include non-well-known marketplace")
+		assert.Equal(t, "github", result["my-marketplace"].Source)
+		assert.Equal(t, "myorg/my-marketplace", result["my-marketplace"].Repo)
+	})
+
+	t.Run("skips directory sources", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		km := `{"local-mkt": {"source": {"source": "directory", "path": "/local"}, "installLocation": "/local"}}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+		result := marketplace.CollectCustomMarketplaceSources(claudeDir, []string{"local-mkt"})
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for empty input", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+		result := marketplace.CollectCustomMarketplaceSources(claudeDir, []string{})
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns git source with URL", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		km := `{"private-mkt": {"source": {"source": "git", "url": "https://git.internal.com/plugins.git"}, "installLocation": "/cache"}}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+		result := marketplace.CollectCustomMarketplaceSources(claudeDir, []string{"private-mkt"})
+		require.Len(t, result, 1)
+		assert.Equal(t, "git", result["private-mkt"].Source)
+		assert.Equal(t, "https://git.internal.com/plugins.git", result["private-mkt"].URL)
+	})
+}
+
 // ─── EnsureRegistered ──────────────────────────────────────────────────────
 
 func TestEnsureRegistered(t *testing.T) {

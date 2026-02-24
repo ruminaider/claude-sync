@@ -200,6 +200,8 @@ type knownMarketplacesVersionEntry struct {
 type knownMarketplacesFullEntry struct {
 	Source struct {
 		Source string `json:"source"`
+		Repo   string `json:"repo,omitempty"` // "org/repo" for github sources
+		URL    string `json:"url,omitempty"`  // full URL for git sources
 	} `json:"source"`
 	InstallLocation string `json:"installLocation"`
 }
@@ -383,6 +385,55 @@ func ComputePluginContentHash(sourceDir string) (string, error) {
 	}
 
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// CollectCustomMarketplaceSources reads known_marketplaces.json and returns
+// MarketplaceSource entries for portable (github/git) marketplaces that are NOT
+// in the hardcoded well-known list. This is used by config create/update to
+// auto-generate the `marketplaces` config section.
+func CollectCustomMarketplaceSources(claudeDir string, marketplaceIDs []string) map[string]config.MarketplaceSource {
+	kmPath := filepath.Join(claudeDir, "plugins", "known_marketplaces.json")
+	kmData, err := os.ReadFile(kmPath)
+	if err != nil {
+		return nil
+	}
+
+	var entries map[string]knownMarketplacesFullEntry
+	if err := json.Unmarshal(kmData, &entries); err != nil {
+		return nil
+	}
+
+	result := make(map[string]config.MarketplaceSource)
+	for _, id := range marketplaceIDs {
+		// Skip well-known marketplaces — they don't need config entries.
+		if _, wellKnown := knownMarketplaces[id]; wellKnown {
+			continue
+		}
+
+		entry, ok := entries[id]
+		if !ok {
+			continue
+		}
+
+		src := entry.Source.Source
+		if src != "github" && src != "git" {
+			continue
+		}
+
+		ms := config.MarketplaceSource{Source: src}
+		switch src {
+		case "github":
+			ms.Repo = entry.Source.Repo
+		case "git":
+			ms.URL = entry.Source.URL
+		}
+		result[id] = ms
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // EnsureRegistered checks if each declared marketplace exists in

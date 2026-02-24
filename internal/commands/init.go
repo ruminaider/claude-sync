@@ -444,19 +444,35 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 	}
 	sort.Strings(result.IncludedHooks)
 
+	// Collect unique marketplace IDs from upstream plugins to detect custom
+	// marketplaces that need entries in the config's marketplaces section.
+	mktIDs := make(map[string]bool)
+	for _, key := range upstream {
+		parts := strings.SplitN(key, "@", 2)
+		if len(parts) == 2 {
+			mktIDs[parts[1]] = true
+		}
+	}
+	var mktIDList []string
+	for id := range mktIDs {
+		mktIDList = append(mktIDList, id)
+	}
+	customMkts := marketplace.CollectCustomMarketplaceSources(claudeDir, mktIDList)
+
 	cfg := config.Config{
-		Version:     "1.0.0",
-		Upstream:    upstream,
-		Pinned:      map[string]string{},
-		Forked:      forkedNames,
-		Excluded:    result.ExcludedPlugins,
-		Settings:    cfgSettings,
-		Hooks:       cfgHooks,
-		Permissions: opts.Permissions,
-		MCP:         opts.MCP,
-		Keybindings: opts.Keybindings,
-		Commands:    opts.Commands,
-		Skills:      opts.Skills,
+		Version:      "1.0.0",
+		Upstream:     upstream,
+		Pinned:       map[string]string{},
+		Forked:       forkedNames,
+		Excluded:     result.ExcludedPlugins,
+		Settings:     cfgSettings,
+		Hooks:        cfgHooks,
+		Permissions:  opts.Permissions,
+		MCP:          opts.MCP,
+		Keybindings:  opts.Keybindings,
+		Commands:     opts.Commands,
+		Skills:       opts.Skills,
+		Marketplaces: customMkts,
 	}
 
 	cfgData, err := config.Marshal(cfg)
