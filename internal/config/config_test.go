@@ -460,6 +460,61 @@ keybindings:
 	})
 }
 
+func TestParseConfig_Marketplaces(t *testing.T) {
+	t.Run("parse with marketplaces", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream:
+    - my-plugin@my-marketplace
+marketplaces:
+  my-marketplace:
+    source: github
+    repo: myorg/my-marketplace
+  private-marketplace:
+    source: git
+    url: https://git.internal.com/plugins.git
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		require.Len(t, cfg.Marketplaces, 2)
+
+		assert.Equal(t, "github", cfg.Marketplaces["my-marketplace"].Source)
+		assert.Equal(t, "myorg/my-marketplace", cfg.Marketplaces["my-marketplace"].Repo)
+
+		assert.Equal(t, "git", cfg.Marketplaces["private-marketplace"].Source)
+		assert.Equal(t, "https://git.internal.com/plugins.git", cfg.Marketplaces["private-marketplace"].URL)
+	})
+
+	t.Run("parse without marketplaces returns nil", func(t *testing.T) {
+		input := []byte(`version: "1.0.0"
+plugins:
+  upstream: []
+`)
+		cfg, err := config.Parse(input)
+		require.NoError(t, err)
+		assert.Nil(t, cfg.Marketplaces)
+	})
+
+	t.Run("marshal round-trip", func(t *testing.T) {
+		cfg := config.Config{
+			Version: "1.0.0",
+			Pinned:  map[string]string{},
+			Upstream: []string{"plugin@my-marketplace"},
+			Marketplaces: map[string]config.MarketplaceSource{
+				"my-marketplace": {Source: "github", Repo: "myorg/my-marketplace"},
+			},
+		}
+		data, err := config.Marshal(cfg)
+		require.NoError(t, err)
+
+		parsed, err := config.Parse(data)
+		require.NoError(t, err)
+		require.Len(t, parsed.Marketplaces, 1)
+		assert.Equal(t, "github", parsed.Marketplaces["my-marketplace"].Source)
+		assert.Equal(t, "myorg/my-marketplace", parsed.Marketplaces["my-marketplace"].Repo)
+	})
+}
+
 func TestParseUserPreferences_WithSync(t *testing.T) {
 	input := []byte(`sync_mode: union
 sync:

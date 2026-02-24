@@ -76,6 +76,13 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		return nil, err
 	}
 
+	// Register declared custom marketplaces before any plugin operations.
+	if len(cfg.Marketplaces) > 0 {
+		if err := marketplace.EnsureRegistered(claudeDir, cfg.Marketplaces); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to register marketplaces: %v\n", err)
+		}
+	}
+
 	// Register local marketplace if forked plugins exist, otherwise clean up stale entry.
 	forks, _ := plugins.ListForkedPlugins(syncDir)
 	if len(forks) > 0 {
