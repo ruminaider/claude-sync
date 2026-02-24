@@ -64,6 +64,7 @@ Both commands install a Claude Code plugin that automatically checks for config 
 claude-sync status        # Show current state
 claude-sync pull          # Pull latest config
 claude-sync push          # Push your changes
+claude-sync config update # Update config from current setup
 claude-sync update        # Apply plugin updates
 ```
 
