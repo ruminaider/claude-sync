@@ -31,6 +31,22 @@ type MCPImportScanResult struct {
 	Secrets    []DetectedSecret
 }
 
+// DetectMCPSecrets scans in-memory MCP server configs for secrets.
+// Use this when configs are already loaded (vs MCPImportScan which reads from file).
+func DetectMCPSecrets(servers map[string]json.RawMessage) []DetectedSecret {
+	var secrets []DetectedSecret
+	for name, raw := range servers {
+		secrets = append(secrets, detectSecrets(name, raw)...)
+	}
+	sort.Slice(secrets, func(i, j int) bool {
+		if secrets[i].ServerName != secrets[j].ServerName {
+			return secrets[i].ServerName < secrets[j].ServerName
+		}
+		return secrets[i].EnvKey < secrets[j].EnvKey
+	})
+	return secrets
+}
+
 // MCPImportScan reads an .mcp.json file and detects secrets in env values.
 func MCPImportScan(sourcePath string) (*MCPImportScanResult, error) {
 	servers, err := claudecode.ReadMCPConfigFile(sourcePath)

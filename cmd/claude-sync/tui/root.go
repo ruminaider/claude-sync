@@ -398,7 +398,8 @@ func (m Model) View() string {
 	if isProfile && (m.focusZone == FocusContent || m.focusZone == FocusPreview) {
 		accentColor = m.tabBar.ActiveTheme().Accent
 	}
-	helperView := renderHelper(m.activeSection, isProfile, contentWidth, hLines, accentColor)
+	mcpSecretsCount := len(m.scanResult.MCPSecrets)
+	helperView := renderHelper(m.activeSection, isProfile, contentWidth, hLines, accentColor, mcpSecretsCount)
 
 	contentView := m.currentContentView(contentHeight)
 
@@ -694,7 +695,8 @@ func helperLines(termHeight int) int {
 
 // helperText returns the two-line contextual description for a section.
 // line1 is a description of what the section does, line2 is keyboard shortcuts.
-func helperText(section Section, isProfile bool) (string, string) {
+// mcpSecretsCount is the number of detected MCP secrets (used only for SectionMCP).
+func helperText(section Section, isProfile bool, mcpSecretsCount int) (string, string) {
 	var line1 string
 
 	if isProfile {
@@ -730,6 +732,9 @@ func helperText(section Section, isProfile bool) (string, string) {
 			line1 = "Select allow/deny permission rules."
 		case SectionMCP:
 			line1 = "Choose which MCP server configs to sync."
+			if mcpSecretsCount > 0 {
+				line1 += fmt.Sprintf(" (%d secrets → ${ENV_VAR})", mcpSecretsCount)
+			}
 		case SectionKeybindings:
 			line1 = "Include or exclude keybinding config."
 		case SectionHooks:
@@ -760,12 +765,12 @@ func helperText(section Section, isProfile bool) (string, string) {
 // renderHelper renders the helper block above content.
 // lines controls the format: 3 = full (desc + shortcuts + sep), 2 = compact (desc + sep), 0 = hidden.
 // accentColor, when set, colors the ● marker in the helper text to match the profile tab.
-func renderHelper(section Section, isProfile bool, width, lines int, accentColor lipgloss.Color) string {
+func renderHelper(section Section, isProfile bool, width, lines int, accentColor lipgloss.Color, mcpSecretsCount int) string {
 	if lines <= 0 {
 		return ""
 	}
 
-	line1, line2 := helperText(section, isProfile)
+	line1, line2 := helperText(section, isProfile, mcpSecretsCount)
 
 	// Color the ● marker to match the profile accent.
 	if accentColor != "" && strings.Contains(line1, "●") {
@@ -1133,6 +1138,10 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 			} else if raw, ok := m.discoveredMCP[k]; ok {
 				mcp[k] = raw
 			}
+		}
+		// Strip detected secrets before writing to config.
+		if len(m.scanResult.MCPSecrets) > 0 {
+			mcp = commands.ReplaceSecrets(mcp, m.scanResult.MCPSecrets)
 		}
 		opts.MCP = mcp
 	} else {

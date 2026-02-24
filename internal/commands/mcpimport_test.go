@@ -186,6 +186,72 @@ func TestMCPImportScan_EmptyFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "no MCP servers found")
 }
 
+// --- DetectMCPSecrets Tests (in-memory detection) ---
+
+func TestDetectMCPSecrets(t *testing.T) {
+	serverA, _ := json.Marshal(map[string]any{
+		"command": "npx",
+		"env": map[string]string{
+			"API_KEY":    "sk-realkey123",
+			"SAFE_VALUE": "hello",
+		},
+	})
+	serverB, _ := json.Marshal(map[string]any{
+		"command": "node",
+		"env": map[string]string{
+			"DB_PASSWORD": "mysecretpass",
+			"APP_NAME":    "my-app",
+		},
+	})
+
+	servers := map[string]json.RawMessage{
+		"server-a": json.RawMessage(serverA),
+		"server-b": json.RawMessage(serverB),
+	}
+
+	secrets := commands.DetectMCPSecrets(servers)
+
+	secretMap := make(map[string]string) // "server:key" -> reason
+	for _, s := range secrets {
+		secretMap[s.ServerName+":"+s.EnvKey] = s.Reason
+	}
+
+	assert.Contains(t, secretMap, "server-a:API_KEY")
+	assert.Contains(t, secretMap, "server-b:DB_PASSWORD")
+	assert.NotContains(t, secretMap, "server-a:SAFE_VALUE")
+	assert.NotContains(t, secretMap, "server-b:APP_NAME")
+
+	// Results should be sorted by server name, then env key.
+	assert.True(t, len(secrets) >= 2)
+	assert.Equal(t, "server-a", secrets[0].ServerName)
+}
+
+func TestDetectMCPSecrets_Empty(t *testing.T) {
+	// Empty map returns nil.
+	secrets := commands.DetectMCPSecrets(nil)
+	assert.Nil(t, secrets)
+
+	// Map with no env sections returns nil.
+	serverData, _ := json.Marshal(map[string]any{"command": "npx"})
+	secrets = commands.DetectMCPSecrets(map[string]json.RawMessage{
+		"safe": json.RawMessage(serverData),
+	})
+	assert.Nil(t, secrets)
+}
+
+func TestDetectMCPSecrets_AlreadyTemplated(t *testing.T) {
+	serverData, _ := json.Marshal(map[string]any{
+		"command": "npx",
+		"env": map[string]string{
+			"API_KEY": "${API_KEY}", // already templated
+		},
+	})
+	secrets := commands.DetectMCPSecrets(map[string]json.RawMessage{
+		"server": json.RawMessage(serverData),
+	})
+	assert.Nil(t, secrets, "already-templated values should not be flagged")
+}
+
 // --- ReplaceSecrets Tests ---
 
 func TestReplaceSecrets_ReplacesValues(t *testing.T) {
