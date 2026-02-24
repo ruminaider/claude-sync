@@ -410,7 +410,7 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 			items = append(items, PickerItem{
 				Key:      item.Key(),
 				Display:  item.Name,
-				Selected: true,
+				Selected: false,
 				Tag:      "[cmd]",
 			})
 		}
@@ -429,7 +429,7 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 			items = append(items, PickerItem{
 				Key:      item.Key(),
 				Display:  item.Name,
-				Selected: true,
+				Selected: false,
 				Tag:      "[skill]",
 			})
 		}
@@ -459,7 +459,7 @@ func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
 			items = append(items, PickerItem{
 				Key:      item.Key(),
 				Display:  item.Name,
-				Selected: true,
+				Selected: false,
 				Tag:      typeTag,
 			})
 		}

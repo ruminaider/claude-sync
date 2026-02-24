@@ -39,6 +39,7 @@ type Preview struct {
 	sections    []PreviewSection
 	rows        []previewRow     // computed virtual row list
 	rowCursor   int              // cursor position in rows
+	listOffset  int              // scroll offset for the left-panel list
 	collapsed   map[string]bool  // collapsed groups keyed by Source
 	selected    map[int]bool
 	viewport    viewport.Model
@@ -231,7 +232,8 @@ func (p *Preview) SetSize(width, height int) {
 	p.viewport.Width = vpWidth
 	p.viewport.Height = vpHeight
 
-	// Re-wrap content for the new width.
+	// Re-wrap content for the new width and recalculate scroll.
+	p.clampListScroll()
 	p.syncViewport()
 }
 
@@ -283,11 +285,13 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 	case "up", "k":
 		if p.rowCursor > 0 {
 			p.rowCursor--
+			p.clampListScroll()
 			p.syncViewport()
 		}
 	case "down", "j":
 		if p.rowCursor < totalEntries-1 {
 			p.rowCursor++
+			p.clampListScroll()
 			p.syncViewport()
 		}
 	case " ":
@@ -339,6 +343,39 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 	return p, nil
 }
 
+// clampListScroll adjusts listOffset so that rowCursor stays within the
+// visible window of the left panel.
+func (p *Preview) clampListScroll() {
+	totalEntries := len(p.rows) + 1 // +1 for [+ Search projects]
+	viewHeight := p.totalHeight
+	if viewHeight < 1 {
+		viewHeight = 1
+	}
+
+	// Reserve lines for scroll indicators when content overflows.
+	effectiveHeight := viewHeight
+	if totalEntries > viewHeight {
+		effectiveHeight -= 2 // ↑ more / ↓ more
+		if effectiveHeight < 1 {
+			effectiveHeight = 1
+		}
+	}
+
+	if p.rowCursor < p.listOffset {
+		p.listOffset = p.rowCursor
+	}
+	if p.rowCursor >= p.listOffset+effectiveHeight {
+		p.listOffset = p.rowCursor - effectiveHeight + 1
+	}
+	maxOffset := totalEntries - effectiveHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if p.listOffset > maxOffset {
+		p.listOffset = maxOffset
+	}
+}
+
 // toggleCollapse flips the collapsed state for a source group and rebuilds rows.
 func (p *Preview) toggleCollapse(source string) {
 	p.collapsed[source] = !p.collapsed[source]
@@ -348,6 +385,7 @@ func (p *Preview) toggleCollapse(source string) {
 	if p.rowCursor > maxCursor {
 		p.rowCursor = maxCursor
 	}
+	p.clampListScroll()
 }
 
 func (p Preview) updateViewport(msg tea.KeyMsg) (Preview, tea.Cmd) {
@@ -416,16 +454,69 @@ func (p Preview) viewList() string {
 		Width(p.listWidth).
 		PaddingLeft(1)
 
-	for ri, row := range p.rows {
-		isCurrent := p.focused && ri == p.rowCursor && p.focusLeft
+	totalEntries := len(p.rows) + 1 // +1 for [+ Search projects]
+	viewHeight := p.totalHeight
+	if viewHeight < 1 {
+		viewHeight = 1
+	}
+
+	// Determine scroll indicators.
+	hasAbove := p.listOffset > 0
+	hasBelow := p.listOffset+viewHeight < totalEntries
+	visibleLines := viewHeight
+	if hasAbove {
+		visibleLines--
+	}
+	if hasBelow {
+		visibleLines--
+	}
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
+
+	if hasAbove {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↑ more") + "\n")
+	}
+
+	end := p.listOffset + visibleLines
+	if end > totalEntries {
+		end = totalEntries
+	}
+
+	for vi := p.listOffset; vi < end; vi++ {
+		// Virtual search action row at the end.
+		if vi == len(p.rows) {
+			searchIsCurrent := p.focused && p.rowCursor == len(p.rows) && p.focusLeft
+			searchCursor := "  "
+			if searchIsCurrent {
+				searchCursor = "> "
+			}
+			b.WriteString(searchCursor + RenderSearchAction(p.focused, searchIsCurrent, p.searching) + "\n")
+			continue
+		}
+
+		row := p.rows[vi]
+		isCurrent := p.focused && vi == p.rowCursor && p.focusLeft
 
 		if row.isHeader {
-			// Render group header: ── ▾ source (N) ──
 			indicator := "▾"
 			if p.collapsed[row.source] {
 				indicator = "▸"
 			}
-			line := fmt.Sprintf("── %s %s (%d) ──", indicator, row.source, row.count)
+			// Truncate source path so the header fits on one line.
+			// Format: "> ── ▸ <source> (<count>) ──" must fit in listWidth.
+			// Overhead: "> " (2) + "── " (3) + indicator (1) + " " (1) + " (" (2) + digits + ") ──" (5) ≈ 14+digits
+			source := row.source
+			countStr := fmt.Sprintf("%d", row.count)
+			overhead := 14 + len(countStr) // cursor + framing + indicator + parens + count
+			maxSourceLen := p.listWidth - overhead
+			if maxSourceLen < 5 {
+				maxSourceLen = 5
+			}
+			if len(source) > maxSourceLen {
+				source = "…" + source[len(source)-maxSourceLen+1:]
+			}
+			line := fmt.Sprintf("── %s %s (%d) ──", indicator, source, row.count)
 
 			cursor := "  "
 			if isCurrent {
@@ -449,8 +540,7 @@ func (p Preview) viewList() string {
 		checkbox := RenderCheckbox(p.focused, p.selected[i])
 
 		header := sec.Header
-		// Truncate long headers to fit the list width.
-		maxHeaderLen := p.listWidth - 10 // account for cursor + checkbox + padding
+		maxHeaderLen := p.listWidth - 10
 		if maxHeaderLen < 5 {
 			maxHeaderLen = 5
 		}
@@ -458,14 +548,12 @@ func (p Preview) viewList() string {
 			header = header[:maxHeaderLen-1] + "…"
 		}
 
-		// Removed inherited section: muted red strikethrough.
 		if sec.IsBase && !p.selected[i] {
 			b.WriteString(cursor + RenderRemovedBaseLine(header, "●", p.focused) + "\n")
 			continue
 		}
 
 		display := RenderItemText(header, p.focused, isCurrent)
-
 		tag := ""
 		if sec.IsBase {
 			tag = RenderTag("●", p.focused, "")
@@ -474,13 +562,9 @@ func (p Preview) viewList() string {
 		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
 	}
 
-	// [+ Search projects] action row.
-	searchIsCurrent := p.focused && p.rowCursor == len(p.rows) && p.focusLeft
-	searchCursor := "  "
-	if searchIsCurrent {
-		searchCursor = "> "
+	if hasBelow {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorOverlay0).Render("  ↓ more") + "\n")
 	}
-	b.WriteString(searchCursor + RenderSearchAction(p.focused, searchIsCurrent, p.searching) + "\n")
 
 	return listStyle.Height(p.totalHeight).Render(b.String())
 }

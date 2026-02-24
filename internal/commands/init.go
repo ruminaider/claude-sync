@@ -29,6 +29,7 @@ type InitScanResult struct {
 	ClaudeMDContent string                     // raw content from ~/.claude/CLAUDE.md
 	ClaudeMDSections []claudemd.Section        // pre-split sections for picker display
 	MCP             map[string]json.RawMessage // MCP server configs found
+	MCPSecrets      []DetectedSecret           // secrets detected in MCP configs
 	Keybindings     map[string]any             // keybindings found
 	CommandsSkills  *cmdskill.ScanResult
 }
@@ -177,6 +178,7 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 	mcp, err := claudecode.ReadMCPConfig(claudeDir)
 	if err == nil && len(mcp) > 0 {
 		result.MCP = mcp
+		result.MCPSecrets = DetectMCPSecrets(mcp)
 	}
 
 	// Read keybindings

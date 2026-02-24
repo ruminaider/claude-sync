@@ -1345,7 +1345,7 @@ func TestHelpOverlayScrolls(t *testing.T) {
 
 func TestHelperTextPerSection(t *testing.T) {
 	for _, sec := range AllSections {
-		line1, line2 := helperText(sec, false)
+		line1, line2 := helperText(sec, false, 0)
 		assert.NotEmpty(t, line1, "section %s should have line1", sec)
 		assert.NotEmpty(t, line2, "section %s should have line2", sec)
 	}
@@ -1353,8 +1353,8 @@ func TestHelperTextPerSection(t *testing.T) {
 
 func TestHelperTextProfileVsBase(t *testing.T) {
 	for _, sec := range AllSections {
-		baseLine1, _ := helperText(sec, false)
-		profLine1, _ := helperText(sec, true)
+		baseLine1, _ := helperText(sec, false, 0)
+		profLine1, _ := helperText(sec, true, 0)
 		assert.NotEqual(t, baseLine1, profLine1,
 			"section %s: profile text should differ from base text", sec)
 	}
@@ -1474,7 +1474,7 @@ func TestViewLineCount_LargeTerminal(t *testing.T) {
 }
 
 func TestRenderHelper_Compact(t *testing.T) {
-	result := renderHelper(SectionPlugins, false, 60, 2, "")
+	result := renderHelper(SectionPlugins, false, 60, 2, "", 0)
 	// Should contain description but NOT shortcuts line.
 	assert.Contains(t, result, "Choose which Claude plugins to sync")
 	assert.NotContains(t, result, "Space: toggle")
@@ -1483,7 +1483,7 @@ func TestRenderHelper_Compact(t *testing.T) {
 }
 
 func TestRenderHelper_Hidden(t *testing.T) {
-	result := renderHelper(SectionPlugins, false, 60, 0, "")
+	result := renderHelper(SectionPlugins, false, 60, 0, "", 0)
 	assert.Equal(t, "", result, "0 lines should produce empty string")
 }
 
@@ -1558,7 +1558,7 @@ func TestViewLineCount_ClaudeMD_Narrow(t *testing.T) {
 // even when the text is longer than the available width.
 func TestRenderHelper_NoWrap(t *testing.T) {
 	// CLAUDE.md has the longest line2. Render at a narrow width.
-	result := renderHelper(SectionClaudeMD, false, 30, 3, "")
+	result := renderHelper(SectionClaudeMD, false, 30, 3, "", 0)
 	lineCount := strings.Count(result, "\n")
 	assert.Equal(t, 3, lineCount, "helper must produce exactly 3 newlines (3 lines) even at narrow width")
 }
