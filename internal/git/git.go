@@ -1,6 +1,7 @@
 package git
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -39,7 +40,7 @@ func RevParse(dir, ref string) (string, error) {
 // Init initializes a new git repo in dir with local user config
 // so commits work regardless of global git configuration.
 func Init(dir string) error {
-	if _, err := Run(dir, "init"); err != nil {
+	if _, err := Run(dir, "init", "-b", "main"); err != nil {
 		return err
 	}
 	if _, err := Run(dir, "config", "user.name", "claude-sync"); err != nil {
@@ -75,22 +76,116 @@ func Pull(dir string) error {
 	return err
 }
 
-// Push runs git push.
+// NonFastForwardError is returned when a push is rejected because the remote
+// has commits not in the local repo.
+type NonFastForwardError struct {
+	Output string
+}
+
+func (e *NonFastForwardError) Error() string {
+	return e.Output
+}
+
+// Push runs git push. Returns NonFastForwardError if rejected due to diverged history.
 func Push(dir string) error {
-	_, err := Run(dir, "push")
-	return err
+	out, err := Run(dir, "push")
+	if err != nil {
+		if isNonFastForward(out) {
+			return &NonFastForwardError{Output: out}
+		}
+		return fmt.Errorf("%s", out)
+	}
+	return nil
+}
+
+// ForcePush runs git push --force-with-lease.
+func ForcePush(dir string) error {
+	out, err := Run(dir, "push", "--force-with-lease")
+	if err != nil {
+		return fmt.Errorf("%s", out)
+	}
+	return nil
 }
 
 // PushWithUpstream pushes and sets the upstream tracking branch.
+// Returns NonFastForwardError if rejected due to diverged history.
 func PushWithUpstream(dir, remote, branch string) error {
-	_, err := Run(dir, "push", "-u", remote, branch)
+	out, err := Run(dir, "push", "-u", remote, branch)
+	if err != nil {
+		if isNonFastForward(out) {
+			return &NonFastForwardError{Output: out}
+		}
+		return fmt.Errorf("%s", out)
+	}
+	return nil
+}
+
+// ForcePushWithUpstream pushes with --force-with-lease and sets upstream.
+func ForcePushWithUpstream(dir, remote, branch string) error {
+	out, err := Run(dir, "push", "--force-with-lease", "-u", remote, branch)
+	if err != nil {
+		return fmt.Errorf("%s", out)
+	}
+	return nil
+}
+
+// isNonFastForward detects push rejections due to diverged histories.
+func isNonFastForward(output string) bool {
+	return strings.Contains(output, "non-fast-forward") ||
+		strings.Contains(output, "fetch first")
+}
+
+// PullRebase pulls with rebase, allowing unrelated histories (e.g. remote
+// has a README, local has config — no common ancestor).
+func PullRebase(dir string) error {
+	out, err := Run(dir, "pull", "--rebase", "--allow-unrelated-histories")
+	if err != nil {
+		return fmt.Errorf("%s", out)
+	}
+	return nil
+}
+
+// PullRebaseFrom pulls from a specific remote/branch with rebase.
+func PullRebaseFrom(dir, remote, branch string) error {
+	out, err := Run(dir, "pull", "--rebase", "--allow-unrelated-histories", remote, branch)
+	if err != nil {
+		return fmt.Errorf("%s", out)
+	}
+	return nil
+}
+
+// ResetSoftHead undoes the last commit, keeping changes staged.
+func ResetSoftHead(dir string) error {
+	_, err := Run(dir, "reset", "--soft", "HEAD~1")
 	return err
+}
+
+// Stash stashes uncommitted changes. Returns true if anything was stashed.
+func Stash(dir string) bool {
+	out, err := Run(dir, "stash")
+	return err == nil && !strings.Contains(out, "No local changes")
+}
+
+// StashPop restores stashed changes.
+func StashPop(dir string) {
+	Run(dir, "stash", "pop")
+}
+
+// RemoteLog returns the last n commit summaries from a remote branch.
+func RemoteLog(dir, remote, branch string, n int) (string, error) {
+	ref := fmt.Sprintf("%s/%s", remote, branch)
+	return Run(dir, "log", "--oneline", ref, fmt.Sprintf("-%d", n))
 }
 
 // Fetch runs git fetch --quiet.
 func Fetch(dir string) error {
 	_, err := Run(dir, "fetch", "--quiet")
 	return err
+}
+
+// FetchPrune fetches and removes stale remote-tracking refs.
+func FetchPrune(dir string) {
+	Run(dir, "fetch", "--quiet", "--prune")
 }
 
 // RemoteAdd adds a remote.

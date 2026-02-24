@@ -172,6 +172,7 @@ type PushApplyOptions struct {
 	UpdateKeybindings bool
 	UpdateCommands    bool
 	UpdateSkills      bool
+	Force             bool // force push (--force-with-lease)
 }
 
 func PushApply(opts PushApplyOptions) error {
@@ -360,8 +361,26 @@ func PushApply(opts PushApplyOptions) error {
 		return fmt.Errorf("committing: %w", err)
 	}
 	if git.HasRemote(opts.SyncDir, "origin") {
-		if err := git.Push(opts.SyncDir); err != nil {
-			return fmt.Errorf("pushing: %w", err)
+		if !git.HasUpstream(opts.SyncDir) {
+			branch, err := git.CurrentBranch(opts.SyncDir)
+			if err != nil {
+				return fmt.Errorf("detecting branch: %w", err)
+			}
+			pushFn := git.PushWithUpstream
+			if opts.Force {
+				pushFn = git.ForcePushWithUpstream
+			}
+			if err := pushFn(opts.SyncDir, "origin", branch); err != nil {
+				return fmt.Errorf("pushing: %w", err)
+			}
+		} else {
+			pushFn := git.Push
+			if opts.Force {
+				pushFn = git.ForcePush
+			}
+			if err := pushFn(opts.SyncDir); err != nil {
+				return fmt.Errorf("pushing: %w", err)
+			}
 		}
 	}
 
