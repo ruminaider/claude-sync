@@ -26,6 +26,9 @@ type PushScanResult struct {
 	ChangedKeybindings bool
 	ChangedCommands    bool
 	ChangedSkills      bool
+	OrphanedCommands   []string // command files in sync dir but not in config
+	OrphanedSkills     []string // skill dirs in sync dir but not in config
+	DirtyWorkingTree   bool     // sync repo has uncommitted changes (e.g. from config update)
 }
 
 func (r *PushScanResult) HasChanges() bool {
@@ -33,7 +36,9 @@ func (r *PushScanResult) HasChanges() bool {
 		len(r.ChangedSettings) > 0 ||
 		r.ChangedPermissions || r.ChangedClaudeMD != nil ||
 		r.ChangedMCP || r.ChangedKeybindings ||
-		r.ChangedCommands || r.ChangedSkills
+		r.ChangedCommands || r.ChangedSkills ||
+		len(r.OrphanedCommands) > 0 || len(r.OrphanedSkills) > 0 ||
+		r.DirtyWorkingTree
 }
 
 func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
@@ -142,37 +147,63 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		}
 	}
 
-	// Scan commands — compare claudeDir/commands/ vs syncDir/commands/.
-	result.ChangedCommands = dirContentsDiffer(
-		filepath.Join(claudeDir, "commands"),
-		filepath.Join(syncDir, "commands"),
-	)
+	// Scan commands — compare items listed in config, or check for uncommitted changes.
+	cmdNames := extractNamesFromKeys(cfg.Commands)
+	if len(cmdNames) > 0 {
+		result.ChangedCommands = filteredDirContentsDiffer(
+			filepath.Join(claudeDir, "commands"),
+			filepath.Join(syncDir, "commands"),
+			cmdNames,
+		)
+	}
+	if !result.ChangedCommands && git.HasUncommittedChanges(syncDir, "commands") {
+		result.ChangedCommands = true
+	}
 
-	// Scan skills — compare claudeDir/skills/ vs syncDir/skills/.
-	result.ChangedSkills = dirContentsDiffer(
-		filepath.Join(claudeDir, "skills"),
-		filepath.Join(syncDir, "skills"),
-	)
+	// Scan skills — compare items listed in config, or check for uncommitted changes.
+	skillNames := extractNamesFromKeys(cfg.Skills)
+	if len(skillNames) > 0 {
+		result.ChangedSkills = filteredDirContentsDiffer(
+			filepath.Join(claudeDir, "skills"),
+			filepath.Join(syncDir, "skills"),
+			skillNames,
+		)
+	}
+	if !result.ChangedSkills && git.HasUncommittedChanges(syncDir, "skills") {
+		result.ChangedSkills = true
+	}
+
+	// Detect orphaned commands/skills in sync dir that aren't in config.
+	result.OrphanedCommands = findOrphanedFiles(filepath.Join(syncDir, "commands"), cmdNames)
+	result.OrphanedSkills = findOrphanedDirs(filepath.Join(syncDir, "skills"), skillNames)
+
+	// Check for uncommitted changes in the sync repo (e.g. from config update).
+	if clean, err := git.IsClean(syncDir); err == nil && !clean {
+		result.DirtyWorkingTree = true
+	}
 
 	return result, nil
 }
 
 // PushApplyOptions configures what PushApply does.
 type PushApplyOptions struct {
-	ClaudeDir         string
-	SyncDir           string
-	AddPlugins        []string
-	RemovePlugins     []string
-	ExcludePlugins    []string // plugins to add to cfg.Excluded
-	ProfileTarget     string   // "" = base config, non-empty = profile name
-	Message           string
-	UpdatePermissions bool
-	UpdateClaudeMD    bool
-	UpdateMCP         bool
-	UpdateKeybindings bool
-	UpdateCommands    bool
-	UpdateSkills      bool
-	Force             bool // force push (--force-with-lease)
+	ClaudeDir          string
+	SyncDir            string
+	AddPlugins         []string
+	RemovePlugins      []string
+	ExcludePlugins     []string // plugins to add to cfg.Excluded
+	ProfileTarget      string   // "" = base config, non-empty = profile name
+	Message            string
+	UpdatePermissions  bool
+	UpdateClaudeMD     bool
+	UpdateMCP          bool
+	UpdateKeybindings  bool
+	UpdateCommands     bool
+	UpdateSkills       bool
+	OrphanedCommands   []string // command files to remove from sync dir
+	OrphanedSkills     []string // skill dirs to remove from sync dir
+	DirtyWorkingTree   bool     // sync repo has uncommitted changes to include
+	Force              bool     // force push (--force-with-lease)
 }
 
 func PushApply(opts PushApplyOptions) error {
@@ -300,14 +331,22 @@ func PushApply(opts PushApplyOptions) error {
 		}
 	}
 
-	// Update commands from current state.
+	// Update commands from current state (only items listed in config).
 	if opts.UpdateCommands {
-		syncCopyCommands(opts.ClaudeDir, opts.SyncDir)
+		syncCopyCommands(opts.ClaudeDir, opts.SyncDir, extractNamesFromKeys(cfg.Commands))
 	}
 
-	// Update skills from current state.
+	// Update skills from current state (only items listed in config).
 	if opts.UpdateSkills {
-		syncCopySkills(opts.ClaudeDir, opts.SyncDir)
+		syncCopySkills(opts.ClaudeDir, opts.SyncDir, extractNamesFromKeys(cfg.Skills))
+	}
+
+	// Remove orphaned commands/skills from sync dir.
+	for _, name := range opts.OrphanedCommands {
+		os.Remove(filepath.Join(opts.SyncDir, "commands", name+".md"))
+	}
+	for _, name := range opts.OrphanedSkills {
+		os.RemoveAll(filepath.Join(opts.SyncDir, "skills", name))
 	}
 
 	// Always write config (excluded list may change even for profile-targeted pushes).
@@ -356,6 +395,17 @@ func PushApply(opts PushApplyOptions) error {
 				return fmt.Errorf("staging skills: %w", err)
 			}
 		}
+	}
+	// Stage orphan removals individually (the directories are already deleted).
+	for _, name := range opts.OrphanedCommands {
+		git.Add(opts.SyncDir, filepath.Join("commands", name+".md"))
+	}
+	for _, name := range opts.OrphanedSkills {
+		git.Add(opts.SyncDir, filepath.Join("skills", name))
+	}
+	// Catch-all: stage any remaining uncommitted changes (e.g. from config update).
+	if opts.DirtyWorkingTree {
+		git.Add(opts.SyncDir, "-A")
 	}
 	if err := git.Commit(opts.SyncDir, message); err != nil {
 		return fmt.Errorf("committing: %w", err)
@@ -438,6 +488,43 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
+// findOrphanedFiles returns .md file names in dir that aren't in the allowed set.
+func findOrphanedFiles(dir string, allowed map[string]bool) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var orphans []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".md")
+		if !allowed[name] {
+			orphans = append(orphans, name)
+		}
+	}
+	return orphans
+}
+
+// findOrphanedDirs returns subdirectory names in dir that aren't in the allowed set.
+func findOrphanedDirs(dir string, allowed map[string]bool) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var orphans []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !allowed[entry.Name()] {
+			orphans = append(orphans, entry.Name())
+		}
+	}
+	return orphans
+}
+
 // jsonMapsEqual compares two json.RawMessage maps by key set and value bytes.
 func jsonMapsEqual(a, b map[string]json.RawMessage) bool {
 	if len(a) != len(b) {
@@ -453,24 +540,6 @@ func jsonMapsEqual(a, b map[string]json.RawMessage) bool {
 		}
 	}
 	return true
-}
-
-// dirContentsDiffer returns true if the .md files in dir a differ from those
-// in dir b. Compares filenames and file contents. Returns false if neither
-// directory exists.
-func dirContentsDiffer(a, b string) bool {
-	aFiles := readDirMDFiles(a)
-	bFiles := readDirMDFiles(b)
-
-	if len(aFiles) != len(bFiles) {
-		return len(aFiles) > 0 || len(bFiles) > 0
-	}
-	for name, aContent := range aFiles {
-		if bContent, ok := bFiles[name]; !ok || aContent != bContent {
-			return true
-		}
-	}
-	return false
 }
 
 // readDirMDFiles reads all .md files in a directory into a map of name→content.
@@ -498,46 +567,77 @@ func readDirMDFiles(dir string) map[string]string {
 	return files
 }
 
-// syncCopyCommands copies .md files from claudeDir/commands/ to syncDir/commands/.
-func syncCopyCommands(claudeDir, syncDir string) {
+// extractNamesFromKeys parses the trailing name from key strings like
+// "cmd:global:review-plan" or "skill:global:termdock-ast".
+func extractNamesFromKeys(keys []string) map[string]bool {
+	names := make(map[string]bool)
+	for _, k := range keys {
+		parts := strings.Split(k, ":")
+		if len(parts) >= 3 {
+			names[parts[len(parts)-1]] = true
+		}
+	}
+	return names
+}
+
+// filteredDirContentsDiffer compares only the named items between two directories.
+func filteredDirContentsDiffer(a, b string, names map[string]bool) bool {
+	aFiles := readDirMDFiles(a)
+	bFiles := readDirMDFiles(b)
+
+	for name := range names {
+		// For commands: name.md; for skills: name/SKILL.md.
+		cmdKey := name + ".md"
+		skillKey := name + "/SKILL.md"
+
+		aContent, aOK := aFiles[cmdKey]
+		bContent, bOK := bFiles[cmdKey]
+		if !aOK {
+			aContent, aOK = aFiles[skillKey]
+			bContent, bOK = bFiles[skillKey]
+		}
+		if aOK != bOK {
+			return true
+		}
+		if aOK && aContent != bContent {
+			return true
+		}
+	}
+	return false
+}
+
+// syncCopyCommands copies only the named .md files from claudeDir/commands/ to syncDir/commands/.
+func syncCopyCommands(claudeDir, syncDir string, names map[string]bool) {
+	if len(names) == 0 {
+		return
+	}
 	srcDir := filepath.Join(claudeDir, "commands")
 	dstDir := filepath.Join(syncDir, "commands")
 
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return
-	}
-
 	os.MkdirAll(dstDir, 0755)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		srcPath := filepath.Join(srcDir, entry.Name())
-		dstPath := filepath.Join(dstDir, entry.Name())
+	for name := range names {
+		srcPath := filepath.Join(srcDir, name+".md")
+		dstPath := filepath.Join(dstDir, name+".md")
 		if data, err := os.ReadFile(srcPath); err == nil {
 			os.WriteFile(dstPath, data, 0644)
 		}
 	}
 }
 
-// syncCopySkills copies skill directories from claudeDir/skills/ to syncDir/skills/.
-func syncCopySkills(claudeDir, syncDir string) {
+// syncCopySkills copies only the named skill directories from claudeDir/skills/ to syncDir/skills/.
+func syncCopySkills(claudeDir, syncDir string, names map[string]bool) {
+	if len(names) == 0 {
+		return
+	}
 	srcDir := filepath.Join(claudeDir, "skills")
 	dstDir := filepath.Join(syncDir, "skills")
 
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	for name := range names {
+		srcSkillDir := filepath.Join(srcDir, name)
+		dstSkillDir := filepath.Join(dstDir, name)
+		if _, err := os.Stat(srcSkillDir); err == nil {
+			copyDir(srcSkillDir, dstSkillDir)
 		}
-		srcSkillDir := filepath.Join(srcDir, entry.Name())
-		dstSkillDir := filepath.Join(dstDir, entry.Name())
-		copyDir(srcSkillDir, dstSkillDir)
 	}
 }
 

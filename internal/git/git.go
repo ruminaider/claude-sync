@@ -32,6 +32,16 @@ func IsClean(dir string) (bool, error) {
 	return out == "", nil
 }
 
+// HasUncommittedChanges returns true if the given path (relative to dir)
+// has any uncommitted changes (modified, untracked, or deleted).
+func HasUncommittedChanges(dir, path string) bool {
+	out, err := Run(dir, "status", "--porcelain", path)
+	if err != nil {
+		return false
+	}
+	return out != ""
+}
+
 // RevParse returns the resolved SHA for a ref.
 func RevParse(dir, ref string) (string, error) {
 	return Run(dir, "rev-parse", ref)
