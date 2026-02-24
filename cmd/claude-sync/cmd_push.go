@@ -60,6 +60,9 @@ var pushCmd = &cobra.Command{
 				UpdateKeybindings: scan.ChangedKeybindings,
 				UpdateCommands:    scan.ChangedCommands,
 				UpdateSkills:      scan.ChangedSkills,
+				OrphanedCommands:  scan.OrphanedCommands,
+				OrphanedSkills:    scan.OrphanedSkills,
+				DirtyWorkingTree:  scan.DirtyWorkingTree,
 				Message:           pushMessage,
 				Force:             pushForceFlag,
 			})
@@ -92,7 +95,8 @@ var pushCmd = &cobra.Command{
 		updateKB := scan.ChangedKeybindings
 		updateCmds := scan.ChangedCommands
 		updateSkills := scan.ChangedSkills
-		hasNonPluginChanges := updatePerms || updateClaudeMD || updateMCP || updateKB || updateCmds || updateSkills
+		hasOrphans := len(scan.OrphanedCommands) > 0 || len(scan.OrphanedSkills) > 0
+		hasNonPluginChanges := updatePerms || updateClaudeMD || updateMCP || updateKB || updateCmds || updateSkills || hasOrphans || scan.DirtyWorkingTree
 
 		var selectedAdd []string
 		var selectedRemove []string
@@ -149,6 +153,15 @@ var pushCmd = &cobra.Command{
 			if updateSkills {
 				kinds = append(kinds, "skills")
 			}
+			if len(scan.OrphanedCommands) > 0 {
+				kinds = append(kinds, fmt.Sprintf("removing %d orphaned command(s)", len(scan.OrphanedCommands)))
+			}
+			if len(scan.OrphanedSkills) > 0 {
+				kinds = append(kinds, fmt.Sprintf("removing %d orphaned skill(s)", len(scan.OrphanedSkills)))
+			}
+			if scan.DirtyWorkingTree && len(kinds) == 0 {
+				kinds = append(kinds, "uncommitted changes from config update")
+			}
 			fmt.Printf("Including config changes: %s\n", strings.Join(kinds, ", "))
 		}
 
@@ -195,6 +208,9 @@ var pushCmd = &cobra.Command{
 			UpdateKeybindings: updateKB,
 			UpdateCommands:    updateCmds,
 			UpdateSkills:      updateSkills,
+			OrphanedCommands:  scan.OrphanedCommands,
+			OrphanedSkills:    scan.OrphanedSkills,
+			DirtyWorkingTree:  scan.DirtyWorkingTree,
 			Force:             pushForceFlag,
 		})
 		if err != nil {
