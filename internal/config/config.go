@@ -25,6 +25,14 @@ type MCPServerMeta struct {
 	SourceProject string `yaml:"source_project,omitempty"`
 }
 
+// MarketplaceSource declares how a custom marketplace should be resolved.
+// Well-known marketplaces (claude-plugins-official, etc.) don't need entries.
+type MarketplaceSource struct {
+	Source string `yaml:"source"` // "github" or "git"
+	Repo   string `yaml:"repo,omitempty"`   // "org/repo" for github
+	URL    string `yaml:"url,omitempty"`    // full URL for git
+}
+
 // ConfigV2 represents ~/.claude-sync/config.yaml with categorized plugins.
 type ConfigV2 struct {
 	Version     string                     `yaml:"version"`
@@ -38,9 +46,10 @@ type ConfigV2 struct {
 	ClaudeMD    ClaudeMDConfig             `yaml:"-"`
 	MCP         map[string]json.RawMessage `yaml:"-"`
 	MCPMeta     map[string]MCPServerMeta   `yaml:"-"`
-	Keybindings map[string]any             `yaml:"-"`
-	Commands    []string                   `yaml:"-"`
-	Skills      []string                   `yaml:"-"`
+	Keybindings  map[string]any              `yaml:"-"`
+	Commands     []string                   `yaml:"-"`
+	Skills       []string                   `yaml:"-"`
+	Marketplaces map[string]MarketplaceSource `yaml:"-"`
 }
 
 // Config is a type alias for ConfigV2 to maintain backward compatibility.
@@ -177,6 +186,12 @@ func Parse(data []byte) (Config, error) {
 				return Config{}, fmt.Errorf("parsing config skills: %w", err)
 			}
 			cfg.Skills = skills
+		case "marketplaces":
+			var mkts map[string]MarketplaceSource
+			if err := valNode.Decode(&mkts); err != nil {
+				return Config{}, fmt.Errorf("parsing config marketplaces: %w", err)
+			}
+			cfg.Marketplaces = mkts
 		}
 	}
 
@@ -464,6 +479,18 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "skills", Tag: "!!str"},
 			skillSeq,
+		)
+	}
+
+	// marketplaces
+	if len(cfg.Marketplaces) > 0 {
+		var mktsNode yaml.Node
+		if err := mktsNode.Encode(cfg.Marketplaces); err != nil {
+			return nil, fmt.Errorf("encoding marketplaces: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "marketplaces", Tag: "!!str"},
+			&mktsNode,
 		)
 	}
 

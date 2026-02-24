@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -583,6 +584,160 @@ func TestComputePluginContentHash(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, hashBefore, hashAfter)
+	})
+}
+
+// ─── EnsureRegistered ──────────────────────────────────────────────────────
+
+func TestEnsureRegistered(t *testing.T) {
+	t.Run("registers missing marketplace", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+		declared := map[string]config.MarketplaceSource{
+			"my-marketplace": {Source: "github", Repo: "myorg/my-marketplace"},
+		}
+
+		err := marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		// Verify it was written.
+		data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+		require.NoError(t, err)
+
+		var entries map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &entries))
+		assert.Contains(t, entries, "my-marketplace")
+
+		// Verify entry structure.
+		var entry struct {
+			Source struct {
+				Source string `json:"source"`
+				Repo   string `json:"repo"`
+			} `json:"source"`
+			InstallLocation string `json:"installLocation"`
+		}
+		require.NoError(t, json.Unmarshal(entries["my-marketplace"], &entry))
+		assert.Equal(t, "github", entry.Source.Source)
+		assert.Equal(t, "myorg/my-marketplace", entry.Source.Repo)
+		assert.Equal(t, filepath.Join(claudeDir, "plugins", "marketplaces", "my-marketplace"), entry.InstallLocation)
+	})
+
+	t.Run("does not overwrite existing marketplace", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		// Pre-populate with an existing entry.
+		existing := `{"my-marketplace": {"source": {"source": "directory", "path": "/custom/path"}, "installLocation": "/custom/path"}}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(existing), 0644))
+
+		declared := map[string]config.MarketplaceSource{
+			"my-marketplace": {Source: "github", Repo: "myorg/my-marketplace"},
+		}
+
+		err := marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		// Verify the existing entry was preserved (not overwritten).
+		data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+		require.NoError(t, err)
+
+		var entry struct {
+			Source struct {
+				Source string `json:"source"`
+			} `json:"source"`
+		}
+		var entries map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &entries))
+		require.NoError(t, json.Unmarshal(entries["my-marketplace"], &entry))
+		assert.Equal(t, "directory", entry.Source.Source, "existing entry should not be overwritten")
+	})
+
+	t.Run("empty declared map is no-op", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+		err := marketplace.EnsureRegistered(claudeDir, map[string]config.MarketplaceSource{})
+		require.NoError(t, err)
+	})
+
+	t.Run("registers git source with URL", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+		declared := map[string]config.MarketplaceSource{
+			"private-marketplace": {Source: "git", URL: "https://git.internal.com/plugins.git"},
+		}
+
+		err := marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+		require.NoError(t, err)
+
+		var entries map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &entries))
+
+		var entry struct {
+			Source struct {
+				Source string `json:"source"`
+				URL    string `json:"url"`
+			} `json:"source"`
+		}
+		require.NoError(t, json.Unmarshal(entries["private-marketplace"], &entry))
+		assert.Equal(t, "git", entry.Source.Source)
+		assert.Equal(t, "https://git.internal.com/plugins.git", entry.Source.URL)
+	})
+
+	t.Run("bootstraps when known_marketplaces.json missing", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		// No plugins/ directory exists yet.
+
+		declared := map[string]config.MarketplaceSource{
+			"my-marketplace": {Source: "github", Repo: "myorg/my-marketplace"},
+		}
+
+		err := marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		// Verify marketplace was registered.
+		data, err := os.ReadFile(filepath.Join(claudeDir, "plugins", "known_marketplaces.json"))
+		require.NoError(t, err)
+
+		var entries map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &entries))
+		assert.Contains(t, entries, "my-marketplace")
+	})
+
+	t.Run("preserves other marketplaces when adding new ones", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		existing := `{"existing-marketplace": {"source": {"source": "github", "repo": "org/existing"}, "installLocation": "/some/path"}}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(existing), 0644))
+
+		declared := map[string]config.MarketplaceSource{
+			"new-marketplace": {Source: "github", Repo: "org/new"},
+		}
+
+		err := marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+		require.NoError(t, err)
+
+		var entries map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &entries))
+		assert.Contains(t, entries, "existing-marketplace", "existing entry should be preserved")
+		assert.Contains(t, entries, "new-marketplace", "new entry should be added")
 	})
 }
 

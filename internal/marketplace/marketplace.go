@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/config"
 )
 
 // PluginVersionInfo holds version data for a plugin in a marketplace.
@@ -380,6 +383,61 @@ func ComputePluginContentHash(sourceDir string) (string, error) {
 	}
 
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// EnsureRegistered checks if each declared marketplace exists in
+// known_marketplaces.json. If missing, registers it as a GitHub or git source.
+// Skips marketplaces that are already registered (idempotent).
+func EnsureRegistered(claudeDir string, declared map[string]config.MarketplaceSource) error {
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	if err != nil {
+		// Bootstrap if file doesn't exist yet.
+		if err := claudecode.Bootstrap(claudeDir); err != nil {
+			return fmt.Errorf("bootstrapping claude dir: %w", err)
+		}
+		mkts, err = claudecode.ReadMarketplaces(claudeDir)
+		if err != nil {
+			return fmt.Errorf("reading marketplaces after bootstrap: %w", err)
+		}
+	}
+
+	changed := false
+	for name, src := range declared {
+		if _, exists := mkts[name]; exists {
+			continue // already registered, don't overwrite
+		}
+		entry := buildMarketplaceEntry(claudeDir, name, src)
+		raw, err := json.Marshal(entry)
+		if err != nil {
+			return fmt.Errorf("marshaling marketplace entry %q: %w", name, err)
+		}
+		mkts[name] = json.RawMessage(raw)
+		changed = true
+	}
+
+	if changed {
+		return claudecode.WriteMarketplaces(claudeDir, mkts)
+	}
+	return nil
+}
+
+// buildMarketplaceEntry creates a known_marketplaces.json entry for a declared
+// marketplace source. The entry format matches what Claude Code expects.
+func buildMarketplaceEntry(claudeDir, name string, src config.MarketplaceSource) map[string]any {
+	sourceMap := map[string]string{
+		"source": src.Source,
+	}
+	switch src.Source {
+	case "github":
+		sourceMap["repo"] = src.Repo
+	case "git":
+		sourceMap["url"] = src.URL
+	}
+
+	return map[string]any{
+		"source":          sourceMap,
+		"installLocation": filepath.Join(claudeDir, "plugins", "marketplaces", name),
+	}
 }
 
 // gitLogLastCommit returns the latest commit SHA that touched the given path
