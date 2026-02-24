@@ -36,6 +36,7 @@ func SearchClaudeMD() tea.Cmd {
 		if fdPath, err := exec.LookPath("fd"); err == nil {
 			out, err := exec.Command(
 				fdPath,
+				"-I",
 				"-t", "f",
 				"-d", "4",
 				"CLAUDE.md",
@@ -113,7 +114,7 @@ func SearchMCPConfigs() tea.Cmd {
 		if fdPath, err := exec.LookPath("fd"); err == nil {
 			out, err := exec.Command(
 				fdPath,
-				"-H",
+				"-H", "-I",
 				"-t", "f",
 				"-d", "4",
 				".mcp.json",
@@ -231,7 +232,7 @@ func SearchCommandsSkills() tea.Cmd {
 		if fdPath, err := exec.LookPath("fd"); err == nil {
 			out, err := exec.Command(
 				fdPath,
-				"-H",
+				"-H", "-I",
 				"-t", "d",
 				"-d", "4",
 				"^.claude$",

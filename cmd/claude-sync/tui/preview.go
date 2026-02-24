@@ -77,15 +77,20 @@ func NewPreview(sections []PreviewSection) Preview {
 // PreviewSection values suitable for the preview model.
 func ClaudeMDPreviewSections(sections []claudemd.Section, source string) []PreviewSection {
 	result := make([]PreviewSection, 0, len(sections))
+	isGlobal := strings.HasSuffix(source, "/.claude/CLAUDE.md")
 	for _, sec := range sections {
 		header := sec.Header
 		if header == "" {
 			header = "(preamble)"
 		}
+		fragKey := claudemd.HeaderToFragmentName(sec.Header)
+		if !isGlobal {
+			fragKey = source + "::" + fragKey
+		}
 		result = append(result, PreviewSection{
 			Header:      header,
 			Content:     sec.Content,
-			FragmentKey: claudemd.HeaderToFragmentName(sec.Header),
+			FragmentKey: fragKey,
 			Source:      source,
 		})
 	}
@@ -164,6 +169,42 @@ func (p Preview) SelectedCount() int {
 // TotalCount returns the total number of sections.
 func (p Preview) TotalCount() int {
 	return len(p.sections)
+}
+
+// GlobalSelectedFragmentKeys returns the fragment keys of selected sections
+// that belong to the global CLAUDE.md (unqualified keys without "::").
+func (p Preview) GlobalSelectedFragmentKeys() []string {
+	var keys []string
+	for i, sec := range p.sections {
+		if p.selected[i] && !strings.Contains(sec.FragmentKey, "::") {
+			keys = append(keys, sec.FragmentKey)
+		}
+	}
+	return keys
+}
+
+// ProjectSelectedFragmentKeys returns the fragment keys of selected sections
+// that belong to project-level CLAUDE.md files (qualified keys with "::").
+func (p Preview) ProjectSelectedFragmentKeys() []string {
+	var keys []string
+	for i, sec := range p.sections {
+		if p.selected[i] && strings.Contains(sec.FragmentKey, "::") {
+			keys = append(keys, sec.FragmentKey)
+		}
+	}
+	return keys
+}
+
+// GlobalTotalCount returns the number of sections from the global CLAUDE.md
+// (those with unqualified fragment keys).
+func (p Preview) GlobalTotalCount() int {
+	count := 0
+	for _, sec := range p.sections {
+		if !strings.Contains(sec.FragmentKey, "::") {
+			count++
+		}
+	}
+	return count
 }
 
 // SetSize sets the total dimensions available for the preview and recalculates

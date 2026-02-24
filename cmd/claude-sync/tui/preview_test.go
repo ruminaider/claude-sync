@@ -42,7 +42,7 @@ func TestClaudeMDPreviewSections_PreambleOnly(t *testing.T) {
 	result := ClaudeMDPreviewSections(sections, "/path/CLAUDE.md")
 	require.Len(t, result, 1)
 	assert.Equal(t, "(preamble)", result[0].Header)
-	assert.Equal(t, "_preamble", result[0].FragmentKey)
+	assert.Equal(t, "/path/CLAUDE.md::_preamble", result[0].FragmentKey)
 }
 
 func TestPreviewSelectedFragmentKeys(t *testing.T) {
@@ -277,6 +277,47 @@ func TestPreviewSelectAllNone(t *testing.T) {
 		p.selected[i] = true
 	}
 	assert.Equal(t, 2, p.SelectedCount())
+}
+
+func TestGlobalSelectedFragmentKeys(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "(preamble)", FragmentKey: "_preamble"},                              // global
+		{Header: "Git Commits", FragmentKey: "git-commits"},                           // global
+		{Header: "(preamble)", FragmentKey: "~/project/CLAUDE.md::_preamble"},         // project
+		{Header: "API Keys", FragmentKey: "~/project/CLAUDE.md::api-keys"},            // project
+	}
+	p := NewPreview(sections)
+
+	globalKeys := p.GlobalSelectedFragmentKeys()
+	assert.Equal(t, []string{"_preamble", "git-commits"}, globalKeys)
+	assert.Equal(t, 2, p.GlobalTotalCount())
+}
+
+func TestGlobalSelectedFragmentKeys_NoneGlobal(t *testing.T) {
+	sections := []PreviewSection{
+		{Header: "(preamble)", FragmentKey: "~/project/CLAUDE.md::_preamble"},
+	}
+	p := NewPreview(sections)
+
+	assert.Nil(t, p.GlobalSelectedFragmentKeys())
+	assert.Equal(t, 0, p.GlobalTotalCount())
+}
+
+func TestClaudeMDPreviewSections_GlobalVsProject(t *testing.T) {
+	sections := []claudemd.Section{
+		{Header: "", Content: "preamble content"},
+		{Header: "Section A", Content: "## Section A\ncontent"},
+	}
+
+	// Global source: keys are unqualified.
+	globalResult := ClaudeMDPreviewSections(sections, "~/.claude/CLAUDE.md")
+	assert.Equal(t, "_preamble", globalResult[0].FragmentKey)
+	assert.Equal(t, "section-a", globalResult[1].FragmentKey)
+
+	// Project source: keys are source-qualified.
+	projResult := ClaudeMDPreviewSections(sections, "~/project/CLAUDE.md")
+	assert.Equal(t, "~/project/CLAUDE.md::_preamble", projResult[0].FragmentKey)
+	assert.Equal(t, "~/project/CLAUDE.md::section-a", projResult[1].FragmentKey)
 }
 
 func TestPreviewRowCursorOnSearchAction(t *testing.T) {

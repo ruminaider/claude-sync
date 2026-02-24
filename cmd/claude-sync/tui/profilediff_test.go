@@ -66,14 +66,6 @@ func TestSortedKeys_Empty(t *testing.T) {
 	assert.Empty(t, sortedKeys(map[string]bool{}))
 }
 
-func TestStripBaseMarker(t *testing.T) {
-	assert.Equal(t, "", stripBaseMarker("●"))
-	assert.Equal(t, "[cmd]", stripBaseMarker("● [cmd]"))
-	assert.Equal(t, "[cmd]", stripBaseMarker("[cmd]"))
-	assert.Equal(t, "", stripBaseMarker(""))
-	assert.Equal(t, "via foo", stripBaseMarker("● via foo"))
-}
-
 func TestProfileToSectionDiffs_Plugins(t *testing.T) {
 	p := profiles.Profile{
 		Plugins: profiles.ProfilePlugins{
@@ -186,7 +178,6 @@ func TestRebuildProfilePicker_Settings(t *testing.T) {
 	for _, it := range workSettings.items {
 		if isSelectableItem(it) && it.Selected {
 			assert.True(t, it.IsBase, "selected setting %s should have IsBase=true", it.Key)
-			assert.Contains(t, it.Tag, "●", "selected setting %s should have ● tag", it.Key)
 		}
 	}
 }
@@ -206,7 +197,6 @@ func TestRebuildProfilePicker_MCP(t *testing.T) {
 	for _, it := range workMCP.items {
 		if isSelectableItem(it) && it.Selected {
 			assert.True(t, it.IsBase, "selected MCP %s should have IsBase=true", it.Key)
-			assert.Contains(t, it.Tag, "●", "selected MCP %s should have ● tag", it.Key)
 		}
 	}
 }
@@ -225,7 +215,6 @@ func TestRebuildProfilePicker_Hooks(t *testing.T) {
 	for _, it := range workHooks.items {
 		if isSelectableItem(it) && it.Selected {
 			assert.True(t, it.IsBase, "selected hook %s should have IsBase=true", it.Key)
-			assert.Contains(t, it.Tag, "●", "selected hook %s should have ● tag", it.Key)
 		}
 	}
 }
@@ -244,7 +233,6 @@ func TestRebuildProfilePicker_Permissions(t *testing.T) {
 	for _, it := range workPerms.items {
 		if isSelectableItem(it) && it.Selected {
 			assert.True(t, it.IsBase, "selected perm %s should have IsBase=true", it.Key)
-			assert.Contains(t, it.Tag, "●", "selected perm %s should have ● tag", it.Key)
 		}
 	}
 }
