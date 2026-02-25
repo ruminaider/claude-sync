@@ -301,6 +301,11 @@ func Update(opts InitOptions) (*InitResult, error) {
 		return nil, err
 	}
 
+	// Ensure plugins/.gitkeep exists for repos initialized before it was added.
+	pluginsDir := filepath.Join(syncDir, "plugins")
+	os.MkdirAll(pluginsDir, 0755)
+	os.WriteFile(filepath.Join(pluginsDir, ".gitkeep"), []byte{}, 0644)
+
 	if len(forkedNames) > 0 {
 		if err := forkedplugins.RegisterLocalMarketplace(opts.ClaudeDir, syncDir); err != nil {
 			return nil, fmt.Errorf("registering local marketplace: %w", err)
