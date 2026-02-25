@@ -387,6 +387,104 @@ func ComputePluginContentHash(sourceDir string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
+// UpgradeDirectoryMarketplaces inspects directory-source marketplace entries
+// in known_marketplaces.json. If the install location is a git repo with a
+// GitHub remote, the entry is re-registered as a github source. This handles
+// the common case where a plugin was installed from a local directory during
+// development but the directory is actually a clone of a GitHub repo.
+//
+// Returns the number of marketplaces upgraded.
+func UpgradeDirectoryMarketplaces(claudeDir string) int {
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	if err != nil {
+		return 0
+	}
+
+	upgraded := 0
+	for name, raw := range mkts {
+		var entry knownMarketplacesFullEntry
+		if json.Unmarshal(raw, &entry) != nil {
+			continue
+		}
+		if entry.Source.Source != "directory" {
+			continue
+		}
+		// Skip the claude-sync-forks marketplace — it's intentionally directory-based.
+		if name == "claude-sync-forks" {
+			continue
+		}
+
+		repo := detectGitHubRemote(entry.InstallLocation)
+		if repo == "" {
+			continue
+		}
+
+		// Re-register as github source.
+		newEntry := map[string]any{
+			"source": map[string]string{
+				"source": "github",
+				"repo":   repo,
+			},
+			"installLocation": entry.InstallLocation,
+		}
+		newRaw, err := json.Marshal(newEntry)
+		if err != nil {
+			continue
+		}
+		mkts[name] = json.RawMessage(newRaw)
+		upgraded++
+	}
+
+	if upgraded > 0 {
+		_ = claudecode.WriteMarketplaces(claudeDir, mkts)
+	}
+	return upgraded
+}
+
+// detectGitHubRemote checks if dir is a git repo with a GitHub remote.
+// Returns "org/repo" if found, empty string otherwise.
+func detectGitHubRemote(dir string) string {
+	if _, err := os.Stat(dir); err != nil {
+		return ""
+	}
+
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	url := strings.TrimSpace(string(out))
+	return ParseGitHubRepoURL(url)
+}
+
+// ParseGitHubRepoURL extracts "org/repo" from a GitHub URL.
+// Handles HTTPS (https://github.com/org/repo.git) and SSH (git@github.com:org/repo.git).
+func ParseGitHubRepoURL(url string) string {
+	url = strings.TrimSuffix(url, ".git")
+
+	// HTTPS: https://github.com/org/repo
+	if strings.HasPrefix(url, "https://github.com/") {
+		path := strings.TrimPrefix(url, "https://github.com/")
+		parts := strings.SplitN(path, "/", 3)
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+	}
+
+	// SSH: git@github.com:org/repo
+	if strings.HasPrefix(url, "git@github.com:") {
+		path := strings.TrimPrefix(url, "git@github.com:")
+		parts := strings.SplitN(path, "/", 3)
+		if len(parts) >= 2 {
+			return parts[0] + "/" + parts[1]
+		}
+	}
+
+	return ""
+}
+
 // CollectCustomMarketplaceSources reads known_marketplaces.json and returns
 // MarketplaceSource entries for portable (github/git) marketplaces that are NOT
 // in the hardcoded well-known list. This is used by config create/update to

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/stretchr/testify/assert"
@@ -585,6 +586,120 @@ func TestComputePluginContentHash(t *testing.T) {
 
 		assert.Equal(t, hashBefore, hashAfter)
 	})
+}
+
+// ─── UpgradeDirectoryMarketplaces ───────────────────────────────────────────
+
+func TestUpgradeDirectoryMarketplaces(t *testing.T) {
+	t.Run("upgrades directory marketplace with GitHub remote", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		// Create a fake git repo with a GitHub remote as the install location.
+		mktDir := t.TempDir()
+		run := func(args ...string) {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = mktDir
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, "git %v: %s", args, string(out))
+		}
+		run("init")
+		run("config", "user.email", "test@test.com")
+		run("config", "user.name", "Test")
+		run("remote", "add", "origin", "https://github.com/myorg/my-marketplace.git")
+
+		km := map[string]any{
+			"my-marketplace": map[string]any{
+				"source":          map[string]string{"source": "directory", "path": mktDir},
+				"installLocation": mktDir,
+			},
+		}
+		kmData, _ := json.MarshalIndent(km, "", "  ")
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), kmData, 0644))
+
+		upgraded := marketplace.UpgradeDirectoryMarketplaces(claudeDir)
+		assert.Equal(t, 1, upgraded)
+
+		// Verify the entry was updated to github.
+		assert.Equal(t, "github", marketplace.MarketplaceSourceType(claudeDir, "my-marketplace"))
+	})
+
+	t.Run("skips directory marketplace without git remote", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		mktDir := t.TempDir() // not a git repo
+
+		km := map[string]any{
+			"local-only": map[string]any{
+				"source":          map[string]string{"source": "directory", "path": mktDir},
+				"installLocation": mktDir,
+			},
+		}
+		kmData, _ := json.MarshalIndent(km, "", "  ")
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), kmData, 0644))
+
+		upgraded := marketplace.UpgradeDirectoryMarketplaces(claudeDir)
+		assert.Equal(t, 0, upgraded)
+		assert.Equal(t, "directory", marketplace.MarketplaceSourceType(claudeDir, "local-only"))
+	})
+
+	t.Run("skips claude-sync-forks marketplace", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		mktDir := t.TempDir()
+
+		km := map[string]any{
+			"claude-sync-forks": map[string]any{
+				"source":          map[string]string{"source": "directory", "path": mktDir},
+				"installLocation": mktDir,
+			},
+		}
+		kmData, _ := json.MarshalIndent(km, "", "  ")
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), kmData, 0644))
+
+		upgraded := marketplace.UpgradeDirectoryMarketplaces(claudeDir)
+		assert.Equal(t, 0, upgraded)
+	})
+
+	t.Run("preserves existing github entries", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		km := `{"gh-mkt": {"source": {"source": "github", "repo": "org/repo"}, "installLocation": "/cache"}}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+		upgraded := marketplace.UpgradeDirectoryMarketplaces(claudeDir)
+		assert.Equal(t, 0, upgraded)
+		assert.Equal(t, "github", marketplace.MarketplaceSourceType(claudeDir, "gh-mkt"))
+	})
+}
+
+func TestParseGitHubRepo(t *testing.T) {
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{"https://github.com/myorg/my-repo.git", "myorg/my-repo"},
+		{"https://github.com/myorg/my-repo", "myorg/my-repo"},
+		{"git@github.com:myorg/my-repo.git", "myorg/my-repo"},
+		{"git@github.com:myorg/my-repo", "myorg/my-repo"},
+		{"https://gitlab.com/org/repo.git", ""},
+		{"https://bitbucket.org/org/repo.git", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got := marketplace.ParseGitHubRepoURL(tt.url)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 // ─── CollectCustomMarketplaceSources ────────────────────────────────────────
