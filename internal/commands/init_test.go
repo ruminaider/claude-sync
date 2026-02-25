@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/ruminaider/claude-sync/internal/claudemd"
@@ -1105,4 +1106,157 @@ func TestInit_MCPFiltered(t *testing.T) {
 	assert.Contains(t, cfg.MCP, "context7")
 	_, hasMemory := cfg.MCP["memory"]
 	assert.False(t, hasMemory)
+}
+
+// --- Orphaned forked plugin cleanup tests ---
+
+func TestUpdate_CleansUpOrphanedForkedPlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	// Create a cached plugin directory for the fork source.
+	forkSrcDir := filepath.Join(t.TempDir(), "bv-files")
+	os.MkdirAll(forkSrcDir, 0755)
+	os.WriteFile(filepath.Join(forkSrcDir, "plugin.json"), []byte(`{"name":"bash-validator"}`), 0644)
+
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"context7@claude-plugins-official": [{"scope":"user","installPath":"/p","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}],
+			"bash-validator@bv-mkt": [{"scope":"user","installPath":"` + forkSrcDir + `","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	// Init with bash-validator as forked (include all plugins).
+	_, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+	})
+	require.NoError(t, err)
+
+	// Verify the fork directory was created.
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "bash-validator"))
+	require.NoError(t, err, "fork dir should exist after init")
+
+	// Now Update excluding the forked plugin (only include context7).
+	_, err = commands.Update(commands.InitOptions{
+		ClaudeDir:      claudeDir,
+		SyncDir:        syncDir,
+		IncludePlugins: []string{"context7@claude-plugins-official"},
+	})
+	require.NoError(t, err)
+
+	// The orphaned fork directory should be removed.
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "bash-validator"))
+	assert.True(t, os.IsNotExist(err), "orphaned fork dir should be removed after update")
+}
+
+func TestUpdate_KeepsActiveForkedPlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	forkSrcDir := filepath.Join(t.TempDir(), "bv-files")
+	os.MkdirAll(forkSrcDir, 0755)
+	os.WriteFile(filepath.Join(forkSrcDir, "plugin.json"), []byte(`{"name":"bash-validator"}`), 0644)
+
+	plugins := `{
+		"version": 2,
+		"plugins": {
+			"bash-validator@bv-mkt": [{"scope":"user","installPath":"` + forkSrcDir + `","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(plugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
+	// Init — plugin gets auto-forked.
+	_, err := commands.Init(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+	})
+	require.NoError(t, err)
+
+	// Update with same plugins — fork should remain.
+	_, err = commands.Update(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+	})
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "bash-validator"))
+	assert.NoError(t, err, "active fork dir should be preserved")
+}
+
+// --- Gitignore tests ---
+
+func TestInit_GitignoreIncludesPycache(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gitignore), "__pycache__/")
+	assert.Contains(t, string(gitignore), "*.pyc")
+}
+
+func TestUpdate_AppendsNewGitignorePatterns(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	// Init creates the repo.
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	// Simulate an old gitignore without pycache patterns by overwriting it.
+	oldGitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n"
+	os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(oldGitignore), 0644)
+
+	// Update should append the missing patterns.
+	_, err = commands.Update(commands.InitOptions{
+		ClaudeDir:       claudeDir,
+		SyncDir:         syncDir,
+		IncludeSettings: true,
+	})
+	require.NoError(t, err)
+
+	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Contains(t, string(gitignore), "__pycache__/")
+	assert.Contains(t, string(gitignore), "*.pyc")
+}
+
+func TestEnsureGitignorePatterns_Idempotent(t *testing.T) {
+	claudeDir, syncDir := setupTestEnv(t)
+
+	_, err := commands.Init(defaultInitOpts(claudeDir, syncDir, ""))
+	require.NoError(t, err)
+
+	// Run Update twice.
+	for i := 0; i < 2; i++ {
+		_, err = commands.Update(commands.InitOptions{
+			ClaudeDir:       claudeDir,
+			SyncDir:         syncDir,
+			IncludeSettings: true,
+		})
+		require.NoError(t, err)
+	}
+
+	gitignore, err := os.ReadFile(filepath.Join(syncDir, ".gitignore"))
+	require.NoError(t, err)
+	content := string(gitignore)
+
+	// Each pattern should appear exactly once.
+	assert.Equal(t, 1, strings.Count(content, "__pycache__/"))
+	assert.Equal(t, 1, strings.Count(content, "*.pyc"))
 }

@@ -183,3 +183,52 @@ func TestUnfork_CleansUpMarketplaceWhenLastFork(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, mkts, plugins.MarketplaceName, "marketplace entry should be removed when last fork is unforked")
 }
+
+func TestCopyDir_SkipsPycache(t *testing.T) {
+	src := t.TempDir()
+
+	// Create source with a __pycache__ directory.
+	os.MkdirAll(filepath.Join(src, "__pycache__"), 0755)
+	os.WriteFile(filepath.Join(src, "__pycache__", "module.cpython-311.pyc"), []byte("bytecode"), 0644)
+	os.WriteFile(filepath.Join(src, "main.py"), []byte("print('hello')"), 0644)
+	os.MkdirAll(filepath.Join(src, "hooks"), 0755)
+	os.WriteFile(filepath.Join(src, "hooks", "hook.py"), []byte("hook"), 0644)
+
+	// Fork the plugin (uses copyDir internally).
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	os.MkdirAll(pluginDir, 0755)
+
+	installedPlugins := `{
+		"version": 2,
+		"plugins": {
+			"test-plugin@test-mkt": [{"scope":"user","installPath":"` + src + `","version":"1.0","installedAt":"2026-01-01T00:00:00Z","lastUpdated":"2026-01-01T00:00:00Z"}]
+		}
+	}`
+	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(installedPlugins), 0644)
+	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
+
+	os.MkdirAll(syncDir, 0755)
+	cfg := config.Config{Version: "1.0.0", Upstream: []string{"test-plugin@test-mkt"}, Pinned: map[string]string{}}
+	cfgData, _ := config.MarshalV2(cfg)
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644)
+	require.NoError(t, git.Init(syncDir))
+	git.Run(syncDir, "config", "user.email", "test@test.com")
+	git.Run(syncDir, "config", "user.name", "Test")
+	require.NoError(t, git.Add(syncDir, "."))
+	require.NoError(t, git.Commit(syncDir, "init"))
+
+	err := commands.Fork(claudeDir, syncDir, "test-plugin@test-mkt")
+	require.NoError(t, err)
+
+	// __pycache__ should NOT exist in the destination.
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "test-plugin", "__pycache__"))
+	assert.True(t, os.IsNotExist(err), "__pycache__ should not be copied")
+
+	// Normal files should exist.
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "test-plugin", "main.py"))
+	assert.NoError(t, err, "main.py should be copied")
+	_, err = os.Stat(filepath.Join(syncDir, "plugins", "test-plugin", "hooks", "hook.py"))
+	assert.NoError(t, err, "hooks/hook.py should be copied")
+}

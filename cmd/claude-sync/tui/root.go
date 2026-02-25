@@ -1143,6 +1143,7 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 		if len(m.scanResult.MCPSecrets) > 0 {
 			mcp = commands.ReplaceSecrets(mcp, m.scanResult.MCPSecrets)
 		}
+		mcp = commands.NormalizeMCPPaths(mcp)
 		opts.MCP = mcp
 	} else {
 		opts.MCP = map[string]json.RawMessage{} // empty = none

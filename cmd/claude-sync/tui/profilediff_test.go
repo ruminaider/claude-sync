@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/ruminaider/claude-sync/internal/commands"
@@ -381,4 +382,41 @@ func TestRebuildAfterBaseChange_AllSectionsUpdate(t *testing.T) {
 
 	devPlugins = m.profilePickers["dev"][SectionPlugins]
 	assert.Equal(t, 1, devPlugins.SelectedCount(), "should only have 1 plugin after base change")
+}
+
+func TestDiffsToProfile_MCPSecretsStripped(t *testing.T) {
+	// Create scan with MCP containing a secret.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP: map[string]json.RawMessage{
+			"render": json.RawMessage(`{"command":"npx","env":{"RENDER_API_KEY":"rnd_abc123"}}`),
+		},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	m.createProfile("work")
+
+	// Deselect MCP from base so it becomes a profile-only add.
+	baseMCP := m.pickers[SectionMCP]
+	for i := range baseMCP.items {
+		if baseMCP.items[i].Key == "render" {
+			baseMCP.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionMCP] = baseMCP
+
+	prof := m.diffsToProfile("work")
+
+	// The profile should have "render" as an MCP add, with secrets replaced.
+	require.Contains(t, prof.MCP.Add, "render")
+
+	var cfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(prof.MCP.Add["render"], &cfg))
+	assert.Equal(t, "${RENDER_API_KEY}", cfg.Env["RENDER_API_KEY"], "secret should be replaced with env var ref")
 }

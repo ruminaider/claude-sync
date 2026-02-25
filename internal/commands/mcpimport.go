@@ -265,6 +265,12 @@ func MCPImport(opts MCPImportOptions) (*MCPImportResult, error) {
 			imported = append(imported, name)
 		}
 	} else {
+		// Strip secrets from profile MCP servers.
+		profileSecrets := DetectMCPSecrets(opts.Servers)
+		if len(profileSecrets) > 0 {
+			opts.Servers = ReplaceSecrets(opts.Servers, profileSecrets)
+		}
+
 		// Merge into profile.
 		profile, err := profiles.ReadProfile(opts.SyncDir, opts.Profile)
 		if err != nil {
@@ -333,6 +339,110 @@ func MCPImport(opts MCPImportOptions) (*MCPImportResult, error) {
 		TargetProfile: opts.Profile,
 		ProjectPath:   opts.ProjectPath,
 	}, nil
+}
+
+// NormalizeMCPPaths replaces $HOME-prefixed absolute paths with ~/ in MCP server
+// configs (command, args elements, and cwd fields). This makes configs portable
+// across machines. Pair with ExpandMCPPaths on the read side.
+func NormalizeMCPPaths(servers map[string]json.RawMessage) map[string]json.RawMessage {
+	home := os.Getenv("HOME")
+	if home == "" {
+		return servers
+	}
+	homePrefix := home + "/"
+	normalize := func(s string) string {
+		if s == home {
+			return "~"
+		}
+		if strings.HasPrefix(s, homePrefix) {
+			return "~/" + s[len(homePrefix):]
+		}
+		return s
+	}
+	return transformMCPPaths(servers, normalize)
+}
+
+// ExpandMCPPaths replaces ~/ prefixed paths with the actual $HOME in MCP server
+// configs (command, args elements, and cwd fields). Inverse of NormalizeMCPPaths.
+func ExpandMCPPaths(servers map[string]json.RawMessage) map[string]json.RawMessage {
+	home := os.Getenv("HOME")
+	if home == "" {
+		return servers
+	}
+	expand := func(s string) string {
+		if s == "~" {
+			return home
+		}
+		if strings.HasPrefix(s, "~/") {
+			return home + "/" + s[2:]
+		}
+		return s
+	}
+	return transformMCPPaths(servers, expand)
+}
+
+// transformMCPPaths applies a path transformation function to the command, args,
+// and cwd fields of each MCP server config.
+func transformMCPPaths(servers map[string]json.RawMessage, transform func(string) string) map[string]json.RawMessage {
+	if len(servers) == 0 {
+		return servers
+	}
+
+	result := make(map[string]json.RawMessage, len(servers))
+	for name, raw := range servers {
+		var cfg map[string]any
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			result[name] = raw
+			continue
+		}
+
+		changed := false
+
+		// Transform "command" field.
+		if cmd, ok := cfg["command"].(string); ok {
+			if t := transform(cmd); t != cmd {
+				cfg["command"] = t
+				changed = true
+			}
+		}
+
+		// Transform each element in "args" array.
+		if argsRaw, ok := cfg["args"].([]any); ok {
+			for i, a := range argsRaw {
+				if s, ok := a.(string); ok {
+					if t := transform(s); t != s {
+						argsRaw[i] = t
+						changed = true
+					}
+				}
+			}
+			if changed {
+				cfg["args"] = argsRaw
+			}
+		}
+
+		// Transform "cwd" field.
+		if cwd, ok := cfg["cwd"].(string); ok {
+			if t := transform(cwd); t != cwd {
+				cfg["cwd"] = t
+				changed = true
+			}
+		}
+
+		if !changed {
+			result[name] = raw
+			continue
+		}
+
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			result[name] = raw
+			continue
+		}
+		result[name] = json.RawMessage(data)
+	}
+
+	return result
 }
 
 // ResolveMCPEnvVars scans MCP server configs for ${VAR} references and resolves

@@ -155,6 +155,11 @@ func copyDir(src, dst string) error {
 			return filepath.SkipDir
 		}
 
+		// Skip Python bytecode cache directories.
+		if d.IsDir() && d.Name() == "__pycache__" {
+			return filepath.SkipDir
+		}
+
 		// Compute the relative path and the corresponding destination path.
 		relPath, err := filepath.Rel(src, path)
 		if err != nil {
