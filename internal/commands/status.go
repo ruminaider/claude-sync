@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/subscriptions"
 	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
 
@@ -19,6 +21,16 @@ type PluginStatus struct {
 	InstalledVersion string `json:"installed_version,omitempty"`
 	PinnedVersion    string `json:"pinned_version,omitempty"`
 	Installed        bool   `json:"installed"`
+}
+
+// SubscriptionInfo represents the status of a single subscription.
+type SubscriptionInfo struct {
+	Name        string    `json:"name"`
+	URL         string    `json:"url"`
+	Ref         string    `json:"ref"`
+	LastFetched time.Time `json:"last_fetched,omitempty"`
+	CommitSHA   string    `json:"commit_sha,omitempty"`
+	Healthy     bool      `json:"healthy"`
 }
 
 // StatusResult contains the computed status of plugins relative to the config.
@@ -35,8 +47,9 @@ type StatusResult struct {
 	PinnedMissing   []PluginStatus `json:"pinned_missing,omitempty"`
 	ForkedSynced    []PluginStatus `json:"forked_synced,omitempty"`
 	ForkedMissing   []PluginStatus          `json:"forked_missing,omitempty"`
-	ConfigVersion   string                  `json:"config_version"`
+	ConfigVersion   string                   `json:"config_version"`
 	PendingChanges  *approval.PendingChanges `json:"pending_changes,omitempty"`
+	Subscriptions   []SubscriptionInfo       `json:"subscriptions,omitempty"`
 }
 
 // JSON returns the StatusResult as indented JSON bytes.
@@ -144,6 +157,28 @@ func Status(claudeDir, syncDir string) (*StatusResult, error) {
 	pending, err := approval.ReadPending(syncDir)
 	if err == nil && !pending.IsEmpty() {
 		result.PendingChanges = &pending
+	}
+
+	// Subscription health.
+	if len(cfg.Subscriptions) > 0 {
+		state, _ := subscriptions.ReadState(syncDir)
+		for name, sub := range cfg.Subscriptions {
+			ref := sub.Ref
+			if ref == "" {
+				ref = "main"
+			}
+			info := SubscriptionInfo{
+				Name: name,
+				URL:  sub.URL,
+				Ref:  ref,
+			}
+			if ss, ok := state.Subscriptions[name]; ok {
+				info.LastFetched = ss.LastFetched
+				info.CommitSHA = ss.CommitSHA
+				info.Healthy = true
+			}
+			result.Subscriptions = append(result.Subscriptions, info)
+		}
 	}
 
 	return result, nil

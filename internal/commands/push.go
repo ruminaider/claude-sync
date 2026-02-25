@@ -222,10 +222,10 @@ func PushApply(opts PushApplyOptions) error {
 	}
 
 	if opts.ProfileTarget != "" {
-		// Route plugins to a profile instead of base config.
+		// Route changes to a profile instead of base config.
 		profile, err := profiles.ReadProfile(opts.SyncDir, opts.ProfileTarget)
 		if err != nil {
-			return fmt.Errorf("reading profile %q: %w", opts.ProfileTarget, err)
+			profile = profiles.Profile{}
 		}
 
 		// Append new plugins to profile's Add list (dedup).
@@ -239,11 +239,101 @@ func PushApply(opts PushApplyOptions) error {
 			}
 		}
 
+		// Route settings to profile overlay.
+		if opts.UpdatePermissions {
+			settingsRaw, err := claudecode.ReadSettings(opts.ClaudeDir)
+			if err == nil {
+				var perms struct {
+					Allow []string `json:"allow"`
+					Deny  []string `json:"deny"`
+				}
+				if permRaw, ok := settingsRaw["permissions"]; ok {
+					json.Unmarshal(permRaw, &perms)
+				}
+				// Compute what's new vs base permissions.
+				baseAllowSet := make(map[string]bool, len(cfg.Permissions.Allow))
+				for _, a := range cfg.Permissions.Allow {
+					baseAllowSet[a] = true
+				}
+				baseDenySet := make(map[string]bool, len(cfg.Permissions.Deny))
+				for _, d := range cfg.Permissions.Deny {
+					baseDenySet[d] = true
+				}
+				var newAllow, newDeny []string
+				for _, a := range perms.Allow {
+					if !baseAllowSet[a] {
+						newAllow = append(newAllow, a)
+					}
+				}
+				for _, d := range perms.Deny {
+					if !baseDenySet[d] {
+						newDeny = append(newDeny, d)
+					}
+				}
+				if len(newAllow) > 0 {
+					profile.Permissions.AddAllow = newAllow
+				}
+				if len(newDeny) > 0 {
+					profile.Permissions.AddDeny = newDeny
+				}
+			}
+			opts.UpdatePermissions = false // prevent base-config write below
+		}
+
+		// Route MCP to profile overlay.
+		if opts.UpdateMCP {
+			mcp, err := claudecode.ReadMCPConfig(opts.ClaudeDir)
+			if err == nil {
+				mcpAdd := make(map[string]json.RawMessage)
+				for name, val := range mcp {
+					baseVal, inBase := cfg.MCP[name]
+					if !inBase || string(baseVal) != string(val) {
+						mcpAdd[name] = val
+					}
+				}
+				if len(mcpAdd) > 0 {
+					if profile.MCP.Add == nil {
+						profile.MCP.Add = make(map[string]json.RawMessage)
+					}
+					for k, v := range mcpAdd {
+						profile.MCP.Add[k] = v
+					}
+				}
+			}
+			opts.UpdateMCP = false // prevent base-config write below
+		}
+
+		// Route keybindings to profile overlay.
+		if opts.UpdateKeybindings {
+			kb, err := claudecode.ReadKeybindings(opts.ClaudeDir)
+			if err == nil {
+				kbOverride := make(map[string]any)
+				for k, v := range kb {
+					baseVal, inBase := cfg.Keybindings[k]
+					if !inBase {
+						kbOverride[k] = v
+					} else {
+						baseJSON, _ := json.Marshal(baseVal)
+						curJSON, _ := json.Marshal(v)
+						if string(baseJSON) != string(curJSON) {
+							kbOverride[k] = v
+						}
+					}
+				}
+				if len(kbOverride) > 0 {
+					profile.Keybindings.Override = kbOverride
+				}
+			}
+			opts.UpdateKeybindings = false // prevent base-config write below
+		}
+
 		profileData, err := profiles.MarshalProfile(profile)
 		if err != nil {
 			return fmt.Errorf("marshaling profile %q: %w", opts.ProfileTarget, err)
 		}
-		profilePath := filepath.Join(opts.SyncDir, "profiles", opts.ProfileTarget+".yaml")
+		profileDir := filepath.Join(opts.SyncDir, "profiles")
+		os.MkdirAll(profileDir, 0755)
+		profilePath := filepath.Join(profileDir, opts.ProfileTarget+".yaml")
 		if err := os.WriteFile(profilePath, profileData, 0644); err != nil {
 			return fmt.Errorf("writing profile %q: %w", opts.ProfileTarget, err)
 		}
