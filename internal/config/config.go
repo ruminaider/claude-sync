@@ -33,23 +33,35 @@ type MarketplaceSource struct {
 	URL    string `yaml:"url,omitempty"`    // full URL for git
 }
 
+// SubscriptionEntry represents a subscription to another team's config repo.
+// Stored in config.yaml under the "subscriptions" key.
+type SubscriptionEntry struct {
+	URL        string              `yaml:"url"`
+	Ref        string              `yaml:"ref,omitempty"`
+	Categories map[string]any      `yaml:"categories,omitempty"` // flexible: "all"/"none" or struct
+	Exclude    map[string][]string `yaml:"exclude,omitempty"`
+	Include    map[string][]string `yaml:"include,omitempty"`
+	Prefer     map[string][]string `yaml:"prefer,omitempty"`
+}
+
 // ConfigV2 represents ~/.claude-sync/config.yaml with categorized plugins.
 type ConfigV2 struct {
-	Version     string                     `yaml:"version"`
-	Upstream    []string                   `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
-	Pinned      map[string]string          `yaml:"-"` // parsed from plugins.pinned (key -> version)
-	Forked      []string                   `yaml:"-"` // parsed from plugins.forked
-	Excluded    []string                   `yaml:"-"` // plugins user excluded during init
-	Settings    map[string]any             `yaml:"settings,omitempty"`
-	Hooks       map[string]json.RawMessage `yaml:"-"`
-	Permissions Permissions                `yaml:"-"`
-	ClaudeMD    ClaudeMDConfig             `yaml:"-"`
-	MCP         map[string]json.RawMessage `yaml:"-"`
-	MCPMeta     map[string]MCPServerMeta   `yaml:"-"`
-	Keybindings  map[string]any              `yaml:"-"`
-	Commands     []string                   `yaml:"-"`
-	Skills       []string                   `yaml:"-"`
-	Marketplaces map[string]MarketplaceSource `yaml:"-"`
+	Version       string                        `yaml:"version"`
+	Upstream      []string                      `yaml:"-"` // parsed from plugins.upstream (or flat list in v1)
+	Pinned        map[string]string             `yaml:"-"` // parsed from plugins.pinned (key -> version)
+	Forked        []string                      `yaml:"-"` // parsed from plugins.forked
+	Excluded      []string                      `yaml:"-"` // plugins user excluded during init
+	Settings      map[string]any                `yaml:"settings,omitempty"`
+	Hooks         map[string]json.RawMessage    `yaml:"-"`
+	Permissions   Permissions                   `yaml:"-"`
+	ClaudeMD      ClaudeMDConfig                `yaml:"-"`
+	MCP           map[string]json.RawMessage    `yaml:"-"`
+	MCPMeta       map[string]MCPServerMeta      `yaml:"-"`
+	Keybindings   map[string]any                `yaml:"-"`
+	Commands      []string                      `yaml:"-"`
+	Skills        []string                      `yaml:"-"`
+	Marketplaces  map[string]MarketplaceSource  `yaml:"-"`
+	Subscriptions map[string]SubscriptionEntry  `yaml:"-"`
 }
 
 // Config is a type alias for ConfigV2 to maintain backward compatibility.
@@ -192,6 +204,12 @@ func Parse(data []byte) (Config, error) {
 				return Config{}, fmt.Errorf("parsing config marketplaces: %w", err)
 			}
 			cfg.Marketplaces = mkts
+		case "subscriptions":
+			var subs map[string]SubscriptionEntry
+			if err := valNode.Decode(&subs); err != nil {
+				return Config{}, fmt.Errorf("parsing config subscriptions: %w", err)
+			}
+			cfg.Subscriptions = subs
 		}
 	}
 
@@ -491,6 +509,18 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "marketplaces", Tag: "!!str"},
 			&mktsNode,
+		)
+	}
+
+	// subscriptions
+	if len(cfg.Subscriptions) > 0 {
+		var subsNode yaml.Node
+		if err := subsNode.Encode(cfg.Subscriptions); err != nil {
+			return nil, fmt.Errorf("encoding subscriptions: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "subscriptions", Tag: "!!str"},
+			&subsNode,
 		)
 	}
 

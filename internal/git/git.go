@@ -221,6 +221,33 @@ func HasUpstream(dir string) bool {
 	return err == nil
 }
 
+// ShallowClone clones a repository with depth 1 into dst.
+func ShallowClone(url, dst, ref string) error {
+	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, url, dst)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("shallow clone: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// FetchShallow fetches the latest from origin with depth 1.
+func FetchShallow(dir string) error {
+	_, err := Run(dir, "fetch", "--depth", "1", "--quiet")
+	return err
+}
+
+// ResetToFetchHead resets the working tree to FETCH_HEAD.
+func ResetToFetchHead(dir string) error {
+	_, err := Run(dir, "reset", "--hard", "FETCH_HEAD")
+	return err
+}
+
+// HeadSHA returns the full SHA of HEAD.
+func HeadSHA(dir string) (string, error) {
+	return Run(dir, "rev-parse", "HEAD")
+}
+
 // HasUnpushedCommits returns true if there are local commits not yet pushed
 // to the remote. Returns true if no upstream is configured (all commits are unpushed).
 func HasUnpushedCommits(dir string) bool {

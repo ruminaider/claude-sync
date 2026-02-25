@@ -19,6 +19,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
+	"github.com/ruminaider/claude-sync/internal/subscriptions"
 	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
 
@@ -176,6 +177,11 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				fmt.Fprintf(os.Stderr, "Warning: git pull failed: %v\n", err)
 			}
 		}
+	}
+
+	// Fetch and merge subscriptions before computing plugin diff.
+	if err := pullSubscriptions(syncDir, opts.Auto, quiet); err != nil && !quiet {
+		fmt.Fprintf(os.Stderr, "Warning: subscription pull failed: %v\n", err)
 	}
 
 	result, err := PullDryRun(claudeDir, syncDir)
@@ -797,5 +803,64 @@ func updatePluginContentHashes(claudeDir string, keys []string) {
 	}
 
 	_ = claudecode.WritePluginContentHashes(claudeDir, pch)
+}
+
+// pullSubscriptions fetches all subscriptions and merges their items into the
+// local config.yaml. In auto mode, only previously-accepted items are applied;
+// new items are queued for the next interactive pull. In interactive mode,
+// all resolved items are applied (the approval TUI is handled by the CLI layer).
+func pullSubscriptions(syncDir string, auto, quiet bool) error {
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	if err != nil {
+		return nil // no config = nothing to do
+	}
+	cfg, err := config.Parse(cfgData)
+	if err != nil || len(cfg.Subscriptions) == 0 {
+		return nil
+	}
+
+	state, _ := subscriptions.ReadState(syncDir)
+
+	// Fetch all subscriptions.
+	results := subscriptions.FetchAll(syncDir, cfg.Subscriptions, state)
+	for _, r := range results {
+		if r.Error != nil {
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "Warning: subscription %q: %v\n", r.Name, r.Error)
+			}
+			continue
+		}
+		// Update state with new SHA.
+		subscriptions.UpdateState(&state, r.Name, r.CommitSHA, nil)
+	}
+
+	// Merge all subscription items.
+	merged, conflicts, err := subscriptions.MergeAll(syncDir, cfg.Subscriptions, cfg)
+	if err != nil {
+		return fmt.Errorf("merging subscriptions: %w", err)
+	}
+	if len(conflicts) > 0 {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "\n%s\n", subscriptions.FormatConflicts(conflicts))
+		}
+		return fmt.Errorf("%d subscription conflict(s) found", len(conflicts))
+	}
+
+	// Apply merged items to local config.
+	subscriptions.ApplyToConfig(&cfg, merged)
+
+	// Write updated config.
+	newData, err := config.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config after subscription merge: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), newData, 0644); err != nil {
+		return fmt.Errorf("writing config after subscription merge: %w", err)
+	}
+
+	// Save state.
+	subscriptions.WriteState(syncDir, state)
+
+	return nil
 }
 

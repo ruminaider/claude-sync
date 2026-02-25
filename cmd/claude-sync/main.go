@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.4.5"
+var version = "0.5.0"
 
 var rootCmd = &cobra.Command{
 	Use:   "claude-sync",
@@ -47,6 +47,9 @@ func init() {
 	rootCmd.AddCommand(autoCommitCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(conflictsCmd)
+	rootCmd.AddCommand(subscribeCmd)
+	rootCmd.AddCommand(unsubscribeCmd)
+	rootCmd.AddCommand(subscriptionsCmd)
 }
 
 func main() {

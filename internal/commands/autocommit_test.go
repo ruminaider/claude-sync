@@ -2,6 +2,7 @@ package commands_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -157,4 +159,194 @@ func TestAutoCommit_NonExistentSyncDir(t *testing.T) {
 	result, err := commands.AutoCommit(claudeDir, syncDir)
 	require.NoError(t, err)
 	assert.False(t, result.Changed)
+}
+
+// setupProfileAwareEnv extends setupAutoCommitEnv with a project directory
+// that has a .claude/.claude-sync.yaml pointing at a profile, and a
+// profiles/<name>.yaml in the sync dir.
+func setupProfileAwareEnv(t *testing.T, profileName string) (claudeDir, syncDir, projectDir string) {
+	t.Helper()
+	claudeDir, syncDir = setupAutoCommitEnv(t)
+
+	// Create project directory with .claude/.claude-sync.yaml.
+	projectDir = t.TempDir()
+	claudeSyncDir := filepath.Join(projectDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeSyncDir, 0755))
+	projCfg := fmt.Sprintf("version: \"1\"\nprofile: %s\n", profileName)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(claudeSyncDir, ".claude-sync.yaml"),
+		[]byte(projCfg), 0644,
+	))
+
+	// Create an empty profile in the sync dir.
+	profilesDir := filepath.Join(syncDir, "profiles")
+	require.NoError(t, os.MkdirAll(profilesDir, 0755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(profilesDir, profileName+".yaml"),
+		[]byte(""), 0644,
+	))
+
+	// Commit the profile.
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add profile").Run()
+
+	return claudeDir, syncDir, projectDir
+}
+
+func TestAutoCommitWithContext_ProfileAware_SettingsToProfile(t *testing.T) {
+	claudeDir, syncDir, projectDir := setupProfileAwareEnv(t, "evvy")
+
+	// Write settings.json with a different value for "theme".
+	settings := map[string]json.RawMessage{
+		"theme": json.RawMessage(`"light"`),
+	}
+	settingsData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsData, 0644)
+
+	result, err := commands.AutoCommitWithContext(commands.AutoCommitOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		ProjectDir: projectDir,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	assert.Contains(t, result.CommitMessage, "auto(evvy):")
+	assert.Contains(t, result.CommitMessage, "update setting theme")
+
+	// Verify the profile was updated (not config.yaml).
+	profile, err := profiles.ReadProfile(syncDir, "evvy")
+	require.NoError(t, err)
+	assert.Equal(t, "light", profile.Settings["theme"])
+
+	// Verify config.yaml was NOT changed (theme should still be "dark").
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, "dark", cfg.Settings["theme"])
+}
+
+func TestAutoCommitWithContext_ProfileAware_MCPToProfile(t *testing.T) {
+	claudeDir, syncDir, projectDir := setupProfileAwareEnv(t, "evvy")
+
+	// Add a base MCP server to config.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	cfg.MCP = map[string]json.RawMessage{
+		"base-server": json.RawMessage(`{"command":"base"}`),
+	}
+	newCfgData, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), newCfgData, 0644)
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add base MCP").Run()
+
+	// Write .mcp.json with the base server plus a new project-specific one.
+	mcpData := `{"mcpServers": {"base-server": {"command":"base"}, "evvy-db": {"command":"evvy-db-cmd"}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	result, err := commands.AutoCommitWithContext(commands.AutoCommitOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		ProjectDir: projectDir,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	assert.Contains(t, result.CommitMessage, "auto(evvy):")
+	assert.Contains(t, result.CommitMessage, "update MCP servers")
+
+	// Verify the new server went to the profile.
+	profile, err := profiles.ReadProfile(syncDir, "evvy")
+	require.NoError(t, err)
+	assert.Contains(t, profile.MCP.Add, "evvy-db")
+
+	// Verify config.yaml's MCP was NOT changed.
+	cfgData, err = os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err = config.Parse(cfgData)
+	require.NoError(t, err)
+	_, hasEvvyDB := cfg.MCP["evvy-db"]
+	assert.False(t, hasEvvyDB, "evvy-db should not be in base config")
+}
+
+func TestAutoCommitWithContext_NoProject_FallsBackToBase(t *testing.T) {
+	claudeDir, syncDir := setupAutoCommitEnv(t)
+
+	// Write settings.json with a different value.
+	settings := map[string]json.RawMessage{
+		"theme": json.RawMessage(`"light"`),
+	}
+	settingsData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsData, 0644)
+
+	// Use a non-project directory (no .claude/.claude-sync.yaml).
+	result, err := commands.AutoCommitWithContext(commands.AutoCommitOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		ProjectDir: t.TempDir(), // temp dir has no project config
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	// Should use base commit format (no profile prefix).
+	assert.Contains(t, result.CommitMessage, "auto: ")
+	assert.NotContains(t, result.CommitMessage, "auto(")
+
+	// Verify config.yaml was updated.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, "light", cfg.Settings["theme"])
+}
+
+func TestAutoCommitWithContext_BaseFlag_ForcesBase(t *testing.T) {
+	claudeDir, syncDir, projectDir := setupProfileAwareEnv(t, "evvy")
+
+	// Write settings.json with a different value.
+	settings := map[string]json.RawMessage{
+		"theme": json.RawMessage(`"light"`),
+	}
+	settingsData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsData, 0644)
+
+	// ForceBase should write to config.yaml even though we're in a profiled project.
+	result, err := commands.AutoCommitWithContext(commands.AutoCommitOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		ProjectDir: projectDir,
+		ForceBase:  true,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	assert.Contains(t, result.CommitMessage, "auto: ")
+	assert.NotContains(t, result.CommitMessage, "auto(evvy)")
+
+	// Verify config.yaml was updated (not the profile).
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Equal(t, "light", cfg.Settings["theme"])
+}
+
+func TestAutoCommitWithContext_BackwardCompatible(t *testing.T) {
+	claudeDir, syncDir := setupAutoCommitEnv(t)
+
+	// Write settings.json with a different value.
+	settings := map[string]json.RawMessage{
+		"theme": json.RawMessage(`"light"`),
+	}
+	settingsData, _ := json.MarshalIndent(settings, "", "  ")
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsData, 0644)
+
+	// Empty ProjectDir should behave identically to AutoCommit().
+	result, err := commands.AutoCommitWithContext(commands.AutoCommitOptions{
+		ClaudeDir: claudeDir,
+		SyncDir:   syncDir,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	assert.Contains(t, result.CommitMessage, "auto: update setting theme")
 }

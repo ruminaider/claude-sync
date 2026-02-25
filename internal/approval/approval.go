@@ -29,6 +29,7 @@ type PermissionChanges struct {
 type Change struct {
 	Category    string // "permissions", "hooks", "mcp", "settings", "claude_md", "keybindings"
 	Description string
+	Source      string // "" for local, or subscription name (e.g. "team-backend")
 }
 
 // ClassifiedChanges splits changes into safe (auto-apply) and high-risk (requires approval).
@@ -96,6 +97,47 @@ func Classify(changes ConfigChanges) ClassifiedChanges {
 			Category:    "mcp",
 			Description: "MCP server configuration changed",
 		})
+	}
+
+	return result
+}
+
+// ClassifySubscription classifies changes from a subscription source.
+// Subscription-sourced MCP, hooks, and permissions are always high-risk.
+func ClassifySubscription(source string, hasMCP, hasHooks bool, permissions *PermissionChanges) ClassifiedChanges {
+	var result ClassifiedChanges
+
+	if hasMCP {
+		result.HighRisk = append(result.HighRisk, Change{
+			Category:    "mcp",
+			Description: fmt.Sprintf("MCP servers from subscription %q", source),
+			Source:      source,
+		})
+	}
+
+	if hasHooks {
+		result.HighRisk = append(result.HighRisk, Change{
+			Category:    "hooks",
+			Description: fmt.Sprintf("hooks from subscription %q", source),
+			Source:      source,
+		})
+	}
+
+	if permissions != nil {
+		for _, rule := range permissions.Allow {
+			result.HighRisk = append(result.HighRisk, Change{
+				Category:    "permissions",
+				Description: fmt.Sprintf("allow rule from subscription %q: %s", source, rule),
+				Source:      source,
+			})
+		}
+		for _, rule := range permissions.Deny {
+			result.HighRisk = append(result.HighRisk, Change{
+				Category:    "permissions",
+				Description: fmt.Sprintf("deny rule from subscription %q: %s", source, rule),
+				Source:      source,
+			})
+		}
 	}
 
 	return result

@@ -21,11 +21,13 @@ var pullCmd = &cobra.Command{
 		var err error
 
 		if autoFlag {
+			projectDir := readCWDFromStdin()
 			result, err = commands.PullWithOptions(commands.PullOptions{
-				ClaudeDir: paths.ClaudeDir(),
-				SyncDir:   paths.SyncDir(),
-				Quiet:     true,
-				Auto:      true,
+				ClaudeDir:  paths.ClaudeDir(),
+				SyncDir:    paths.SyncDir(),
+				Quiet:      true,
+				Auto:       true,
+				ProjectDir: projectDir,
 			})
 		} else {
 			if !quietFlag {
