@@ -92,6 +92,10 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 		return nil, fmt.Errorf("reading plugins: %w", err)
 	}
 
+	// Upgrade directory-source marketplaces that are actually GitHub repos,
+	// so the scan correctly categorizes their plugins as upstream.
+	marketplace.UpgradeDirectoryMarketplaces(claudeDir)
+
 	pluginKeys := plugins.PluginKeys()
 	sort.Strings(pluginKeys)
 
@@ -310,6 +314,11 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading plugins: %w", err)
 	}
+
+	// Upgrade directory-source marketplaces that are actually GitHub repos.
+	// This must happen before plugin categorization so IsPortable() sees the
+	// corrected source type.
+	marketplace.UpgradeDirectoryMarketplaces(claudeDir)
 
 	pluginKeys := plugins.PluginKeys()
 	sort.Strings(pluginKeys)
