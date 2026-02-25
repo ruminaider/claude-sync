@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 )
 
@@ -407,6 +408,14 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 		} else if raw, ok := m.discoveredMCP[k]; ok {
 			mcpAdd[k] = raw
 		}
+	}
+	// Strip secrets from profile MCP additions (same treatment as base config).
+	if len(mcpAdd) > 0 {
+		profileSecrets := commands.DetectMCPSecrets(mcpAdd)
+		if len(profileSecrets) > 0 {
+			mcpAdd = commands.ReplaceSecrets(mcpAdd, profileSecrets)
+		}
+		mcpAdd = commands.NormalizeMCPPaths(mcpAdd)
 	}
 	mcpRemoves := sortedKeys(mcpDiff.removes)
 	if len(mcpAdd) > 0 || len(mcpRemoves) > 0 {

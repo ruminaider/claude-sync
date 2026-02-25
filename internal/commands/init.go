@@ -223,7 +223,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, err
 	}
 
-	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n"
+	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\n__pycache__/\n*.pyc\n"
 	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return nil, fmt.Errorf("writing .gitignore: %w", err)
 	}
@@ -296,15 +296,39 @@ func Update(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
+	// Read old config to find previously forked plugins.
+	var oldForked []string
+	if cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml")); err == nil {
+		if oldCfg, err := config.Parse(cfgData); err == nil {
+			oldForked = oldCfg.Forked
+		}
+	}
+
 	result, forkedNames, err := buildAndWriteConfig(opts)
 	if err != nil {
 		return nil, err
+	}
+
+	// Remove directories for plugins that were forked but no longer are.
+	if len(oldForked) > 0 {
+		newForkedSet := make(map[string]bool, len(forkedNames))
+		for _, name := range forkedNames {
+			newForkedSet[name] = true
+		}
+		for _, name := range oldForked {
+			if !newForkedSet[name] {
+				os.RemoveAll(filepath.Join(syncDir, "plugins", name))
+			}
+		}
 	}
 
 	// Ensure plugins/.gitkeep exists for repos initialized before it was added.
 	pluginsDir := filepath.Join(syncDir, "plugins")
 	os.MkdirAll(pluginsDir, 0755)
 	os.WriteFile(filepath.Join(pluginsDir, ".gitkeep"), []byte{}, 0644)
+
+	// Ensure .gitignore has bytecode patterns (for repos initialized before they were added).
+	ensureGitignorePatterns(syncDir, []string{"__pycache__/", "*.pyc"})
 
 	if len(forkedNames) > 0 {
 		if err := forkedplugins.RegisterLocalMarketplace(opts.ClaudeDir, syncDir); err != nil {
@@ -648,6 +672,31 @@ func findInstallPath(installations []claudecode.PluginInstallation) string {
 		}
 	}
 	return ""
+}
+
+// ensureGitignorePatterns appends any missing patterns to the .gitignore file.
+// It is idempotent — running it twice never produces duplicate entries.
+func ensureGitignorePatterns(syncDir string, patterns []string) {
+	path := filepath.Join(syncDir, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	existing := string(data)
+	var missing []string
+	for _, p := range patterns {
+		if !strings.Contains(existing, p) {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		existing += "\n"
+	}
+	existing += strings.Join(missing, "\n") + "\n"
+	os.WriteFile(path, []byte(existing), 0644)
 }
 
 // ExtractHookCommand extracts the first command string from a hook's raw JSON data.

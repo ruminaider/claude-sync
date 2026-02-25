@@ -310,8 +310,9 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				mcpServers = profiles.MergeMCP(mcpServers, *activeProfile)
 			}
 
-			// Resolve ${VAR} env var references before writing.
+			// Expand ~/... paths and resolve ${VAR} env var references before writing.
 			if len(mcpServers) > 0 {
+				mcpServers = ExpandMCPPaths(mcpServers)
 				mcpServers, result.MCPEnvWarnings = ResolveMCPEnvVars(mcpServers)
 			}
 

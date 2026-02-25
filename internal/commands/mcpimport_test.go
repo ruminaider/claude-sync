@@ -10,6 +10,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -514,4 +515,156 @@ func TestReadMCPConfigFile_DelegatesToExisting(t *testing.T) {
 	read, err := claudecode.ReadMCPConfig(dir)
 	require.NoError(t, err)
 	assert.Contains(t, read, "global-server")
+}
+
+// --- MCPImport Profile Secrets Tests ---
+
+func TestMCPImport_ProfileSecretsReplaced(t *testing.T) {
+	syncDir := setupImportEnv(t)
+
+	// Create a profile.
+	profilesDir := filepath.Join(syncDir, "profiles")
+	os.MkdirAll(profilesDir, 0755)
+	emptyProfile, _ := profiles.MarshalProfile(profiles.Profile{})
+	os.WriteFile(filepath.Join(profilesDir, "work.yaml"), emptyProfile, 0644)
+	git.Add(syncDir, ".")
+	git.Commit(syncDir, "add profile")
+
+	serverData, _ := json.Marshal(map[string]any{
+		"command": "npx",
+		"env": map[string]string{
+			"RENDER_API_KEY": "rnd_abc123xyz",
+			"APP_NAME":       "my-app",
+		},
+	})
+
+	result, err := commands.MCPImport(commands.MCPImportOptions{
+		SyncDir: syncDir,
+		Profile: "work",
+		Servers: map[string]json.RawMessage{
+			"render": json.RawMessage(serverData),
+		},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Imported, "render")
+
+	// Read the profile and verify the secret was replaced.
+	profile, err := profiles.ReadProfile(syncDir, "work")
+	require.NoError(t, err)
+
+	var cfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(profile.MCP.Add["render"], &cfg))
+	assert.Equal(t, "${RENDER_API_KEY}", cfg.Env["RENDER_API_KEY"], "secret should be replaced with env var ref")
+	assert.Equal(t, "my-app", cfg.Env["APP_NAME"], "non-secret value should be untouched")
+}
+
+// --- NormalizeMCPPaths / ExpandMCPPaths Tests ---
+
+func TestNormalizeMCPPaths(t *testing.T) {
+	home := os.Getenv("HOME")
+	require.NotEmpty(t, home, "HOME must be set for this test")
+
+	serverData, _ := json.Marshal(map[string]any{
+		"command": home + "/bin/my-server",
+		"args":    []string{"-c", home + "/Work/evvy/.mcp.json"},
+		"cwd":     home + "/Work/evvy",
+	})
+
+	servers := map[string]json.RawMessage{
+		"my-server": json.RawMessage(serverData),
+	}
+
+	result := commands.NormalizeMCPPaths(servers)
+
+	var cfg struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+		Cwd     string   `json:"cwd"`
+	}
+	require.NoError(t, json.Unmarshal(result["my-server"], &cfg))
+	assert.Equal(t, "~/bin/my-server", cfg.Command)
+	assert.Equal(t, "~/Work/evvy/.mcp.json", cfg.Args[1])
+	assert.Equal(t, "~/Work/evvy", cfg.Cwd)
+	assert.Equal(t, "-c", cfg.Args[0], "non-path arg should be untouched")
+}
+
+func TestNormalizeMCPPaths_LeavesNonHomePaths(t *testing.T) {
+	serverData, _ := json.Marshal(map[string]any{
+		"command": "/usr/local/bin/npx",
+		"args":    []string{"-y", "@context7/mcp"},
+	})
+
+	servers := map[string]json.RawMessage{
+		"context7": json.RawMessage(serverData),
+	}
+
+	result := commands.NormalizeMCPPaths(servers)
+
+	var cfg struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+	}
+	require.NoError(t, json.Unmarshal(result["context7"], &cfg))
+	assert.Equal(t, "/usr/local/bin/npx", cfg.Command, "non-home path should be untouched")
+	assert.Equal(t, []string{"-y", "@context7/mcp"}, cfg.Args)
+}
+
+func TestExpandMCPPaths(t *testing.T) {
+	home := os.Getenv("HOME")
+	require.NotEmpty(t, home, "HOME must be set for this test")
+
+	serverData, _ := json.Marshal(map[string]any{
+		"command": "~/bin/my-server",
+		"args":    []string{"-c", "~/Work/evvy/.mcp.json"},
+		"cwd":     "~/Work/evvy",
+	})
+
+	servers := map[string]json.RawMessage{
+		"my-server": json.RawMessage(serverData),
+	}
+
+	result := commands.ExpandMCPPaths(servers)
+
+	var cfg struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+		Cwd     string   `json:"cwd"`
+	}
+	require.NoError(t, json.Unmarshal(result["my-server"], &cfg))
+	assert.Equal(t, home+"/bin/my-server", cfg.Command)
+	assert.Equal(t, home+"/Work/evvy/.mcp.json", cfg.Args[1])
+	assert.Equal(t, home+"/Work/evvy", cfg.Cwd)
+}
+
+func TestNormalizeThenExpand_Roundtrip(t *testing.T) {
+	home := os.Getenv("HOME")
+	require.NotEmpty(t, home, "HOME must be set for this test")
+
+	original, _ := json.Marshal(map[string]any{
+		"command": home + "/bin/my-server",
+		"args":    []string{"-y", home + "/Work/project/run.sh"},
+		"cwd":     home + "/Work/project",
+	})
+
+	servers := map[string]json.RawMessage{
+		"test": json.RawMessage(original),
+	}
+
+	normalized := commands.NormalizeMCPPaths(servers)
+	expanded := commands.ExpandMCPPaths(normalized)
+
+	// Parse both original and round-tripped.
+	var origCfg, rtCfg struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+		Cwd     string   `json:"cwd"`
+	}
+	require.NoError(t, json.Unmarshal(servers["test"], &origCfg))
+	require.NoError(t, json.Unmarshal(expanded["test"], &rtCfg))
+
+	assert.Equal(t, origCfg.Command, rtCfg.Command, "command should round-trip")
+	assert.Equal(t, origCfg.Args, rtCfg.Args, "args should round-trip")
+	assert.Equal(t, origCfg.Cwd, rtCfg.Cwd, "cwd should round-trip")
 }
