@@ -228,6 +228,13 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, fmt.Errorf("writing .gitignore: %w", err)
 	}
 
+	// Ensure the plugins directory exists in git even when empty or when its
+	// only contents are gitignored. Without this, GitHub's UI collapses the
+	// path to show plugins/<only-child> instead of plugins/ as a directory.
+	pluginsDir := filepath.Join(syncDir, "plugins")
+	os.MkdirAll(pluginsDir, 0755)
+	os.WriteFile(filepath.Join(pluginsDir, ".gitkeep"), []byte{}, 0644)
+
 	if err := git.Init(syncDir); err != nil {
 		return nil, fmt.Errorf("initializing git repo: %w", err)
 	}
