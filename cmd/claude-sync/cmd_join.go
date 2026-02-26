@@ -165,8 +165,15 @@ var configJoinCmd = &cobra.Command{
 			}
 		}
 
+		// Automatically apply the config.
 		fmt.Println()
-		fmt.Println("Run 'claude-sync pull' to apply the config.")
+		fmt.Println("Applying config...")
+		pullResult, pullErr := commands.Pull(paths.ClaudeDir(), syncDir, false)
+		if pullErr != nil {
+			return fmt.Errorf("pull failed: %w", pullErr)
+		}
+
+		printPullResult(pullResult)
 		return nil
 	},
 }
