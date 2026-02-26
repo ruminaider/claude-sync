@@ -1139,9 +1139,11 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 				mcp[k] = raw
 			}
 		}
-		// Strip detected secrets before writing to config.
-		if len(m.scanResult.MCPSecrets) > 0 {
-			mcp = commands.ReplaceSecrets(mcp, m.scanResult.MCPSecrets)
+		// Strip secrets and normalize paths before writing to config.
+		// Detect on the final map (not scanResult.MCPSecrets) to catch
+		// secrets from project-level .mcp.json files in discoveredMCP.
+		if secrets := commands.DetectMCPSecrets(mcp); len(secrets) > 0 {
+			mcp = commands.ReplaceSecrets(mcp, secrets)
 		}
 		mcp = commands.NormalizeMCPPaths(mcp)
 		opts.MCP = mcp

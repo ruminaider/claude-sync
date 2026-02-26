@@ -1726,6 +1726,38 @@ func TestBuildInitOptions_WithDiscoveredMCP(t *testing.T) {
 	assert.Contains(t, opts.MCP, "project-mcp")
 }
 
+func TestBuildInitOptions_DiscoveredMCPSecretsStripped(t *testing.T) {
+	// Global MCP has no secrets; discovered (project-level) MCP has secrets.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP:      map[string]json.RawMessage{"safe-server": json.RawMessage(`{"url":"http://s"}`)},
+	}
+	m := testModel(scan)
+
+	// Add discovered MCP server with a hardcoded secret.
+	m.discoveredMCP["slack"] = json.RawMessage(`{"command":"npx","env":{"SLACK_TOKEN":"xoxb-secret-value","APP_NAME":"my-app"}}`)
+	m.mcpSources["slack"] = "~/Work/evvy"
+
+	// Add to picker.
+	p := m.pickers[SectionMCP]
+	p.AddItems([]PickerItem{
+		{Key: "slack", Display: "slack", Selected: true, Tag: "[~/Work/evvy]"},
+	})
+	m.pickers[SectionMCP] = p
+
+	opts := m.buildInitOptions()
+
+	require.Contains(t, opts.MCP, "slack")
+
+	// Secret should be replaced with ${VAR} reference.
+	var cfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(opts.MCP["slack"], &cfg))
+	assert.Equal(t, "${SLACK_TOKEN}", cfg.Env["SLACK_TOKEN"], "discovered MCP secret should be replaced")
+	assert.Equal(t, "my-app", cfg.Env["APP_NAME"], "non-secret should be untouched")
+}
+
 func TestMCPSearchDoneMsg_Empty(t *testing.T) {
 	scan := &commands.InitScanResult{Upstream: []string{"a@m"}}
 	m := testModel(scan)
