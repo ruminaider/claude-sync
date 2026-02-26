@@ -331,6 +331,73 @@ func TestAutoCommitWithContext_BaseFlag_ForcesBase(t *testing.T) {
 	assert.Equal(t, "light", cfg.Settings["theme"])
 }
 
+func TestAutoCommit_MCPStripsSecrets(t *testing.T) {
+	claudeDir, syncDir := setupAutoCommitEnv(t)
+
+	// Add MCP to config (without secrets).
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	cfg.MCP = map[string]json.RawMessage{
+		"old-server": json.RawMessage(`{"command":"old"}`),
+	}
+	newCfgData, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), newCfgData, 0644)
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add MCP").Run()
+
+	// Write .mcp.json with a hardcoded secret.
+	mcpData := `{"mcpServers": {"slack": {"command": "npx", "env": {"SLACK_TOKEN": "xoxb-secret-token-value", "APP_NAME": "my-app"}}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	result, err := commands.AutoCommit(claudeDir, syncDir)
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+
+	// Read back and verify secret was replaced.
+	cfgData, err = os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err = config.Parse(cfgData)
+	require.NoError(t, err)
+
+	var serverCfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(cfg.MCP["slack"], &serverCfg))
+	assert.Equal(t, "${SLACK_TOKEN}", serverCfg.Env["SLACK_TOKEN"], "secret should be replaced")
+	assert.Equal(t, "my-app", serverCfg.Env["APP_NAME"], "non-secret should be untouched")
+}
+
+func TestAutoCommitWithContext_ProfileMCPStripsSecrets(t *testing.T) {
+	claudeDir, syncDir, projectDir := setupProfileAwareEnv(t, "evvy")
+
+	// Write .mcp.json with a hardcoded secret.
+	mcpData := `{"mcpServers": {"clew": {"command": "clew", "env": {"VOYAGE_API_KEY": "pa-SomeSecretKey123", "QDRANT_URL": "http://localhost:6333"}}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	result, err := commands.AutoCommitWithContext(commands.AutoCommitOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		ProjectDir: projectDir,
+	})
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+
+	// Read the profile and verify the secret was replaced.
+	profile, err := profiles.ReadProfile(syncDir, "evvy")
+	require.NoError(t, err)
+	assert.Contains(t, profile.MCP.Add, "clew")
+
+	var serverCfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(profile.MCP.Add["clew"], &serverCfg))
+	assert.Equal(t, "${VOYAGE_API_KEY}", serverCfg.Env["VOYAGE_API_KEY"], "secret should be replaced")
+	assert.Equal(t, "http://localhost:6333", serverCfg.Env["QDRANT_URL"], "non-secret should be untouched")
+}
+
 func TestAutoCommitWithContext_BackwardCompatible(t *testing.T) {
 	claudeDir, syncDir := setupAutoCommitEnv(t)
 

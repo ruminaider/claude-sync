@@ -23,6 +23,7 @@ type PushScanResult struct {
 	ChangedPermissions bool
 	ChangedClaudeMD    *claudemd.ReconcileResult
 	ChangedMCP         bool
+	MCPSecrets         []DetectedSecret // secrets detected in MCP configs (will be auto-replaced)
 	ChangedKeybindings bool
 	ChangedCommands    bool
 	ChangedSkills      bool
@@ -136,6 +137,7 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 	if mcpErr == nil {
 		if !jsonMapsEqual(currentMCP, cfg.MCP) {
 			result.ChangedMCP = true
+			result.MCPSecrets = DetectMCPSecrets(currentMCP)
 		}
 	}
 
@@ -292,6 +294,11 @@ func PushApply(opts PushApplyOptions) error {
 					}
 				}
 				if len(mcpAdd) > 0 {
+					// Strip secrets and normalize paths before writing to profile.
+					if secrets := DetectMCPSecrets(mcpAdd); len(secrets) > 0 {
+						mcpAdd = ReplaceSecrets(mcpAdd, secrets)
+					}
+					mcpAdd = NormalizeMCPPaths(mcpAdd)
 					if profile.MCP.Add == nil {
 						profile.MCP.Add = make(map[string]json.RawMessage)
 					}
@@ -409,6 +416,11 @@ func PushApply(opts PushApplyOptions) error {
 	if opts.UpdateMCP {
 		mcp, err := claudecode.ReadMCPConfig(opts.ClaudeDir)
 		if err == nil {
+			// Strip secrets and normalize paths before writing to config.
+			if secrets := DetectMCPSecrets(mcp); len(secrets) > 0 {
+				mcp = ReplaceSecrets(mcp, secrets)
+			}
+			mcp = NormalizeMCPPaths(mcp)
 			cfg.MCP = mcp
 		}
 	}
