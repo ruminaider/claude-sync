@@ -22,11 +22,29 @@ var (
 )
 
 var configJoinCmd = &cobra.Command{
-	Use:   "join <url>",
+	Use:   "join [url]",
 	Short: "Join existing config repo",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		repoURL := args[0]
+		var repoURL string
+		if len(args) > 0 {
+			repoURL = args[0]
+		} else {
+			err := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Config repo URL:").
+						Placeholder("git@github.com:org/claude-code-config.git").
+						Value(&repoURL),
+				),
+			).Run()
+			if err != nil {
+				return fmt.Errorf("cancelled")
+			}
+			if repoURL == "" {
+				return fmt.Errorf("URL is required")
+			}
+		}
 		syncDir := paths.SyncDir()
 		fmt.Printf("Cloning config from %s...\n", repoURL)
 
