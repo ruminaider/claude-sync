@@ -103,6 +103,11 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 	currentMCP, mcpErr := claudecode.ReadMCPConfig(claudeDir)
 	if mcpErr == nil && len(currentMCP) > 0 {
 		if !jsonMapsEqual(currentMCP, cfg.MCP) {
+			// Strip secrets and normalize paths before writing to config.
+			if secrets := DetectMCPSecrets(currentMCP); len(secrets) > 0 {
+				currentMCP = ReplaceSecrets(currentMCP, secrets)
+			}
+			currentMCP = NormalizeMCPPaths(currentMCP)
 			cfg.MCP = currentMCP
 			configChanged = true
 			changes = append(changes, "update MCP servers")
@@ -304,6 +309,11 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 				}
 			}
 
+			// Strip secrets and normalize paths before writing to profile.
+			if secrets := DetectMCPSecrets(newAdd); len(secrets) > 0 {
+				newAdd = ReplaceSecrets(newAdd, secrets)
+			}
+			newAdd = NormalizeMCPPaths(newAdd)
 			profile.MCP.Add = newAdd
 			profile.MCP.Remove = dedupedRemove
 			profileChanged = true

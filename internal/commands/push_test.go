@@ -374,3 +374,86 @@ func TestPushApply_UpdateMCP(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, cfg.MCP, "test-server")
 }
+
+func TestPushApply_UpdateMCP_StripsSecrets(t *testing.T) {
+	_, syncDir := setupV2PushEnv(t)
+	claudeDir := filepath.Dir(syncDir)
+
+	// Write .mcp.json with a hardcoded secret.
+	mcpData := `{"mcpServers": {"slack": {"command": "npx", "env": {"SLACK_TOKEN": "xoxb-secret-token", "APP_NAME": "my-app"}}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir: claudeDir,
+		SyncDir:   syncDir,
+		UpdateMCP: true,
+		Message:   "Update MCP with secret",
+	})
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.MCP, "slack")
+
+	// Secret should be replaced with env var reference.
+	var serverCfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(cfg.MCP["slack"], &serverCfg))
+	assert.Equal(t, "${SLACK_TOKEN}", serverCfg.Env["SLACK_TOKEN"], "secret should be replaced with env var ref")
+	assert.Equal(t, "my-app", serverCfg.Env["APP_NAME"], "non-secret should be untouched")
+}
+
+func TestPushApply_UpdateMCP_ProfileStripsSecrets(t *testing.T) {
+	_, syncDir := setupV2PushEnv(t)
+	claudeDir := filepath.Dir(syncDir)
+
+	// Create a profile.
+	profilesDir := filepath.Join(syncDir, "profiles")
+	require.NoError(t, os.MkdirAll(profilesDir, 0755))
+	profileData := []byte("plugins:\n  add: []\n")
+	require.NoError(t, os.WriteFile(filepath.Join(profilesDir, "work.yaml"), profileData, 0644))
+
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add work profile").Run()
+
+	// Write .mcp.json with a hardcoded secret.
+	mcpData := `{"mcpServers": {"notion": {"type": "http", "url": "https://mcp.notion.com"}, "clew": {"command": "clew", "env": {"VOYAGE_API_KEY": "pa-SomeSecretKey123"}}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	err := commands.PushApply(commands.PushApplyOptions{
+		ClaudeDir:     claudeDir,
+		SyncDir:       syncDir,
+		UpdateMCP:     true,
+		ProfileTarget: "work",
+		Message:       "Update MCP to profile with secret",
+	})
+	require.NoError(t, err)
+
+	// Read the profile and verify secrets were replaced.
+	profile, err := profiles.ReadProfile(syncDir, "work")
+	require.NoError(t, err)
+	assert.Contains(t, profile.MCP.Add, "clew")
+
+	var serverCfg struct {
+		Env map[string]string `json:"env"`
+	}
+	require.NoError(t, json.Unmarshal(profile.MCP.Add["clew"], &serverCfg))
+	assert.Equal(t, "${VOYAGE_API_KEY}", serverCfg.Env["VOYAGE_API_KEY"], "secret should be replaced with env var ref")
+}
+
+func TestPushScan_MCPSecrets(t *testing.T) {
+	claudeDir, syncDir := setupV2PushEnv(t)
+
+	// Write .mcp.json with a secret.
+	mcpData := `{"mcpServers": {"my-server": {"command": "npx", "env": {"API_KEY": "sk-secretvalue123"}}}}`
+	os.WriteFile(filepath.Join(claudeDir, ".mcp.json"), []byte(mcpData), 0644)
+
+	scan, err := commands.PushScan(claudeDir, syncDir)
+	require.NoError(t, err)
+	assert.True(t, scan.ChangedMCP)
+	assert.NotEmpty(t, scan.MCPSecrets, "should detect secrets in MCP configs")
+	assert.Equal(t, "API_KEY", scan.MCPSecrets[0].EnvKey)
+}
