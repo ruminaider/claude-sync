@@ -2077,7 +2077,7 @@ func TestNewModel_EditMode_RestoresProfiles(t *testing.T) {
 	existingCfg := &config.Config{
 		Version:  "1.0.0",
 		Upstream: []string{"a@m", "b@m"},
-		Forked:   []string{"c@local"},
+		Forked:   []string{"c"},
 		Settings: map[string]any{"model": "opus", "env": "prod"},
 	}
 
