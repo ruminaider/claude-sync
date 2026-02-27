@@ -13,10 +13,7 @@ var rootCmd = &cobra.Command{
 	Use:   "claude-sync",
 	Short: "Sync Claude Code configuration across machines",
 	Long:  "claude-sync synchronizes Claude Code plugins, settings, and hooks across multiple machines using a git-backed config repo.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Default behavior: show status
-		return statusCmd.RunE(cmd, args)
-	},
+	RunE: runMainMenu,
 }
 
 var versionCmd = &cobra.Command{
