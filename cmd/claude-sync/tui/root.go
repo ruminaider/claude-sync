@@ -1581,6 +1581,16 @@ func applyPickerSelection(p *Picker, selectedSet map[string]bool) {
 func (m *Model) applyExistingConfig(cfg *config.Config, existingProfiles map[string]profiles.Profile) {
 	// Plugins: select only those in the existing config.
 	pluginSet := toSet(cfg.AllPluginKeys())
+	// AllPluginKeys() maps Forked names to name@claude-sync-forks, but the
+	// picker uses scan AutoForked keys (name@original-marketplace). Add
+	// those keys so forked plugins get selected in the picker.
+	forkedNames := toSet(cfg.Forked)
+	for _, key := range m.scanResult.AutoForked {
+		parts := strings.SplitN(key, "@", 2)
+		if len(parts) == 2 && forkedNames[parts[0]] {
+			pluginSet[key] = true
+		}
+	}
 	applyPickerSelection(pickerPtr(m.pickers, SectionPlugins), pluginSet)
 
 	// Settings: select only those in the existing config.
