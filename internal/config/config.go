@@ -64,6 +64,9 @@ type ConfigV2 struct {
 	Subscriptions map[string]SubscriptionEntry  `yaml:"-"`
 }
 
+// ForkedMarketplace is the marketplace name for forked plugins.
+const ForkedMarketplace = "claude-sync-forks"
+
 // Config is a type alias for ConfigV2 to maintain backward compatibility.
 type Config = ConfigV2
 
@@ -86,9 +89,10 @@ func (c *ConfigV2) AllPluginKeys() []string {
 		}
 	}
 	for _, k := range c.Forked {
-		if !seen[k] {
-			seen[k] = true
-			keys = append(keys, k)
+		qualified := k + "@" + ForkedMarketplace
+		if !seen[qualified] {
+			seen[qualified] = true
+			keys = append(keys, qualified)
 		}
 	}
 
