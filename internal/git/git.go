@@ -32,6 +32,13 @@ func IsClean(dir string) (bool, error) {
 	return out == "", nil
 }
 
+// HasStagedChanges returns true if there are any changes in the staging area.
+func HasStagedChanges(dir string) bool {
+	_, err := Run(dir, "diff", "--cached", "--quiet")
+	// git diff --cached --quiet exits 1 when there are staged changes
+	return err != nil
+}
+
 // HasUncommittedChanges returns true if the given path (relative to dir)
 // has any uncommitted changes (modified, untracked, or deleted).
 func HasUncommittedChanges(dir, path string) bool {

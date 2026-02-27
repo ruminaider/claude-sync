@@ -166,7 +166,7 @@ func TestAllPluginKeys(t *testing.T) {
 	assert.Contains(t, keys, "context7@claude-plugins-official")
 	assert.Contains(t, keys, "playwright@claude-plugins-official")
 	assert.Contains(t, keys, "beads@beads-marketplace")
-	assert.Contains(t, keys, "figma-minimal")
+	assert.Contains(t, keys, "figma-minimal@claude-sync-forks")
 
 	// Verify sorted
 	for i := 1; i < len(keys); i++ {

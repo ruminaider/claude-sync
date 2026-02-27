@@ -101,9 +101,22 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		filtered = append(filtered, p)
 	}
 
+	// Filter forked plugins from the "removed" list — they use a different
+	// key format and should never be auto-removed by push.
+	var filteredRemoved []string
+	for _, p := range diff.ToInstall {
+		name := p
+		if idx := strings.Index(p, "@"); idx > 0 {
+			name = p[:idx]
+		}
+		if !forkedSet[name] {
+			filteredRemoved = append(filteredRemoved, p)
+		}
+	}
+
 	result := &PushScanResult{
 		AddedPlugins:   filtered,
-		RemovedPlugins: diff.ToInstall,
+		RemovedPlugins: filteredRemoved,
 	}
 
 	// Scan permissions.
@@ -508,6 +521,9 @@ func PushApply(opts PushApplyOptions) error {
 	// Catch-all: stage any remaining uncommitted changes (e.g. from config update).
 	if opts.DirtyWorkingTree {
 		git.Add(opts.SyncDir, "-A")
+	}
+	if !git.HasStagedChanges(opts.SyncDir) {
+		return nil // nothing actually changed on disk
 	}
 	if err := git.Commit(opts.SyncDir, message); err != nil {
 		return fmt.Errorf("committing: %w", err)
