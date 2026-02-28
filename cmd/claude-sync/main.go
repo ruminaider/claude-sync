@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.6.0"
+var version = "0.6.1"
 
 var rootCmd = &cobra.Command{
 	Use:   "claude-sync",
