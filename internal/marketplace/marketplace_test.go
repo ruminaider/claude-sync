@@ -1015,6 +1015,86 @@ func TestEnsureRegistered(t *testing.T) {
 	})
 }
 
+// ─── FindUndefinedMarketplaces ──────────────────────────────────────────────
+
+func TestFindUndefinedMarketplaces(t *testing.T) {
+	t.Run("returns nil when all marketplaces are known", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		keys := []string{
+			"plugin-a@claude-plugins-official",
+			"plugin-b@superpowers-marketplace",
+		}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for declared marketplaces", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		declared := map[string]config.MarketplaceSource{
+			"custom-marketplace": {Source: "github", Repo: "org/custom"},
+		}
+		keys := []string{"my-plugin@custom-marketplace"}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, declared)
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for claude-sync-forks", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		keys := []string{"forked-plugin@claude-sync-forks"}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil for marketplace in known_marketplaces.json", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		km := `{"on-disk-marketplace": {"source": {"source": "github", "repo": "org/repo"}, "installLocation": "/cache"}}`
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+		keys := []string{"my-plugin@on-disk-marketplace"}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("detects undefined marketplace", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		keys := []string{
+			"plugin-a@unknown-marketplace",
+			"plugin-b@unknown-marketplace",
+			"plugin-c@another-unknown",
+		}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, nil)
+		require.NotNil(t, result)
+		assert.ElementsMatch(t, []string{"plugin-a", "plugin-b"}, result["unknown-marketplace"])
+		assert.ElementsMatch(t, []string{"plugin-c"}, result["another-unknown"])
+	})
+
+	t.Run("skips keys without @ separator", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		keys := []string{"bare-plugin-name"}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("mixed known and undefined", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		declared := map[string]config.MarketplaceSource{
+			"declared-one": {Source: "github", Repo: "org/declared"},
+		}
+		keys := []string{
+			"a@claude-plugins-official", // known
+			"b@declared-one",            // declared
+			"c@missing-marketplace",     // undefined
+		}
+		result := marketplace.FindUndefinedMarketplaces(claudeDir, keys, declared)
+		require.NotNil(t, result)
+		assert.Len(t, result, 1)
+		assert.Equal(t, []string{"c"}, result["missing-marketplace"])
+	})
+}
+
 // ─── QueryRemoteVersion (skipped by default — requires network) ────────────
 
 func TestQueryRemoteVersion_InvalidURL(t *testing.T) {

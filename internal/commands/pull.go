@@ -46,6 +46,7 @@ type PullResult struct {
 	PendingHighRisk            []approval.Change
 	Updated                    []string // plugins refreshed due to version mismatch
 	UpdateFailed               []string // plugins that failed to refresh
+	UndefinedMarketplaces      map[string][]string // marketplace name -> plugin names referencing it
 	ProjectSettingsApplied     bool
 	ProjectUnmanagedDetected   bool // CWD has settings.local.json but no .claude-sync.yaml
 }
@@ -113,6 +114,9 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		}
 	}
 
+	// Check for plugins referencing undefined marketplaces.
+	undefinedMkts := marketplace.FindUndefinedMarketplaces(claudeDir, allDesired, cfg.Marketplaces)
+
 	prefs := config.DefaultUserPreferences()
 	prefsPath := filepath.Join(syncDir, "user-preferences.yaml")
 	if prefsData, err := os.ReadFile(prefsPath); err == nil {
@@ -133,11 +137,12 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 	diff := csync.ComputePluginDiff(effectiveDesired, installedPlugins.PluginKeys())
 
 	result := &PullResult{
-		ToInstall:        diff.ToInstall,
-		Synced:           diff.Synced,
-		Untracked:        diff.Untracked,
-		EffectiveDesired: effectiveDesired,
-		ActiveProfile:    activeName,
+		ToInstall:             diff.ToInstall,
+		Synced:                diff.Synced,
+		Untracked:             diff.Untracked,
+		EffectiveDesired:      effectiveDesired,
+		ActiveProfile:         activeName,
+		UndefinedMarketplaces: undefinedMkts,
 	}
 
 	if prefs.SyncMode == "exact" {
