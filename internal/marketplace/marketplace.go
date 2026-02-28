@@ -560,8 +560,28 @@ func EnsureRegistered(claudeDir string, declared map[string]config.MarketplaceSo
 	}
 
 	for name, src := range declared {
-		if _, exists := mkts[name]; exists {
-			continue // already registered, don't overwrite
+		dest := filepath.Join(claudeDir, "plugins", "marketplaces", name)
+
+		if raw, exists := mkts[name]; exists {
+			// Already registered — still clone if the directory is missing on disk
+			// (e.g., previous clone failed or user upgraded from a pre-clone version).
+			// Only attempt for clonable sources (github/git), not directory sources.
+			var entry struct {
+				Source struct {
+					Source string `json:"source"`
+				} `json:"source"`
+			}
+			if err := json.Unmarshal(raw, &entry); err == nil &&
+				(entry.Source.Source == "github" || entry.Source.Source == "git") {
+				if _, err := os.Stat(dest); os.IsNotExist(err) {
+					toClone = append(toClone, struct {
+						name string
+						src  config.MarketplaceSource
+						dest string
+					}{name, src, dest})
+				}
+			}
+			continue
 		}
 		entry := buildMarketplaceEntry(claudeDir, name, src)
 		raw, err := json.Marshal(entry)
@@ -571,7 +591,6 @@ func EnsureRegistered(claudeDir string, declared map[string]config.MarketplaceSo
 		mkts[name] = json.RawMessage(raw)
 		changed = true
 
-		dest := filepath.Join(claudeDir, "plugins", "marketplaces", name)
 		toClone = append(toClone, struct {
 			name string
 			src  config.MarketplaceSource
