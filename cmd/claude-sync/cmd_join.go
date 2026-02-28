@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ var (
 	joinKeepLocal    bool
 	joinSkipSettings bool
 	joinSkipHooks    bool
+	joinReplace      bool
 )
 
 var configJoinCmd = &cobra.Command{
@@ -46,9 +48,59 @@ var configJoinCmd = &cobra.Command{
 			}
 		}
 		syncDir := paths.SyncDir()
+		claudeDir := paths.ClaudeDir()
+
+		// If --replace is set and sync dir exists, confirm and replace.
+		if joinReplace {
+			if _, statErr := os.Stat(syncDir); statErr == nil {
+				subCount := countSubscriptions(syncDir)
+				warning := "This will remove your current config"
+				if subCount > 0 {
+					warning += fmt.Sprintf(" and %d subscription(s)", subCount)
+				}
+				var confirm bool
+				confirmErr := huh.NewForm(
+					huh.NewGroup(
+						huh.NewConfirm().
+							Title(warning + ". Continue?").
+							Affirmative("Yes, replace").
+							Negative("Cancel").
+							Value(&confirm),
+					),
+				).Run()
+				if confirmErr != nil || !confirm {
+					return fmt.Errorf("cancelled")
+				}
+			}
+		}
+
 		fmt.Printf("Cloning config from %s...\n", repoURL)
 
-		result, err := commands.Join(repoURL, paths.ClaudeDir(), syncDir)
+		var result *commands.JoinResult
+		var err error
+		if joinReplace {
+			result, err = commands.JoinReplace(repoURL, claudeDir, syncDir)
+		} else {
+			result, err = commands.Join(repoURL, claudeDir, syncDir)
+		}
+
+		var alreadyErr *commands.AlreadyJoinedError
+		var subscribeErr *commands.SubscribeNeededError
+		if errors.As(err, &alreadyErr) {
+			fmt.Println("Already joined this config. Running pull...")
+			pullResult, pullErr := commands.Pull(claudeDir, syncDir, false)
+			if pullErr != nil {
+				return fmt.Errorf("pull failed: %w", pullErr)
+			}
+			printPullResult(pullResult)
+			return nil
+		}
+		if errors.As(err, &subscribeErr) {
+			fmt.Printf("You already have a config repo. To add items from this source, run:\n\n")
+			fmt.Printf("  claude-sync subscribe %s\n\n", subscribeErr.URL)
+			fmt.Println("Or use 'claude-sync config join --replace' to replace your current config.")
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -186,7 +238,7 @@ var configJoinCmd = &cobra.Command{
 		// Automatically apply the config.
 		fmt.Println()
 		fmt.Println("Applying config...")
-		pullResult, pullErr := commands.Pull(paths.ClaudeDir(), syncDir, false)
+		pullResult, pullErr := commands.Pull(claudeDir, syncDir, false)
 		if pullErr != nil {
 			return fmt.Errorf("pull failed: %w", pullErr)
 		}
@@ -194,6 +246,19 @@ var configJoinCmd = &cobra.Command{
 		printPullResult(pullResult)
 		return nil
 	},
+}
+
+// countSubscriptions returns the number of subscriptions in the sync dir.
+func countSubscriptions(syncDir string) int {
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	if err != nil {
+		return 0
+	}
+	cfg, err := config.Parse(cfgData)
+	if err != nil {
+		return 0
+	}
+	return len(cfg.Subscriptions)
 }
 
 // promptCategorySelection asks the user which sync categories to apply.
@@ -301,6 +366,7 @@ func init() {
 	configJoinCmd.Flags().BoolVar(&joinKeepLocal, "keep-local", false, "Keep all locally installed plugins without prompting")
 	configJoinCmd.Flags().BoolVar(&joinSkipSettings, "skip-settings", false, "Don't apply settings from the remote config")
 	configJoinCmd.Flags().BoolVar(&joinSkipHooks, "skip-hooks", false, "Don't apply hooks from the remote config")
+	configJoinCmd.Flags().BoolVar(&joinReplace, "replace", false, "Replace existing config repo with a new one")
 
 	configCmd.AddCommand(configJoinCmd)
 }

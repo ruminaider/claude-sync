@@ -89,11 +89,48 @@ func TestJoin(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestJoin_AlreadyExists(t *testing.T) {
-	syncDir := t.TempDir()
-	_, err := commands.Join("http://example.com/repo.git", "/tmp/claude", syncDir)
+func TestJoin_AlreadyExists_SameURL(t *testing.T) {
+	// Create a "remote" repo and clone it as the sync dir.
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	exec.Command("git", "clone", remote, syncDir).Run()
+
+	// Join with the same URL should return AlreadyJoinedError.
+	_, err := commands.Join(remote, "/tmp/claude", syncDir)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "already")
+	var alreadyErr *commands.AlreadyJoinedError
+	assert.ErrorAs(t, err, &alreadyErr)
+	assert.Equal(t, remote, alreadyErr.URL)
+}
+
+func TestJoin_AlreadyExists_SameURL_NormalizedGitSuffix(t *testing.T) {
+	// Create a "remote" repo and clone it as the sync dir.
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	exec.Command("git", "clone", remote, syncDir).Run()
+
+	// Join with the same URL + .git suffix should still match.
+	_, err := commands.Join(remote+".git", "/tmp/claude", syncDir)
+	assert.Error(t, err)
+	var alreadyErr *commands.AlreadyJoinedError
+	assert.ErrorAs(t, err, &alreadyErr)
+}
+
+func TestJoin_AlreadyExists_DifferentURL(t *testing.T) {
+	// Create a "remote" repo and clone it as the sync dir.
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	exec.Command("git", "clone", remote, syncDir).Run()
+
+	// Join with a different URL should return SubscribeNeededError.
+	_, err := commands.Join("https://github.com/other/repo.git", "/tmp/claude", syncDir)
+	assert.Error(t, err)
+	var subscribeErr *commands.SubscribeNeededError
+	assert.ErrorAs(t, err, &subscribeErr)
+	assert.Equal(t, "https://github.com/other/repo.git", subscribeErr.URL)
 }
 
 func TestJoin_BootstrapsClaudeDir(t *testing.T) {
@@ -266,4 +303,41 @@ func TestJoin_EmptyLocalInstallation(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, result.LocalOnly)
+}
+
+func TestJoinReplace(t *testing.T) {
+	// Set up an existing sync dir with a cloned repo.
+	remote1 := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	_, err := commands.Join(remote1, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Now replace with a different repo.
+	remote2 := setupRemoteRepo(t, []string{"beads@beads-marketplace"})
+	result, err := commands.JoinReplace(remote2, claudeDir, syncDir)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify the sync dir now has the new repo's content.
+	_, err = os.Stat(filepath.Join(syncDir, "config.yaml"))
+	assert.NoError(t, err)
+}
+
+func TestNormalizeURL(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"https://github.com/org/repo", "https://github.com/org/repo", true},
+		{"https://github.com/org/repo.git", "https://github.com/org/repo", true},
+		{"https://github.com/org/repo/", "https://github.com/org/repo", true},
+		{"https://github.com/org/repo.git/", "https://github.com/org/repo", true},
+		{"https://github.com/org/repo", "https://github.com/other/repo", false},
+	}
+	for _, tt := range tests {
+		got := commands.NormalizeURL(tt.a) == commands.NormalizeURL(tt.b)
+		assert.Equal(t, tt.want, got, "NormalizeURL(%q) == NormalizeURL(%q)", tt.a, tt.b)
+	}
 }
