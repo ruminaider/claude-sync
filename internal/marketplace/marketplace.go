@@ -536,6 +536,46 @@ func CollectCustomMarketplaceSources(claudeDir string, marketplaceIDs []string) 
 	return result
 }
 
+// FindUndefinedMarketplaces checks a list of plugin keys ("name@marketplace")
+// and returns a map of marketplace name -> plugin names for any marketplace that
+// is not resolvable: not in the declared config marketplaces, not in the
+// hardcoded known list, and not already registered in known_marketplaces.json.
+func FindUndefinedMarketplaces(claudeDir string, pluginKeys []string, declared map[string]config.MarketplaceSource) map[string][]string {
+	undefined := make(map[string][]string)
+	for _, key := range pluginKeys {
+		parts := strings.SplitN(key, "@", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		pluginName := parts[0]
+		mktName := parts[1]
+
+		// Skip if declared in config.yaml marketplaces section.
+		if _, ok := declared[mktName]; ok {
+			continue
+		}
+		// Skip if it's a well-known marketplace.
+		if _, ok := knownMarketplaces[mktName]; ok {
+			continue
+		}
+		// Skip the special local forks marketplace.
+		if mktName == "claude-sync-forks" {
+			continue
+		}
+		// Skip if already registered in known_marketplaces.json.
+		if _, found := IsPortableFromKnownMarketplaces(claudeDir, mktName); found {
+			continue
+		}
+
+		undefined[mktName] = append(undefined[mktName], pluginName)
+	}
+
+	if len(undefined) == 0 {
+		return nil
+	}
+	return undefined
+}
+
 // EnsureRegistered checks if each declared marketplace exists in
 // known_marketplaces.json. If missing, registers it as a GitHub or git source.
 // Skips marketplaces that are already registered (idempotent).

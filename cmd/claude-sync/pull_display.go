@@ -48,6 +48,16 @@ func printPullResult(result *commands.PullResult) {
 		fmt.Printf("  Skipped: %s (per user-preferences.yaml)\n", strings.Join(result.SkippedCategories, ", "))
 	}
 
+	if len(result.UndefinedMarketplaces) > 0 {
+		for mktName, pluginNames := range result.UndefinedMarketplaces {
+			fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) reference undefined marketplace %q:\n", len(pluginNames), mktName)
+			for _, p := range pluginNames {
+				fmt.Fprintf(os.Stderr, "  • %s\n", p)
+			}
+		}
+		fmt.Fprintln(os.Stderr, "Add it to the \"marketplaces\" section of config.yaml to resolve.")
+	}
+
 	allFailed := append(result.Failed, result.UpdateFailed...)
 	if len(allFailed) > 0 {
 		fmt.Fprintf(os.Stderr, "\n⚠️  %d plugin(s) failed:\n", len(allFailed))
