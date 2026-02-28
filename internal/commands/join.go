@@ -5,12 +5,38 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 )
+
+// AlreadyJoinedError is returned when the user joins a URL that matches the existing origin.
+type AlreadyJoinedError struct {
+	URL string
+}
+
+func (e *AlreadyJoinedError) Error() string {
+	return fmt.Sprintf("already joined %s", e.URL)
+}
+
+// SubscribeNeededError is returned when the user joins a different URL than the existing origin.
+type SubscribeNeededError struct {
+	URL string
+}
+
+func (e *SubscribeNeededError) Error() string {
+	return fmt.Sprintf("different config repo; subscribe to %s instead", e.URL)
+}
+
+// NormalizeURL strips trailing slashes and .git suffix for URL comparison.
+func NormalizeURL(u string) string {
+	u = strings.TrimRight(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	return u
+}
 
 // LocalPlugin describes a locally installed plugin not in the remote config.
 type LocalPlugin struct {
@@ -31,7 +57,12 @@ type JoinResult struct {
 
 func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	if _, err := os.Stat(syncDir); err == nil {
-		return nil, fmt.Errorf("%s already exists. Run 'claude-sync pull' instead", syncDir)
+		// Sync dir exists — check if it's the same or different repo.
+		existingURL, err := git.RemoteURL(syncDir, "origin")
+		if err == nil && NormalizeURL(existingURL) == NormalizeURL(repoURL) {
+			return nil, &AlreadyJoinedError{URL: repoURL}
+		}
+		return nil, &SubscribeNeededError{URL: repoURL}
 	}
 
 	if !claudecode.DirExists(claudeDir) {
@@ -100,6 +131,12 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	}
 
 	return result, nil
+}
+
+// JoinReplace removes the existing sync dir and performs a fresh join.
+func JoinReplace(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
+	os.RemoveAll(syncDir)
+	return Join(repoURL, claudeDir, syncDir)
 }
 
 // CleanupResult holds the outcome of a plugin removal attempt.

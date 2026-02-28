@@ -92,6 +92,27 @@ func TestClone(t *testing.T) {
 	assert.Equal(t, "hello", string(data))
 }
 
+func TestRemoteURL(t *testing.T) {
+	src := initTestRepo(t)
+	os.WriteFile(filepath.Join(src, "test.txt"), []byte("hello"), 0644)
+	exec.Command("git", "-C", src, "add", ".").Run()
+	exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+
+	dst := filepath.Join(t.TempDir(), "clone")
+	err := git.Clone(src, dst)
+	require.NoError(t, err)
+
+	url, err := git.RemoteURL(dst, "origin")
+	require.NoError(t, err)
+	assert.Equal(t, src, url)
+}
+
+func TestRemoteURL_NoRemote(t *testing.T) {
+	dir := initTestRepo(t)
+	_, err := git.RemoteURL(dir, "nonexistent")
+	assert.Error(t, err)
+}
+
 func TestAddAndCommit(t *testing.T) {
 	dir := initTestRepo(t)
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)

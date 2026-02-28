@@ -222,6 +222,11 @@ func HasRemote(dir, name string) bool {
 	return err == nil
 }
 
+// RemoteURL returns the URL configured for the named remote.
+func RemoteURL(dir, name string) (string, error) {
+	return Run(dir, "remote", "get-url", name)
+}
+
 // HasUpstream returns true if the current branch has an upstream tracking branch.
 func HasUpstream(dir string) bool {
 	_, err := Run(dir, "rev-parse", "--abbrev-ref", "@{u}")
