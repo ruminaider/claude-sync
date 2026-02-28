@@ -879,6 +879,50 @@ func TestEnsureRegistered(t *testing.T) {
 		assert.Equal(t, "directory", entry.Source.Source, "existing entry should not be overwritten")
 	})
 
+	t.Run("clones when already registered but directory missing", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+		// Create a local bare repo as the clone source.
+		bareRepo := initTestRepo(t)
+
+		// Pre-populate known_marketplaces.json with an entry whose installLocation
+		// doesn't exist on disk (simulates upgrade from pre-clone version or
+		// a previously failed clone).
+		installDir := filepath.Join(pluginDir, "marketplaces", "stale-marketplace")
+		existing := map[string]any{
+			"stale-marketplace": map[string]any{
+				"source":          map[string]string{"source": "git", "url": bareRepo},
+				"installLocation": installDir,
+				"lastUpdated":     "2026-01-01T00:00:00Z",
+			},
+		}
+		existingData, err := json.MarshalIndent(existing, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), existingData, 0644))
+
+		// Verify the directory doesn't exist yet.
+		_, err = os.Stat(installDir)
+		require.True(t, os.IsNotExist(err), "install dir should not exist before EnsureRegistered")
+
+		declared := map[string]config.MarketplaceSource{
+			"stale-marketplace": {Source: "git", URL: bareRepo},
+		}
+
+		err = marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		// Verify the repo was cloned even though it was already registered.
+		_, err = os.Stat(installDir)
+		assert.NoError(t, err, "installLocation should exist after EnsureRegistered clones missing directory")
+
+		// Verify it's a git repo.
+		cmd := exec.Command("git", "rev-parse", "--git-dir")
+		cmd.Dir = installDir
+		assert.NoError(t, cmd.Run(), "installLocation should be a git repo")
+	})
+
 	t.Run("empty declared map is no-op", func(t *testing.T) {
 		claudeDir := t.TempDir()
 		pluginDir := filepath.Join(claudeDir, "plugins")
