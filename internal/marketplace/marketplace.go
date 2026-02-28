@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/git"
 )
 
 // PluginVersionInfo holds version data for a plugin in a marketplace.
@@ -551,6 +553,12 @@ func EnsureRegistered(claudeDir string, declared map[string]config.MarketplaceSo
 	}
 
 	changed := false
+	var toClone []struct {
+		name string
+		src  config.MarketplaceSource
+		dest string
+	}
+
 	for name, src := range declared {
 		if _, exists := mkts[name]; exists {
 			continue // already registered, don't overwrite
@@ -562,11 +570,28 @@ func EnsureRegistered(claudeDir string, declared map[string]config.MarketplaceSo
 		}
 		mkts[name] = json.RawMessage(raw)
 		changed = true
+
+		dest := filepath.Join(claudeDir, "plugins", "marketplaces", name)
+		toClone = append(toClone, struct {
+			name string
+			src  config.MarketplaceSource
+			dest string
+		}{name, src, dest})
 	}
 
 	if changed {
-		return claudecode.WriteMarketplaces(claudeDir, mkts)
+		if err := claudecode.WriteMarketplaces(claudeDir, mkts); err != nil {
+			return err
+		}
 	}
+
+	// Clone marketplace repos that don't exist on disk yet.
+	for _, c := range toClone {
+		if err := cloneMarketplace(c.src, c.dest); err != nil {
+			return fmt.Errorf("cloning marketplace %q: %w", c.name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -586,7 +611,33 @@ func buildMarketplaceEntry(claudeDir, name string, src config.MarketplaceSource)
 	return map[string]any{
 		"source":          sourceMap,
 		"installLocation": filepath.Join(claudeDir, "plugins", "marketplaces", name),
+		"lastUpdated":     time.Now().UTC().Format(time.RFC3339Nano),
 	}
+}
+
+// cloneMarketplace clones a marketplace repo to dest if it doesn't already
+// exist. For github sources, constructs the HTTPS URL from the repo field.
+// For git sources, uses the URL directly.
+func cloneMarketplace(src config.MarketplaceSource, dest string) error {
+	// Skip if already cloned.
+	if _, err := os.Stat(dest); err == nil {
+		return nil
+	}
+
+	var cloneURL string
+	switch src.Source {
+	case "github":
+		cloneURL = "https://github.com/" + src.Repo + ".git"
+	case "git":
+		cloneURL = src.URL
+	default:
+		return nil // nothing to clone for directory sources
+	}
+
+	if err := git.Clone(cloneURL, dest); err != nil {
+		return fmt.Errorf("git clone %s: %w", cloneURL, err)
+	}
+	return nil
 }
 
 // gitLogLastCommit returns the latest commit SHA that touched the given path

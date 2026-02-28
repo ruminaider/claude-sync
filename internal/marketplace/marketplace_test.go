@@ -762,39 +762,90 @@ func TestCollectCustomMarketplaceSources(t *testing.T) {
 // ─── EnsureRegistered ──────────────────────────────────────────────────────
 
 func TestEnsureRegistered(t *testing.T) {
-	t.Run("registers missing marketplace", func(t *testing.T) {
+	t.Run("registers missing marketplace with lastUpdated", func(t *testing.T) {
 		claudeDir := t.TempDir()
 		pluginDir := filepath.Join(claudeDir, "plugins")
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
 
+		// Create a local bare repo to serve as the "github" source.
+		bareRepo := initTestRepo(t)
+
 		declared := map[string]config.MarketplaceSource{
 			"my-marketplace": {Source: "github", Repo: "myorg/my-marketplace"},
 		}
 
+		// EnsureRegistered will try to clone from github — use a local bare repo
+		// by testing the metadata portion separately.
 		err := marketplace.EnsureRegistered(claudeDir, declared)
+		// Clone will fail since myorg/my-marketplace doesn't exist on github,
+		// but we can test metadata was written correctly in a dedicated test below.
+		// For the metadata-only check, pre-create the install dir to skip clone.
+		_ = err // expected clone failure
+
+		// --- Metadata-only test: skip clone by pre-creating the directory ---
+		claudeDir2 := t.TempDir()
+		pluginDir2 := filepath.Join(claudeDir2, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir2, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir2, "known_marketplaces.json"), []byte("{}"), 0644))
+
+		// Pre-create install location so clone is skipped.
+		installDir := filepath.Join(pluginDir2, "marketplaces", "my-marketplace")
+		require.NoError(t, os.MkdirAll(installDir, 0755))
+
+		err = marketplace.EnsureRegistered(claudeDir2, declared)
 		require.NoError(t, err)
 
-		// Verify it was written.
-		data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+		data, err := os.ReadFile(filepath.Join(pluginDir2, "known_marketplaces.json"))
 		require.NoError(t, err)
 
 		var entries map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(data, &entries))
 		assert.Contains(t, entries, "my-marketplace")
 
-		// Verify entry structure.
+		// Verify entry structure including lastUpdated.
 		var entry struct {
 			Source struct {
 				Source string `json:"source"`
 				Repo   string `json:"repo"`
 			} `json:"source"`
 			InstallLocation string `json:"installLocation"`
+			LastUpdated     string `json:"lastUpdated"`
 		}
 		require.NoError(t, json.Unmarshal(entries["my-marketplace"], &entry))
 		assert.Equal(t, "github", entry.Source.Source)
 		assert.Equal(t, "myorg/my-marketplace", entry.Source.Repo)
-		assert.Equal(t, filepath.Join(claudeDir, "plugins", "marketplaces", "my-marketplace"), entry.InstallLocation)
+		assert.Equal(t, filepath.Join(claudeDir2, "plugins", "marketplaces", "my-marketplace"), entry.InstallLocation)
+		assert.NotEmpty(t, entry.LastUpdated, "lastUpdated field must be present for Claude Code Zod validation")
+
+		_ = bareRepo // used in clone test below
+	})
+
+	t.Run("clones marketplace repo to installLocation", func(t *testing.T) {
+		claudeDir := t.TempDir()
+		pluginDir := filepath.Join(claudeDir, "plugins")
+		require.NoError(t, os.MkdirAll(pluginDir, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+		// Create a local bare repo as the clone source.
+		bareRepo := initTestRepo(t)
+
+		declared := map[string]config.MarketplaceSource{
+			"local-test": {Source: "git", URL: bareRepo},
+		}
+
+		err := marketplace.EnsureRegistered(claudeDir, declared)
+		require.NoError(t, err)
+
+		// Verify the repo was cloned to the installLocation.
+		installDir := filepath.Join(pluginDir, "marketplaces", "local-test")
+		_, err = os.Stat(installDir)
+		assert.NoError(t, err, "installLocation directory should exist after EnsureRegistered")
+
+		// Verify it's a git repo.
+		cmd := exec.Command("git", "rev-parse", "--git-dir")
+		cmd.Dir = installDir
+		assert.NoError(t, cmd.Run(), "installLocation should be a git repo")
 	})
 
 	t.Run("does not overwrite existing marketplace", func(t *testing.T) {
@@ -844,6 +895,9 @@ func TestEnsureRegistered(t *testing.T) {
 		require.NoError(t, os.MkdirAll(pluginDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
 
+		// Pre-create install dir so clone is skipped (testing metadata, not clone).
+		require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, "marketplaces", "private-marketplace"), 0755))
+
 		declared := map[string]config.MarketplaceSource{
 			"private-marketplace": {Source: "git", URL: "https://git.internal.com/plugins.git"},
 		}
@@ -870,7 +924,8 @@ func TestEnsureRegistered(t *testing.T) {
 
 	t.Run("bootstraps when known_marketplaces.json missing", func(t *testing.T) {
 		claudeDir := t.TempDir()
-		// No plugins/ directory exists yet.
+		// No plugins/ directory exists yet, but pre-create install dir so clone is skipped.
+		require.NoError(t, os.MkdirAll(filepath.Join(claudeDir, "plugins", "marketplaces", "my-marketplace"), 0755))
 
 		declared := map[string]config.MarketplaceSource{
 			"my-marketplace": {Source: "github", Repo: "myorg/my-marketplace"},
@@ -895,6 +950,9 @@ func TestEnsureRegistered(t *testing.T) {
 
 		existing := `{"existing-marketplace": {"source": {"source": "github", "repo": "org/existing"}, "installLocation": "/some/path"}}`
 		require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(existing), 0644))
+
+		// Pre-create install dir so clone is skipped (testing metadata preservation).
+		require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, "marketplaces", "new-marketplace"), 0755))
 
 		declared := map[string]config.MarketplaceSource{
 			"new-marketplace": {Source: "github", Repo: "org/new"},
