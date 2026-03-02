@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/ruminaider/claude-sync/internal/commands"
+import (
+	"path/filepath"
+
+	"github.com/ruminaider/claude-sync/internal/commands"
+)
 
 // BuildMenuItems returns the menu item tree based on the detected state.
 func BuildMenuItems(state commands.MenuState) []menuItem {
@@ -36,6 +40,7 @@ func buildConfiguredMenu(state commands.MenuState) []menuItem {
 		items = append(items, *profiles)
 	}
 
+	items = append(items, buildProjectsCategory(state))
 	items = append(items, buildAdvancedCategory(state))
 	return items
 }
@@ -153,6 +158,35 @@ func descForProfile(name, active string) string {
 	return ""
 }
 
+func buildProjectsCategory(state commands.MenuState) menuItem {
+	var children []menuItem
+
+	for _, p := range state.Projects {
+		tag := "[base]"
+		if p.Profile != "" {
+			tag = "[" + p.Profile + "]"
+		}
+		name := filepath.Base(p.Path)
+		children = append(children, menuItem{
+			label: name,
+			desc:  tag,
+			children: []menuItem{
+				{label: "Remove project", action: MenuAction{ID: ActionProjectRemove, Type: ActionCLI, Args: []string{p.Path}}},
+			},
+		})
+	}
+
+	children = append(children, menuItem{
+		label:  "+ Initialize new project",
+		action: MenuAction{ID: ActionProjectInit, Type: ActionTUI},
+	})
+
+	return menuItem{
+		label:    "Projects",
+		children: children,
+	}
+}
+
 func buildAdvancedCategory(state commands.MenuState) menuItem {
 	var children []menuItem
 
@@ -165,7 +199,6 @@ func buildAdvancedCategory(state commands.MenuState) menuItem {
 
 	children = append(children,
 		menuItem{label: "Import MCP servers", action: MenuAction{ID: ActionMCPImport, Type: ActionCLI}},
-		menuItem{label: "Manage projects", action: MenuAction{ID: ActionProjects, Type: ActionCLI}},
 	)
 
 	if state.HasConflicts {

@@ -31,12 +31,13 @@ func TestBuildMenuItems_Configured(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	// No profiles => Profiles category hidden => 4 categories: Sync, Config, Plugins, Advanced
-	assert.Len(t, items, 4)
+	// No profiles => Profiles category hidden => 5 categories: Sync, Config, Plugins, Projects, Advanced
+	assert.Len(t, items, 5)
 	assert.Equal(t, "Sync", items[0].label)
 	assert.Equal(t, "Config", items[1].label)
 	assert.Equal(t, "Plugins", items[2].label)
-	assert.Equal(t, "Advanced", items[3].label)
+	assert.Equal(t, "Projects", items[3].label)
+	assert.Equal(t, "Advanced", items[4].label)
 
 	// Sync category should have 3 children
 	assert.Len(t, items[0].children, 3)
@@ -278,6 +279,72 @@ func TestBuildMenuItems_ProfilePicker_NoProfiles(t *testing.T) {
 	for _, item := range items {
 		assert.NotEqual(t, "Profiles", item.label, "Profiles category should be hidden when no profiles")
 	}
+}
+
+func TestBuildMenuItems_ProjectManager(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Projects: []commands.ProjectInfo{
+			{Path: "/home/user/Work/project-a", Profile: "work"},
+			{Path: "/home/user/Repositories/project-b", Profile: ""},
+		},
+	}
+
+	items := BuildMenuItems(state)
+
+	// Find Projects category
+	var projects *menuItem
+	for i := range items {
+		if items[i].label == "Projects" {
+			projects = &items[i]
+			break
+		}
+	}
+	assert.NotNil(t, projects, "Projects category should exist")
+
+	// 2 projects + "+ Initialize new project" = 3 children
+	assert.Len(t, projects.children, 3)
+
+	// Project A with profile tag
+	assert.Equal(t, "project-a", projects.children[0].label)
+	assert.Contains(t, projects.children[0].desc, "[work]")
+	assert.True(t, projects.children[0].isCategory())
+	// Should have "Remove project" action inside
+	assert.Len(t, projects.children[0].children, 1)
+	assert.Equal(t, ActionProjectRemove, projects.children[0].children[0].action.ID)
+	assert.Equal(t, []string{"/home/user/Work/project-a"}, projects.children[0].children[0].action.Args)
+
+	// Project B with base tag
+	assert.Equal(t, "project-b", projects.children[1].label)
+	assert.Contains(t, projects.children[1].desc, "[base]")
+
+	// Init at bottom
+	assert.Equal(t, "+ Initialize new project", projects.children[2].label)
+	assert.Equal(t, ActionProjectInit, projects.children[2].action.ID)
+}
+
+func TestBuildMenuItems_ProjectManager_Empty(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Projects:     nil,
+	}
+
+	items := BuildMenuItems(state)
+
+	// Find Projects category
+	var projects *menuItem
+	for i := range items {
+		if items[i].label == "Projects" {
+			projects = &items[i]
+			break
+		}
+	}
+	assert.NotNil(t, projects, "Projects category should exist even with no projects")
+
+	// Only "+ Initialize new project"
+	assert.Len(t, projects.children, 1)
+	assert.Equal(t, "+ Initialize new project", projects.children[0].label)
+	assert.Equal(t, ActionProjectInit, projects.children[0].action.ID)
 }
 
 func TestAllActionIDs_IncludesPhase2(t *testing.T) {

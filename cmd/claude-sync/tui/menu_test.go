@@ -178,5 +178,6 @@ func TestMenuModel_ViewConfigured(t *testing.T) {
 	assert.Contains(t, view, "Plugins")
 	// Profiles hidden when no profiles exist
 	assert.NotContains(t, view, "Profiles")
+	assert.Contains(t, view, "Projects")
 	assert.Contains(t, view, "Advanced")
 }
