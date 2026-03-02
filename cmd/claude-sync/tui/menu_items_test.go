@@ -31,13 +31,12 @@ func TestBuildMenuItems_Configured(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	// Should have 5 categories: Sync, Config, Plugins, Profiles, Advanced
-	assert.Len(t, items, 5)
+	// No profiles => Profiles category hidden => 4 categories: Sync, Config, Plugins, Advanced
+	assert.Len(t, items, 4)
 	assert.Equal(t, "Sync", items[0].label)
 	assert.Equal(t, "Config", items[1].label)
 	assert.Equal(t, "Plugins", items[2].label)
-	assert.Equal(t, "Profiles", items[3].label)
-	assert.Equal(t, "Advanced", items[4].label)
+	assert.Equal(t, "Advanced", items[3].label)
 
 	// Sync category should have 3 children
 	assert.Len(t, items[0].children, 3)
@@ -163,8 +162,9 @@ func TestBuildMenuItems_PendingApprovals(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	// Advanced category should include Approve and Reject
-	advanced := items[4]
+	// No profiles => Advanced is last category
+	advanced := items[len(items)-1]
+	assert.Equal(t, "Advanced", advanced.label)
 	labels := []string{}
 	for _, child := range advanced.children {
 		labels = append(labels, child.label)
@@ -181,8 +181,8 @@ func TestBuildMenuItems_NoPendingApprovals(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	// Advanced category should NOT include Approve/Reject
-	advanced := items[4]
+	advanced := items[len(items)-1]
+	assert.Equal(t, "Advanced", advanced.label)
 	for _, child := range advanced.children {
 		assert.NotEqual(t, "Approve pending changes", child.label)
 		assert.NotEqual(t, "Reject pending changes", child.label)
@@ -197,7 +197,8 @@ func TestBuildMenuItems_WithConflicts(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	advanced := items[4]
+	advanced := items[len(items)-1]
+	assert.Equal(t, "Advanced", advanced.label)
 	labels := []string{}
 	for _, child := range advanced.children {
 		labels = append(labels, child.label)
@@ -213,13 +214,14 @@ func TestBuildMenuItems_NoConflicts(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	advanced := items[4]
+	advanced := items[len(items)-1]
+	assert.Equal(t, "Advanced", advanced.label)
 	for _, child := range advanced.children {
 		assert.NotEqual(t, "Resolve conflicts", child.label)
 	}
 }
 
-func TestBuildMenuItems_WithProfiles(t *testing.T) {
+func TestBuildMenuItems_ProfilePicker(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
 		Profiles:      []string{"work", "personal"},
@@ -228,13 +230,54 @@ func TestBuildMenuItems_WithProfiles(t *testing.T) {
 
 	items := BuildMenuItems(state)
 
-	profiles := items[3]
-	labels := []string{}
-	for _, child := range profiles.children {
-		labels = append(labels, child.label)
+	// With profiles, Profiles category should exist
+	// Find Profiles category
+	var profiles *menuItem
+	for i := range items {
+		if items[i].label == "Profiles" {
+			profiles = &items[i]
+			break
+		}
 	}
-	assert.Contains(t, labels, "List profiles")
-	assert.Contains(t, labels, "Show active profile")
+	assert.NotNil(t, profiles, "Profiles category should exist")
+
+	// "base" first (deactivate), then each profile, then Show active at bottom
+	// base + work + personal + Show active = 4 children
+	assert.Len(t, profiles.children, 4)
+
+	// base is first
+	assert.Equal(t, "base", profiles.children[0].label)
+	assert.Equal(t, ActionProfileSet, profiles.children[0].action.ID)
+	assert.Equal(t, []string{""}, profiles.children[0].action.Args)
+
+	// work is active
+	assert.Equal(t, "work", profiles.children[1].label)
+	assert.Contains(t, profiles.children[1].desc, "active")
+	assert.Equal(t, ActionProfileSet, profiles.children[1].action.ID)
+	assert.Equal(t, []string{"work"}, profiles.children[1].action.Args)
+
+	// personal
+	assert.Equal(t, "personal", profiles.children[2].label)
+	assert.Equal(t, ActionProfileSet, profiles.children[2].action.ID)
+	assert.Equal(t, []string{"personal"}, profiles.children[2].action.Args)
+
+	// Show active profile at bottom
+	assert.Equal(t, "Show active profile", profiles.children[3].label)
+	assert.Equal(t, ActionProfileShow, profiles.children[3].action.ID)
+}
+
+func TestBuildMenuItems_ProfilePicker_NoProfiles(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Profiles:     nil,
+	}
+
+	items := BuildMenuItems(state)
+
+	// With no profiles, Profiles category should be hidden
+	for _, item := range items {
+		assert.NotEqual(t, "Profiles", item.label, "Profiles category should be hidden when no profiles")
+	}
 }
 
 func TestAllActionIDs_IncludesPhase2(t *testing.T) {

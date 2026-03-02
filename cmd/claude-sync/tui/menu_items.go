@@ -26,13 +26,18 @@ func buildFreshInstallMenu() []menuItem {
 }
 
 func buildConfiguredMenu(state commands.MenuState) []menuItem {
-	return []menuItem{
+	items := []menuItem{
 		buildSyncCategory(),
 		buildConfigCategory(),
 		buildPluginsCategory(state),
-		buildProfilesCategory(state),
-		buildAdvancedCategory(state),
 	}
+
+	if profiles := buildProfilesCategory(state); profiles != nil {
+		items = append(items, *profiles)
+	}
+
+	items = append(items, buildAdvancedCategory(state))
+	return items
 }
 
 func buildSyncCategory() menuItem {
@@ -106,14 +111,46 @@ func buildPluginItem(p commands.PluginInfo) menuItem {
 	}
 }
 
-func buildProfilesCategory(state commands.MenuState) menuItem {
-	return menuItem{
-		label: "Profiles",
-		children: []menuItem{
-			{label: "List profiles", action: MenuAction{ID: ActionProfileList, Type: ActionCLI}},
-			{label: "Show active profile", action: MenuAction{ID: ActionProfileShow, Type: ActionCLI}},
-		},
+func buildProfilesCategory(state commands.MenuState) *menuItem {
+	if len(state.Profiles) == 0 {
+		return nil
 	}
+
+	var children []menuItem
+
+	// "base" always first — selecting it deactivates the current profile
+	children = append(children, menuItem{
+		label:  "base",
+		desc:   descForProfile("", state.ActiveProfile),
+		action: MenuAction{ID: ActionProfileSet, Type: ActionCLI, Args: []string{""}},
+	})
+
+	// Each profile
+	for _, name := range state.Profiles {
+		children = append(children, menuItem{
+			label:  name,
+			desc:   descForProfile(name, state.ActiveProfile),
+			action: MenuAction{ID: ActionProfileSet, Type: ActionCLI, Args: []string{name}},
+		})
+	}
+
+	// Show active profile at bottom
+	children = append(children, menuItem{
+		label:  "Show active profile",
+		action: MenuAction{ID: ActionProfileShow, Type: ActionCLI},
+	})
+
+	return &menuItem{
+		label:    "Profiles",
+		children: children,
+	}
+}
+
+func descForProfile(name, active string) string {
+	if name == active {
+		return "(active)"
+	}
+	return ""
 }
 
 func buildAdvancedCategory(state commands.MenuState) menuItem {
