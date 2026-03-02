@@ -99,23 +99,65 @@ func dispatchAction(cmd *cobra.Command, action tui.MenuAction) error {
 	case tui.ActionConflicts:
 		return conflictsCmd.RunE(conflictsCmd, nil)
 
-	// Phase 2 — placeholders
+	// Phase 2: Plugin management
 	case tui.ActionPluginPin:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-pin requires a plugin key")
+		}
+		fmt.Print("Pin version (default: latest): ")
+		var version string
+		fmt.Scanln(&version)
+		if version == "" {
+			version = "latest"
+		}
+		return pinCmd.RunE(pinCmd, []string{action.Args[0], version})
+
 	case tui.ActionPluginUnpin:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-unpin requires a plugin key")
+		}
+		return unpinCmd.RunE(unpinCmd, []string{action.Args[0]})
+
 	case tui.ActionPluginFork:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-fork requires a plugin key")
+		}
+		return forkCmd.RunE(forkCmd, []string{action.Args[0]})
+
 	case tui.ActionPluginUnfork:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-unfork requires a plugin key")
+		}
+		return unforkCmd.RunE(unforkCmd, []string{action.Args[0]})
+
 	case tui.ActionPluginUpdate:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-update requires a plugin key")
+		}
+		return updateCmd.RunE(updateCmd, []string{action.Args[0]})
+
+	// Phase 2: Profile activation
 	case tui.ActionProfileSet:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("profile-set requires a profile name argument")
+		}
+		name := action.Args[0]
+		if name == "" {
+			profileSetNone = true
+			defer func() { profileSetNone = false }()
+			return profileSetCmd.RunE(profileSetCmd, nil)
+		}
+		return profileSetCmd.RunE(profileSetCmd, []string{name})
+
+	// Phase 2: Project management
 	case tui.ActionProjectInit:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		return projectInitCmd.RunE(projectInitCmd, nil)
+
 	case tui.ActionProjectRemove:
-		return fmt.Errorf("action %s: not yet implemented", action.ID)
+		if len(action.Args) == 0 {
+			return fmt.Errorf("project-remove requires a project path")
+		}
+		return projectRemoveCmd.RunE(projectRemoveCmd, []string{action.Args[0]})
 
 	default:
 		return fmt.Errorf("unknown action: %s", action.ID)
