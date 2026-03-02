@@ -12,6 +12,7 @@ const (
 // Action ID constants — single source of truth for menu item <-> dispatcher mapping.
 // Adding a new menu action requires adding a constant here first.
 const (
+	// Phase 1
 	ActionPull          = "pull"
 	ActionPush          = "push"
 	ActionStatus        = "status"
@@ -28,6 +29,16 @@ const (
 	ActionMCPImport     = "mcp-import"
 	ActionProjects      = "projects"
 	ActionConflicts     = "conflicts"
+
+	// Phase 2
+	ActionPluginPin     = "plugin-pin"
+	ActionPluginUnpin   = "plugin-unpin"
+	ActionPluginFork    = "plugin-fork"
+	ActionPluginUnfork  = "plugin-unfork"
+	ActionPluginUpdate  = "plugin-update"
+	ActionProfileSet    = "profile-set"
+	ActionProjectInit   = "project-init"
+	ActionProjectRemove = "project-remove"
 )
 
 // AllActionIDs returns all known action ID constants. Used by tests to verify
@@ -40,6 +51,9 @@ func AllActionIDs() []string {
 		ActionProfileList, ActionProfileShow,
 		ActionApprove, ActionReject,
 		ActionMCPImport, ActionProjects, ActionConflicts,
+		// Phase 2
+		ActionPluginPin, ActionPluginUnpin, ActionPluginFork, ActionPluginUnfork,
+		ActionPluginUpdate, ActionProfileSet, ActionProjectInit, ActionProjectRemove,
 	}
 }
 
@@ -47,6 +61,7 @@ func AllActionIDs() []string {
 type MenuAction struct {
 	ID   string     // one of the Action* constants above
 	Type ActionType
+	Args []string   // optional arguments for parameterized actions
 }
 
 // menuItem represents one entry in the menu tree.

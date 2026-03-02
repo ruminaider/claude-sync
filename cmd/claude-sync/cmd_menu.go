@@ -103,6 +103,24 @@ func dispatchAction(cmd *cobra.Command, action tui.MenuAction) error {
 	case tui.ActionConflicts:
 		return conflictsCmd.RunE(conflictsCmd, nil)
 
+	// Phase 2 — placeholders
+	case tui.ActionPluginPin:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionPluginUnpin:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionPluginFork:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionPluginUnfork:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionPluginUpdate:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionProfileSet:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionProjectInit:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+	case tui.ActionProjectRemove:
+		return fmt.Errorf("action %s: not yet implemented", action.ID)
+
 	default:
 		return fmt.Errorf("unknown action: %s", action.ID)
 	}

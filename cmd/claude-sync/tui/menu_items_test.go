@@ -141,3 +141,14 @@ func TestBuildMenuItems_WithProfiles(t *testing.T) {
 	assert.Contains(t, labels, "List profiles")
 	assert.Contains(t, labels, "Show active profile")
 }
+
+func TestAllActionIDs_IncludesPhase2(t *testing.T) {
+	ids := AllActionIDs()
+	phase2 := []string{
+		ActionPluginPin, ActionPluginUnpin, ActionPluginFork, ActionPluginUnfork,
+		ActionPluginUpdate, ActionProfileSet, ActionProjectInit, ActionProjectRemove,
+	}
+	for _, id := range phase2 {
+		assert.Contains(t, ids, id, "AllActionIDs should include %s", id)
+	}
+}
