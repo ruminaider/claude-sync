@@ -46,18 +46,113 @@ func TestBuildMenuItems_Configured(t *testing.T) {
 	assert.Equal(t, "View sync status", items[0].children[2].label)
 }
 
-func TestBuildMenuItems_PluginsCategory(t *testing.T) {
+func TestBuildMenuItems_PluginsCategory_NoPlugins(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 	}
 
 	items := BuildMenuItems(state)
 
-	// Phase 1: Plugins should only show commands that don't require arguments
+	// With no plugins, Plugins category should just show Subscribe + List
 	plugins := items[2]
 	assert.Len(t, plugins.children, 2)
 	assert.Equal(t, "Subscribe", plugins.children[0].label)
 	assert.Equal(t, "List subscriptions", plugins.children[1].label)
+}
+
+func TestBuildMenuItems_PluginFirstLayout(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Key: "beads@beads-marketplace", Name: "beads", Status: "upstream"},
+			{Key: "superpowers@claude-plugins-official", Name: "superpowers", Status: "pinned", PinVersion: "1.2.3"},
+			{Key: "my-tool@claude-sync-forks", Name: "my-tool", Status: "forked"},
+		},
+	}
+
+	items := BuildMenuItems(state)
+	plugins := items[2]
+
+	// 3 plugins + Subscribe + List subscriptions = 5 children
+	assert.Len(t, plugins.children, 5)
+
+	// First 3 are plugin categories
+	assert.Equal(t, "beads", plugins.children[0].label)
+	assert.True(t, plugins.children[0].isCategory())
+
+	assert.Equal(t, "superpowers", plugins.children[1].label)
+	assert.Contains(t, plugins.children[1].desc, "pinned v1.2.3")
+
+	assert.Equal(t, "my-tool", plugins.children[2].label)
+	assert.Contains(t, plugins.children[2].desc, "forked")
+
+	// Last two are Subscribe + List
+	assert.Equal(t, "Subscribe", plugins.children[3].label)
+	assert.Equal(t, "List subscriptions", plugins.children[4].label)
+}
+
+func TestBuildMenuItems_PluginActions_Upstream(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Key: "beads@beads-marketplace", Name: "beads", Status: "upstream"},
+		},
+	}
+
+	items := BuildMenuItems(state)
+	plugins := items[2]
+	beads := plugins.children[0]
+
+	// Upstream: Pin to version, Fork for local edit, Update
+	assert.Len(t, beads.children, 3)
+
+	actionIDs := []string{}
+	for _, child := range beads.children {
+		actionIDs = append(actionIDs, child.action.ID)
+	}
+	assert.Contains(t, actionIDs, ActionPluginPin)
+	assert.Contains(t, actionIDs, ActionPluginFork)
+	assert.Contains(t, actionIDs, ActionPluginUpdate)
+}
+
+func TestBuildMenuItems_PluginActions_Pinned(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Key: "superpowers@claude-plugins-official", Name: "superpowers", Status: "pinned", PinVersion: "1.2.3"},
+		},
+	}
+
+	items := BuildMenuItems(state)
+	plugins := items[2]
+	sp := plugins.children[0]
+
+	// Pinned: Unpin, Update
+	assert.Len(t, sp.children, 2)
+
+	actionIDs := []string{}
+	for _, child := range sp.children {
+		actionIDs = append(actionIDs, child.action.ID)
+	}
+	assert.Contains(t, actionIDs, ActionPluginUnpin)
+	assert.Contains(t, actionIDs, ActionPluginUpdate)
+}
+
+func TestBuildMenuItems_PluginActions_Forked(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Key: "my-tool@claude-sync-forks", Name: "my-tool", Status: "forked"},
+		},
+	}
+
+	items := BuildMenuItems(state)
+	plugins := items[2]
+	tool := plugins.children[0]
+
+	// Forked: Unfork only
+	assert.Len(t, tool.children, 1)
+	assert.Equal(t, ActionPluginUnfork, tool.children[0].action.ID)
 }
 
 func TestBuildMenuItems_PendingApprovals(t *testing.T) {

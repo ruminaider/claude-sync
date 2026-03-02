@@ -29,7 +29,7 @@ func buildConfiguredMenu(state commands.MenuState) []menuItem {
 	return []menuItem{
 		buildSyncCategory(),
 		buildConfigCategory(),
-		buildPluginsCategory(),
+		buildPluginsCategory(state),
 		buildProfilesCategory(state),
 		buildAdvancedCategory(state),
 	}
@@ -56,13 +56,53 @@ func buildConfigCategory() menuItem {
 	}
 }
 
-func buildPluginsCategory() menuItem {
+func buildPluginsCategory(state commands.MenuState) menuItem {
+	var children []menuItem
+
+	for _, p := range state.Plugins {
+		children = append(children, buildPluginItem(p))
+	}
+
+	// Subscribe + List subscriptions always at bottom
+	children = append(children,
+		menuItem{label: "Subscribe", desc: "follow another config", action: MenuAction{ID: ActionSubscribe, Type: ActionTUI}},
+		menuItem{label: "List subscriptions", action: MenuAction{ID: ActionSubscriptions, Type: ActionCLI}},
+	)
+
 	return menuItem{
-		label: "Plugins",
-		children: []menuItem{
-			{label: "Subscribe", desc: "follow another config", action: MenuAction{ID: ActionSubscribe, Type: ActionTUI}},
-			{label: "List subscriptions", action: MenuAction{ID: ActionSubscriptions, Type: ActionCLI}},
-		},
+		label:    "Plugins",
+		children: children,
+	}
+}
+
+func buildPluginItem(p commands.PluginInfo) menuItem {
+	var desc string
+	var actions []menuItem
+
+	switch p.Status {
+	case "upstream":
+		actions = []menuItem{
+			{label: "Pin to version", action: MenuAction{ID: ActionPluginPin, Type: ActionCLI, Args: []string{p.Key}}},
+			{label: "Fork for local edit", action: MenuAction{ID: ActionPluginFork, Type: ActionCLI, Args: []string{p.Key}}},
+			{label: "Update", action: MenuAction{ID: ActionPluginUpdate, Type: ActionCLI, Args: []string{p.Key}}},
+		}
+	case "pinned":
+		desc = "[pinned v" + p.PinVersion + "]"
+		actions = []menuItem{
+			{label: "Unpin", action: MenuAction{ID: ActionPluginUnpin, Type: ActionCLI, Args: []string{p.Key}}},
+			{label: "Update", action: MenuAction{ID: ActionPluginUpdate, Type: ActionCLI, Args: []string{p.Key}}},
+		}
+	case "forked":
+		desc = "[forked]"
+		actions = []menuItem{
+			{label: "Unfork", action: MenuAction{ID: ActionPluginUnfork, Type: ActionCLI, Args: []string{p.Key}}},
+		}
+	}
+
+	return menuItem{
+		label:    p.Name,
+		desc:     desc,
+		children: actions,
 	}
 }
 
