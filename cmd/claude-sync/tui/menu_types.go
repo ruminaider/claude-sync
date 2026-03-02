@@ -22,12 +22,10 @@ const (
 	ActionSetup         = "setup"
 	ActionSubscribe     = "subscribe"
 	ActionSubscriptions = "subscriptions"
-	ActionProfileList   = "profile-list"
 	ActionProfileShow   = "profile-show"
 	ActionApprove       = "approve"
 	ActionReject        = "reject"
 	ActionMCPImport     = "mcp-import"
-	ActionProjects      = "projects"
 	ActionConflicts     = "conflicts"
 
 	// Phase 2
@@ -48,9 +46,9 @@ func AllActionIDs() []string {
 		ActionPull, ActionPush, ActionStatus,
 		ActionConfigCreate, ActionConfigUpdate, ActionConfigJoin, ActionSetup,
 		ActionSubscribe, ActionSubscriptions,
-		ActionProfileList, ActionProfileShow,
+		ActionProfileShow,
 		ActionApprove, ActionReject,
-		ActionMCPImport, ActionProjects, ActionConflicts,
+		ActionMCPImport, ActionConflicts,
 		// Phase 2
 		ActionPluginPin, ActionPluginUnpin, ActionPluginFork, ActionPluginUnfork,
 		ActionPluginUpdate, ActionProfileSet, ActionProjectInit, ActionProjectRemove,

@@ -86,8 +86,6 @@ func dispatchAction(cmd *cobra.Command, action tui.MenuAction) error {
 		return subscriptionsCmd.RunE(subscriptionsCmd, nil)
 
 	// Profiles
-	case tui.ActionProfileList:
-		return profileListCmd.RunE(profileListCmd, nil)
 	case tui.ActionProfileShow:
 		return profileShowCmd.RunE(profileShowCmd, nil)
 
@@ -98,8 +96,6 @@ func dispatchAction(cmd *cobra.Command, action tui.MenuAction) error {
 		return rejectCmd.RunE(rejectCmd, nil)
 	case tui.ActionMCPImport:
 		return mcpImportCmd.RunE(mcpImportCmd, nil)
-	case tui.ActionProjects:
-		return projectCmd.Help()
 	case tui.ActionConflicts:
 		return conflictsCmd.RunE(conflictsCmd, nil)
 

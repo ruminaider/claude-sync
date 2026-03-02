@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
@@ -100,12 +101,17 @@ func buildPluginInfos(cfg config.Config) []PluginInfo {
 		})
 	}
 
-	for key, version := range cfg.Pinned {
+	pinnedKeys := make([]string, 0, len(cfg.Pinned))
+	for key := range cfg.Pinned {
+		pinnedKeys = append(pinnedKeys, key)
+	}
+	sort.Strings(pinnedKeys)
+	for _, key := range pinnedKeys {
 		infos = append(infos, PluginInfo{
 			Key:        key,
 			Name:       pluginNameFromKey(key),
 			Status:     "pinned",
-			PinVersion: version,
+			PinVersion: cfg.Pinned[key],
 		})
 	}
 
