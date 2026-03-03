@@ -49,6 +49,7 @@ type PullResult struct {
 	UndefinedMarketplaces      map[string][]string // marketplace name -> plugin names referencing it
 	ProjectSettingsApplied     bool
 	ProjectUnmanagedDetected   bool // CWD has settings.local.json but no .claude-sync.yaml
+	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
 }
 
 // PullOptions configures pull behavior.
@@ -62,6 +63,12 @@ type PullOptions struct {
 	// (empty string means write to global instead). If nil, uses suggested paths as-is.
 	MCPTargetResolver func(serverName, suggestedPath string) string
 	ProjectDir        string // if set, apply project settings after global pull
+	// DuplicateResolver is called when duplicate plugins are detected.
+	// nil means skip resolution (duplicates left as-is).
+	DuplicateResolver func(dupes []plugins.Duplicate) error
+	// ReEvalResolver is called when tracked active-dev plugins need re-evaluation.
+	// nil means skip re-evaluation.
+	ReEvalResolver func(signals []plugins.ReEvalSignal) error
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -187,6 +194,33 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 	// Fetch and merge subscriptions before computing plugin diff.
 	if err := pullSubscriptions(syncDir, opts.Auto, quiet); err != nil && !quiet {
 		fmt.Fprintf(os.Stderr, "Warning: subscription pull failed: %v\n", err)
+	}
+
+	// Detect duplicate plugins before computing diff.
+	var unresolvedDupes []plugins.Duplicate
+	dupes, dupErr := plugins.DetectDuplicates(claudeDir)
+	if dupErr == nil && len(dupes) > 0 {
+		if opts.DuplicateResolver != nil {
+			if err := opts.DuplicateResolver(dupes); err != nil {
+				return nil, err
+			}
+			// Resolved — don't report in result.
+		} else {
+			unresolvedDupes = dupes
+		}
+	}
+
+	// Re-evaluate tracked active-dev plugins.
+	if opts.ReEvalResolver != nil {
+		sources, srcErr := plugins.ReadPluginSources(syncDir)
+		if srcErr == nil && len(sources.Plugins) > 0 {
+			signals := plugins.CheckReEvaluation(sources, 7)
+			if len(signals) > 0 {
+				if err := opts.ReEvalResolver(signals); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	result, err := PullDryRun(claudeDir, syncDir)
@@ -491,6 +525,8 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			}
 		}
 	}
+
+	result.DuplicatePlugins = unresolvedDupes
 
 	return result, nil
 }
