@@ -48,7 +48,10 @@ type PullResult struct {
 	UpdateFailed               []string // plugins that failed to refresh
 	UndefinedMarketplaces      map[string][]string // marketplace name -> plugin names referencing it
 	ProjectSettingsApplied     bool
-	ProjectUnmanagedDetected   bool // CWD has settings.local.json but no .claude-sync.yaml
+	ProjectUnmanagedDetected   bool     // CWD has settings.local.json but no .claude-sync.yaml
+	ProjectInitEligible        bool     // detected project root has no .claude-sync.yaml and profiles exist
+	ProjectInitDir             string   // suggested directory for project init (project root, not CWD)
+	AvailableProfiles          []string // profile names from sync dir (set when ProjectInitEligible)
 	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
 }
 
@@ -514,13 +517,26 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			}
 		}
 	} else {
-		// Detect unmanaged projects (settings.local.json exists but no .claude-sync.yaml).
+		// Detect directories without claude-sync project config.
 		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
-			settingsPath := filepath.Join(cwd, ".claude", "settings.local.json")
-			configPath := filepath.Join(cwd, ".claude", project.ConfigFileName)
-			if _, statErr := os.Stat(settingsPath); statErr == nil {
-				if _, statErr2 := os.Stat(configPath); os.IsNotExist(statErr2) {
-					result.ProjectUnmanagedDetected = true
+			// Find the project root: walk up looking for .git/ or .claude/.
+			projectRoot := findProjectRoot(cwd)
+			if projectRoot != "" {
+				configPath := filepath.Join(projectRoot, ".claude", project.ConfigFileName)
+				if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
+					// Flag existing settings.local.json without .claude-sync.yaml.
+					settingsPath := filepath.Join(projectRoot, ".claude", "settings.local.json")
+					if _, settingsErr := os.Stat(settingsPath); settingsErr == nil {
+						result.ProjectUnmanagedDetected = true
+					}
+
+					// If profiles exist, this directory is eligible for project init.
+					profileNames, _ := profiles.ListProfiles(syncDir)
+					if len(profileNames) > 0 {
+						result.ProjectInitEligible = true
+						result.ProjectInitDir = projectRoot
+						result.AvailableProfiles = profileNames
+					}
 				}
 			}
 		}
@@ -903,5 +919,33 @@ func pullSubscriptions(syncDir string, auto, quiet bool) error {
 	subscriptions.WriteState(syncDir, state)
 
 	return nil
+}
+
+// findProjectRoot walks up from dir looking for .git/ or .claude/ to identify
+// the root of a project. Returns empty string if no project root is found.
+// Stops at the user's home directory to avoid walking all the way to /.
+func findProjectRoot(dir string) string {
+	home, _ := os.UserHomeDir()
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for {
+		// Don't treat home itself as a project root.
+		if dir == home {
+			return ""
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".claude")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
