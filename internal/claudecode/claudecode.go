@@ -200,6 +200,43 @@ func WriteKeybindings(claudeDir string, kb map[string]any) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// ContentHashes stores content hashes for tracking local modifications.
+// Used by commands (.content_hashes.json) and skills (.content_hashes.json).
+type ContentHashes struct {
+	Hashes map[string]string `json:"hashes"` // filename -> 16-char hex hash
+}
+
+// ReadContentHashes reads .content_hashes.json from the given directory.
+// Returns an empty map if the file is missing.
+func ReadContentHashes(dir string) (*ContentHashes, error) {
+	path := filepath.Join(dir, ".content_hashes.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &ContentHashes{Hashes: map[string]string{}}, nil
+		}
+		return nil, fmt.Errorf("reading content hashes: %w", err)
+	}
+	var ch ContentHashes
+	if err := json.Unmarshal(data, &ch); err != nil {
+		return nil, fmt.Errorf("parsing content hashes: %w", err)
+	}
+	if ch.Hashes == nil {
+		ch.Hashes = map[string]string{}
+	}
+	return &ch, nil
+}
+
+// WriteContentHashes writes .content_hashes.json to the given directory.
+func WriteContentHashes(dir string, ch *ContentHashes) error {
+	data, err := json.MarshalIndent(ch, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling content hashes: %w", err)
+	}
+	path := filepath.Join(dir, ".content_hashes.json")
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // PluginContentHashes stores content hashes for directory-based plugins.
 // File location: ~/.claude/plugins/plugin_content_hashes.json
 type PluginContentHashes struct {

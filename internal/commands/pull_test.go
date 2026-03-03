@@ -1167,3 +1167,153 @@ func TestPull_StaleWhenNoStoredHash(t *testing.T) {
 	staleDetected := len(result.Updated) > 0 || len(result.UpdateFailed) > 0
 	assert.True(t, staleDetected, "plugin should be stale when no stored hash exists")
 }
+
+// setupCommandSkillEnv creates a test environment with commands and skills
+// in the sync dir. Returns (claudeDir, syncDir).
+func setupCommandSkillEnv(t *testing.T) (claudeDir, syncDir string) {
+	t.Helper()
+
+	claudeDir = t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir = filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - context7@claude-plugins-official
+commands:
+  - cmd:global:review-pr
+  - cmd:global:deploy
+skills:
+  - skill:global:brainstorming
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+
+	// Create command files in sync dir.
+	cmdDir := filepath.Join(syncDir, "commands")
+	require.NoError(t, os.MkdirAll(cmdDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(cmdDir, "review-pr.md"), []byte("# Review PR\nOriginal content"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(cmdDir, "deploy.md"), []byte("# Deploy\nOriginal content"), 0644))
+
+	// Create skill directory in sync dir.
+	skillDir := filepath.Join(syncDir, "skills", "brainstorming")
+	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Brainstorming\nOriginal content"), 0644))
+
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	return claudeDir, syncDir
+}
+
+func TestRestoreSkipsLocallyModifiedCommand(t *testing.T) {
+	claudeDir, syncDir := setupCommandSkillEnv(t)
+
+	// First pull — restores commands and creates hash file.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.CommandsRestored)
+	assert.Equal(t, 0, result.CommandsSkipped)
+
+	// Modify a command locally (simulates agent editing a command).
+	localCmd := filepath.Join(claudeDir, "commands", "review-pr.md")
+	require.NoError(t, os.WriteFile(localCmd, []byte("# Review PR\nLocally modified content"), 0644))
+
+	// Second pull — should skip the modified command, overwrite the unmodified one.
+	result, err = commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.CommandsRestored, "unmodified command should be restored")
+	assert.Equal(t, 1, result.CommandsSkipped, "locally modified command should be skipped")
+
+	// Verify the local modification was preserved.
+	data, err := os.ReadFile(localCmd)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Locally modified content")
+}
+
+func TestRestoreSkipsLocallyModifiedSkill(t *testing.T) {
+	claudeDir, syncDir := setupCommandSkillEnv(t)
+
+	// First pull — restores skills and creates hash file.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.SkillsRestored)
+	assert.Equal(t, 0, result.SkillsSkipped)
+
+	// Modify skill SKILL.md locally.
+	localSkill := filepath.Join(claudeDir, "skills", "brainstorming", "SKILL.md")
+	require.NoError(t, os.WriteFile(localSkill, []byte("# Brainstorming\nLocally modified skill"), 0644))
+
+	// Second pull — should skip the modified skill.
+	result, err = commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.SkillsRestored, "modified skill should not be restored")
+	assert.Equal(t, 1, result.SkillsSkipped, "locally modified skill should be skipped")
+
+	// Verify local modification preserved.
+	data, err := os.ReadFile(localSkill)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Locally modified skill")
+}
+
+func TestRestoreOverwritesUnmodifiedCommand(t *testing.T) {
+	claudeDir, syncDir := setupCommandSkillEnv(t)
+
+	// First pull.
+	_, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+
+	// Update the command in sync dir (simulates remote change).
+	syncCmd := filepath.Join(syncDir, "commands", "review-pr.md")
+	require.NoError(t, os.WriteFile(syncCmd, []byte("# Review PR\nUpdated remote content"), 0644))
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "update command").Run()
+
+	// Second pull — local was not modified, so remote update should overwrite.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.CommandsRestored, "both unmodified commands should be restored")
+	assert.Equal(t, 0, result.CommandsSkipped)
+
+	// Verify remote content arrived.
+	data, err := os.ReadFile(filepath.Join(claudeDir, "commands", "review-pr.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Updated remote content")
+}
+
+func TestRestoreHandlesNoHashFile(t *testing.T) {
+	claudeDir, syncDir := setupCommandSkillEnv(t)
+
+	// Pull with no prior hash file — should restore all + create hash file.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.CommandsRestored)
+	assert.Equal(t, 0, result.CommandsSkipped)
+	assert.Equal(t, 1, result.SkillsRestored)
+	assert.Equal(t, 0, result.SkillsSkipped)
+
+	// Verify hash files were created.
+	cmdHashFile := filepath.Join(claudeDir, "commands", ".content_hashes.json")
+	_, err = os.Stat(cmdHashFile)
+	assert.NoError(t, err, "command hash file should exist")
+
+	skillHashFile := filepath.Join(claudeDir, "skills", ".content_hashes.json")
+	_, err = os.Stat(skillHashFile)
+	assert.NoError(t, err, "skill hash file should exist")
+
+	// Verify hash file content is valid JSON with expected keys.
+	data, err := os.ReadFile(cmdHashFile)
+	require.NoError(t, err)
+	var hashes struct {
+		Hashes map[string]string `json:"hashes"`
+	}
+	require.NoError(t, json.Unmarshal(data, &hashes))
+	assert.Contains(t, hashes.Hashes, "review-pr.md")
+	assert.Contains(t, hashes.Hashes, "deploy.md")
+	assert.Len(t, hashes.Hashes["review-pr.md"], 16, "hash should be 16-char hex")
+}
