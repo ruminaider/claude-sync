@@ -89,6 +89,26 @@ func ApplySnooze(syncDir, pluginName string, days int) error {
 	return WritePluginSources(syncDir, sources)
 }
 
+// ResetReEvalBaseline updates tracking timestamps so re-evaluation
+// doesn't fire again until the next change occurs.
+func ResetReEvalBaseline(syncDir, pluginName string) error {
+	sources, err := ReadPluginSources(syncDir)
+	if err != nil {
+		return err
+	}
+
+	entry, ok := sources.Plugins[pluginName]
+	if !ok {
+		return nil
+	}
+
+	entry.LastLocalCommitAtDecision = time.Now()
+	entry.SnoozeUntil = nil
+	sources.Plugins[pluginName] = entry
+
+	return WritePluginSources(syncDir, sources)
+}
+
 // sourceFromKey extracts the source portion from a "name@source" key.
 func sourceFromKey(key string) string {
 	if idx := strings.LastIndex(key, "@"); idx > 0 {

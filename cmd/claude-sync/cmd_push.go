@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/paths"
+	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
@@ -41,6 +43,31 @@ var pushCmd = &cobra.Command{
 		scan, err := commands.PushScan(claudeDir, syncDir)
 		if err != nil {
 			return err
+		}
+
+		// Detect duplicate plugins (same name, different sources).
+		dupes, dupErr := plugins.DetectDuplicates(claudeDir)
+		if dupErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not check for duplicate plugins: %v\n", dupErr)
+		} else if len(dupes) > 0 {
+			if pushAutoFlag {
+				for _, d := range dupes {
+					fmt.Fprintf(os.Stderr, "Duplicate plugin: %s (sources: %s)\n",
+						d.Name, strings.Join(d.Sources, ", "))
+				}
+				fmt.Fprintf(os.Stderr, "Run 'claude-sync push' interactively to resolve.\n")
+			} else {
+				for _, d := range dupes {
+					resolution, promptErr := promptDuplicateResolution(d, syncDir)
+					if promptErr != nil {
+						return promptErr
+					}
+					if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
+						return fmt.Errorf("resolving duplicate %s: %w", d.Name, err)
+					}
+					fmt.Printf("Resolved: keeping %s\n", resolution.KeepSource)
+				}
+			}
 		}
 
 		if !scan.HasChanges() {
