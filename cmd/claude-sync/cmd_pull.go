@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/paths"
+	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/spf13/cobra"
 )
 
@@ -19,11 +21,14 @@ var pullCmd = &cobra.Command{
 		var result *commands.PullResult
 		var err error
 
+		claudeDir := paths.ClaudeDir()
+		syncDir := paths.SyncDir()
+
 		if autoFlag {
 			projectDir := readCWDFromStdin()
 			result, err = commands.PullWithOptions(commands.PullOptions{
-				ClaudeDir:  paths.ClaudeDir(),
-				SyncDir:    paths.SyncDir(),
+				ClaudeDir:  claudeDir,
+				SyncDir:    syncDir,
 				Quiet:      true,
 				Auto:       true,
 				ProjectDir: projectDir,
@@ -32,13 +37,72 @@ var pullCmd = &cobra.Command{
 			if !quietFlag {
 				fmt.Println("Pulling latest config...")
 			}
-			result, err = commands.Pull(paths.ClaudeDir(), paths.SyncDir(), quietFlag)
+			result, err = commands.PullWithOptions(commands.PullOptions{
+				ClaudeDir: claudeDir,
+				SyncDir:   syncDir,
+				Quiet:     quietFlag,
+				DuplicateResolver: func(dupes []plugins.Duplicate) error {
+					for _, d := range dupes {
+						resolution, promptErr := promptDuplicateResolution(d, syncDir)
+						if promptErr != nil {
+							return promptErr
+						}
+						if applyErr := plugins.ApplyResolution(claudeDir, syncDir, resolution); applyErr != nil {
+							return fmt.Errorf("resolving duplicate %s: %w", d.Name, applyErr)
+						}
+						if !quietFlag {
+							fmt.Printf("Resolved: keeping %s\n", resolution.KeepSource)
+						}
+					}
+					return nil
+				},
+				ReEvalResolver: func(signals []plugins.ReEvalSignal) error {
+					for _, sig := range signals {
+						action, promptErr := promptReEvaluation(sig)
+						if promptErr != nil {
+							return promptErr
+						}
+						switch action {
+						case "switch":
+							if switchErr := plugins.ApplyReEvalSwitch(claudeDir, syncDir, sig.PluginName); switchErr != nil {
+								return switchErr
+							}
+							if !quietFlag {
+								fmt.Printf("Switched %s to marketplace\n", sig.PluginName)
+							}
+						case "snooze":
+							if snoozeErr := plugins.ApplySnooze(syncDir, sig.PluginName, 2); snoozeErr != nil {
+								return snoozeErr
+							}
+							if !quietFlag {
+								fmt.Printf("Snoozed %s for 2 days\n", sig.PluginName)
+							}
+						case "keep":
+							if resetErr := plugins.ResetReEvalBaseline(syncDir, sig.PluginName); resetErr != nil {
+								return resetErr
+							}
+						}
+					}
+					return nil
+				},
+			})
 		}
 		if err != nil {
 			return err
 		}
 
 		if quietFlag || autoFlag {
+			// In auto mode, warn about duplicate plugins.
+			if autoFlag {
+				dupes, dupErr := plugins.DetectDuplicates(claudeDir)
+				if dupErr == nil && len(dupes) > 0 {
+					for _, d := range dupes {
+						fmt.Fprintf(os.Stderr, "Duplicate plugin: %s (sources: %s)\n",
+							d.Name, strings.Join(d.Sources, ", "))
+					}
+					fmt.Fprintf(os.Stderr, "Run 'claude-sync pull' interactively to resolve.\n")
+				}
+			}
 			// In auto mode, still show pending high-risk warnings.
 			if autoFlag && len(result.PendingHighRisk) > 0 {
 				fmt.Fprintf(os.Stderr, "%d high-risk change(s) deferred. Run 'claude-sync approve' to apply:\n", len(result.PendingHighRisk))
