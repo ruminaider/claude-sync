@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
@@ -112,8 +115,90 @@ var pullCmd = &cobra.Command{
 		}
 
 		printPullResult(result)
+
+		// Offer project init when in an unmanaged directory with profiles available.
+		if result.ProjectInitEligible {
+			if err := promptProjectInit(claudeDir, syncDir, result.ProjectInitDir, result.AvailableProfiles); err != nil {
+				// User cancelled or declined — not an error.
+				return nil
+			}
+		}
+
 		return nil
 	},
+}
+
+// promptProjectInit offers to initialize a project directory with a per-project profile.
+// projectDir is the detected project root (not necessarily CWD).
+func promptProjectInit(claudeDir, syncDir, projectDir string, profileNames []string) error {
+	var wantInit bool
+	if err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Initialize %s with a project profile?", filepath.Base(projectDir))).
+				Description("Different directories can use different profiles.").
+				Affirmative("Yes").
+				Negative("Not now").
+				Value(&wantInit),
+		),
+	).Run(); err != nil || !wantInit {
+		return fmt.Errorf("declined")
+	}
+
+	// Show profile picker.
+	active, _ := profiles.ReadActiveProfile(syncDir)
+	options := make([]huh.Option[string], 0, len(profileNames)+1)
+	for _, name := range profileNames {
+		label := capitalize(name)
+		if name == active {
+			label += " (global default)"
+		}
+		options = append(options, huh.NewOption(label, name))
+	}
+	options = append(options, huh.NewOption("No profile — use base only", ""))
+
+	var profile string
+	if err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Which profile should this project use?").
+				Options(options...).
+				Value(&profile),
+		),
+	).Run(); err != nil {
+		return err
+	}
+
+	// Run project init.
+	result, err := commands.ProjectInit(commands.ProjectInitOptions{
+		ProjectDir:    projectDir,
+		SyncDir:       syncDir,
+		Profile:       profile,
+		ProjectedKeys: []string{"hooks", "permissions"},
+		Yes:           true,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\nProject initialized at %s\n", projectDir)
+	if result.Profile != "" {
+		fmt.Printf("  Profile: %s\n", result.Profile)
+	}
+	fmt.Printf("  Projected keys: %s\n", strings.Join(result.ProjectedKeys, ", "))
+
+	// Apply project settings now.
+	pullResult, pullErr := commands.PullWithOptions(commands.PullOptions{
+		ClaudeDir:  claudeDir,
+		SyncDir:    syncDir,
+		Quiet:      true,
+		ProjectDir: projectDir,
+	})
+	if pullErr == nil && pullResult.ProjectSettingsApplied {
+		fmt.Println("  Project settings applied.")
+	}
+
+	return nil
 }
 
 func init() {

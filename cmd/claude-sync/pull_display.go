@@ -90,7 +90,7 @@ func printPullResult(result *commands.PullResult) {
 		fmt.Println("Run 'claude-sync push' to add them, or keep as local-only.")
 	}
 
-	if result.ProjectUnmanagedDetected {
+	if result.ProjectUnmanagedDetected && !result.ProjectInitEligible {
 		fmt.Println("\nThis project has settings.local.json but isn't managed by claude-sync.")
 		fmt.Println("Run 'claude-sync project init' to sync hooks and permissions.")
 	}
