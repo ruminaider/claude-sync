@@ -92,16 +92,14 @@ var pullCmd = &cobra.Command{
 		}
 
 		if quietFlag || autoFlag {
-			// In auto mode, warn about duplicate plugins.
-			if autoFlag {
-				dupes, dupErr := plugins.DetectDuplicates(claudeDir)
-				if dupErr == nil && len(dupes) > 0 {
-					for _, d := range dupes {
-						fmt.Fprintf(os.Stderr, "Duplicate plugin: %s (sources: %s)\n",
-							d.Name, strings.Join(d.Sources, ", "))
-					}
-					fmt.Fprintf(os.Stderr, "Run 'claude-sync pull' interactively to resolve.\n")
+			// In auto mode, surface duplicate plugins so the agent can help resolve.
+			if autoFlag && len(result.DuplicatePlugins) > 0 {
+				fmt.Fprintf(os.Stderr, "WARNING: %d duplicate plugin(s) detected — same plugin installed from multiple sources.\n", len(result.DuplicatePlugins))
+				fmt.Fprintf(os.Stderr, "This causes redundant hook execution and slow exit times.\n")
+				for _, d := range result.DuplicatePlugins {
+					fmt.Fprintf(os.Stderr, "  %s: %s\n", d.Name, strings.Join(d.Sources, ", "))
 				}
+				fmt.Fprintf(os.Stderr, "To fix: set the unwanted source to false in enabledPlugins in ~/.claude/settings.json, then run 'claude-sync push'.\n")
 			}
 			// In auto mode, still show pending high-risk warnings.
 			if autoFlag && len(result.PendingHighRisk) > 0 {

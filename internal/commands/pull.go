@@ -49,6 +49,7 @@ type PullResult struct {
 	UndefinedMarketplaces      map[string][]string // marketplace name -> plugin names referencing it
 	ProjectSettingsApplied     bool
 	ProjectUnmanagedDetected   bool // CWD has settings.local.json but no .claude-sync.yaml
+	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
 }
 
 // PullOptions configures pull behavior.
@@ -195,13 +196,17 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 		fmt.Fprintf(os.Stderr, "Warning: subscription pull failed: %v\n", err)
 	}
 
-	// Detect and resolve duplicate plugins before computing diff.
-	if opts.DuplicateResolver != nil {
-		dupes, dupErr := plugins.DetectDuplicates(claudeDir)
-		if dupErr == nil && len(dupes) > 0 {
+	// Detect duplicate plugins before computing diff.
+	var unresolvedDupes []plugins.Duplicate
+	dupes, dupErr := plugins.DetectDuplicates(claudeDir)
+	if dupErr == nil && len(dupes) > 0 {
+		if opts.DuplicateResolver != nil {
 			if err := opts.DuplicateResolver(dupes); err != nil {
 				return nil, err
 			}
+			// Resolved — don't report in result.
+		} else {
+			unresolvedDupes = dupes
 		}
 	}
 
@@ -520,6 +525,8 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			}
 		}
 	}
+
+	result.DuplicatePlugins = unresolvedDupes
 
 	return result, nil
 }
