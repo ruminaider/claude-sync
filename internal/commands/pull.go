@@ -42,7 +42,9 @@ type PullResult struct {
 	MCPProjectApplied      map[string][]string // project path -> server names written there
 	KeybindingsApplied     bool
 	CommandsRestored           int
+	CommandsSkipped            int
 	SkillsRestored             int
+	SkillsSkipped              int
 	PendingHighRisk            []approval.Change
 	Updated                    []string // plugins refreshed due to version mismatch
 	UpdateFailed               []string // plugins that failed to refresh
@@ -444,9 +446,11 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				effectiveSkills = profiles.MergeSkills(effectiveSkills, *activeProfile)
 			}
 			if len(effectiveCommands) > 0 || len(effectiveSkills) > 0 {
-				cr, sr := restoreCommandsSkills(claudeDir, syncDir, effectiveCommands, effectiveSkills)
+				cr, cs, sr, ss := restoreCommandsSkills(claudeDir, syncDir, effectiveCommands, effectiveSkills)
 				result.CommandsRestored = cr
+				result.CommandsSkipped = cs
 				result.SkillsRestored = sr
+				result.SkillsSkipped = ss
 			}
 
 			// In auto mode, write high-risk items to pending.
@@ -652,10 +656,10 @@ func applyPermissions(claudeDir string, perms config.Permissions) error {
 }
 
 // restoreCommandsSkills copies command .md files and skill directories from
-// syncDir to claudeDir, filtered by the effective key lists. Returns counts.
-func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []string) (int, int) {
-	var cmdsRestored, skillsRestored int
-
+// syncDir to claudeDir, filtered by the effective key lists.
+// Tracks content hashes to avoid overwriting locally-modified files.
+// Returns (restored, skipped) counts for commands and skills.
+func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []string) (cmdsRestored, cmdsSkipped, skillsRestored, skillsSkipped int) {
 	// Build set of command filenames from keys (e.g. "cmd:global:review-pr" → "review-pr.md").
 	cmdNames := make(map[string]bool)
 	for _, k := range commandKeys {
@@ -665,11 +669,14 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 		}
 	}
 
-	// Copy commands.
+	// Copy commands with local-modification protection.
 	srcCmdsDir := filepath.Join(syncDir, "commands")
 	if entries, err := os.ReadDir(srcCmdsDir); err == nil {
 		dstCmdsDir := filepath.Join(claudeDir, "commands")
 		os.MkdirAll(dstCmdsDir, 0755)
+
+		cmdHashes, _ := claudecode.ReadContentHashes(dstCmdsDir)
+
 		for _, entry := range entries {
 			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 				continue
@@ -679,12 +686,29 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 			}
 			srcPath := filepath.Join(srcCmdsDir, entry.Name())
 			dstPath := filepath.Join(dstCmdsDir, entry.Name())
-			if data, err := os.ReadFile(srcPath); err == nil {
-				if os.WriteFile(dstPath, data, 0644) == nil {
-					cmdsRestored++
+
+			srcData, err := os.ReadFile(srcPath)
+			if err != nil {
+				continue
+			}
+
+			// Check if local file was modified since last sync.
+			if localData, err := os.ReadFile(dstPath); err == nil {
+				localHash := claudemd.ContentHash(string(localData))
+				if storedHash, ok := cmdHashes.Hashes[entry.Name()]; ok && localHash != storedHash {
+					// Local file was modified — skip overwrite.
+					cmdsSkipped++
+					continue
 				}
 			}
+
+			if os.WriteFile(dstPath, srcData, 0644) == nil {
+				cmdHashes.Hashes[entry.Name()] = claudemd.ContentHash(string(srcData))
+				cmdsRestored++
+			}
 		}
+
+		claudecode.WriteContentHashes(dstCmdsDir, cmdHashes)
 	}
 
 	// Build set of skill names from keys (e.g. "skill:global:brainstorming" → "brainstorming").
@@ -696,9 +720,14 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 		}
 	}
 
-	// Copy skills (entire directories).
+	// Copy skills (entire directories) with local-modification protection.
 	srcSkillsDir := filepath.Join(syncDir, "skills")
 	if entries, err := os.ReadDir(srcSkillsDir); err == nil {
+		skillsDir := filepath.Join(claudeDir, "skills")
+		os.MkdirAll(skillsDir, 0755)
+
+		skillHashes, _ := claudecode.ReadContentHashes(skillsDir)
+
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
@@ -708,13 +737,38 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 			}
 			srcDir := filepath.Join(srcSkillsDir, entry.Name())
 			dstDir := filepath.Join(claudeDir, "skills", entry.Name())
-			if err := copyDir(srcDir, dstDir); err == nil {
+
+			// Hash the SKILL.md content for modification detection.
+			srcSkillMD := filepath.Join(srcDir, "SKILL.md")
+			srcData, err := os.ReadFile(srcSkillMD)
+			if err != nil {
+				// No SKILL.md in source — copy without tracking.
+				if copyDir(srcDir, dstDir) == nil {
+					skillsRestored++
+				}
+				continue
+			}
+
+			// Check if local SKILL.md was modified since last sync.
+			dstSkillMD := filepath.Join(dstDir, "SKILL.md")
+			if localData, err := os.ReadFile(dstSkillMD); err == nil {
+				localHash := claudemd.ContentHash(string(localData))
+				if storedHash, ok := skillHashes.Hashes[entry.Name()]; ok && localHash != storedHash {
+					skillsSkipped++
+					continue
+				}
+			}
+
+			if copyDir(srcDir, dstDir) == nil {
+				skillHashes.Hashes[entry.Name()] = claudemd.ContentHash(string(srcData))
 				skillsRestored++
 			}
 		}
+
+		claudecode.WriteContentHashes(skillsDir, skillHashes)
 	}
 
-	return cmdsRestored, skillsRestored
+	return
 }
 
 // appendUniqueStrings appends items from add to base without duplicates.
