@@ -576,6 +576,131 @@ func FindUndefinedMarketplaces(claudeDir string, pluginKeys []string, declared m
 	return undefined
 }
 
+// AutoRegisterFromPlugins scans plugin keys for marketplace references that are
+// not in the declared config.yaml marketplaces section and not yet registered in
+// known_marketplaces.json. For each such marketplace it attempts auto-registration:
+//
+//  1. Well-known marketplaces (hardcoded list) are registered as github sources.
+//  2. Marketplace directories that already exist on disk with a valid
+//     marketplace.json are registered (as github if a GitHub remote is detected,
+//     otherwise as a directory source).
+//
+// Returns the names of successfully auto-registered marketplaces.
+func AutoRegisterFromPlugins(claudeDir string, pluginKeys []string, declared map[string]config.MarketplaceSource) ([]string, error) {
+	toRegister := make(map[string]config.MarketplaceSource)
+	var directoryRegistrations []struct {
+		name string
+		dir  string
+	}
+
+	for _, key := range pluginKeys {
+		parts := strings.SplitN(key, "@", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		mktName := parts[1]
+
+		// Skip if already declared in config.
+		if _, ok := declared[mktName]; ok {
+			continue
+		}
+		// Skip claude-sync-forks (handled separately).
+		if mktName == "claude-sync-forks" {
+			continue
+		}
+		// Skip if already registered in known_marketplaces.json.
+		if _, found := IsPortableFromKnownMarketplaces(claudeDir, mktName); found {
+			continue
+		}
+		// Skip if already queued.
+		if _, ok := toRegister[mktName]; ok {
+			continue
+		}
+
+		// Strategy 1: Well-known marketplace — derive source from hardcoded map.
+		if org, ok := knownMarketplaces[mktName]; ok {
+			toRegister[mktName] = config.MarketplaceSource{
+				Source: "github",
+				Repo:   org + "/" + mktName,
+			}
+			continue
+		}
+
+		// Strategy 2: Directory exists on disk with valid marketplace.json.
+		mktDir := filepath.Join(claudeDir, "plugins", "marketplaces", mktName)
+		mkplPath := filepath.Join(mktDir, ".claude-plugin", "marketplace.json")
+		if _, err := os.Stat(mkplPath); err == nil {
+			if repo := detectGitHubRemote(mktDir); repo != "" {
+				toRegister[mktName] = config.MarketplaceSource{
+					Source: "github",
+					Repo:   repo,
+				}
+			} else {
+				directoryRegistrations = append(directoryRegistrations, struct {
+					name string
+					dir  string
+				}{mktName, mktDir})
+			}
+			continue
+		}
+	}
+
+	var registered []string
+
+	// Register directory-source marketplaces directly.
+	for _, dr := range directoryRegistrations {
+		if err := registerDirectoryMarketplace(claudeDir, dr.name, dr.dir); err != nil {
+			return registered, fmt.Errorf("registering directory marketplace %q: %w", dr.name, err)
+		}
+		registered = append(registered, dr.name)
+	}
+
+	// Use existing EnsureRegistered for github/git sources.
+	if len(toRegister) > 0 {
+		if err := EnsureRegistered(claudeDir, toRegister); err != nil {
+			return registered, err
+		}
+		for name := range toRegister {
+			registered = append(registered, name)
+		}
+	}
+
+	sort.Strings(registered)
+	return registered, nil
+}
+
+// registerDirectoryMarketplace registers a marketplace that already exists on
+// disk as a directory source in known_marketplaces.json.
+func registerDirectoryMarketplace(claudeDir, name, installDir string) error {
+	mkts, err := claudecode.ReadMarketplaces(claudeDir)
+	if err != nil {
+		if bErr := claudecode.Bootstrap(claudeDir); bErr != nil {
+			return fmt.Errorf("bootstrapping claude dir: %w", bErr)
+		}
+		mkts, err = claudecode.ReadMarketplaces(claudeDir)
+		if err != nil {
+			return fmt.Errorf("reading marketplaces after bootstrap: %w", err)
+		}
+	}
+	if _, exists := mkts[name]; exists {
+		return nil
+	}
+	entry := map[string]any{
+		"source": map[string]string{
+			"source": "directory",
+			"path":   installDir,
+		},
+		"installLocation": installDir,
+		"lastUpdated":     time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	mkts[name] = json.RawMessage(raw)
+	return claudecode.WriteMarketplaces(claudeDir, mkts)
+}
+
 // EnsureRegistered checks if each declared marketplace exists in
 // known_marketplaces.json. If missing, registers it as a GitHub or git source.
 // Skips marketplaces that are already registered (idempotent).

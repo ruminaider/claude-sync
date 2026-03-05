@@ -1095,6 +1095,197 @@ func TestFindUndefinedMarketplaces(t *testing.T) {
 	})
 }
 
+// ─── AutoRegisterFromPlugins ────────────────────────────────────────────────
+
+func TestAutoRegisterFromPlugins_WellKnownMarketplace(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Pre-create install dir so clone is skipped.
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, "marketplaces", "superpowers-marketplace"), 0755))
+
+	keys := []string{"my-plugin@superpowers-marketplace"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Contains(t, registered, "superpowers-marketplace")
+
+	// Verify it was registered as github with correct org/repo.
+	data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+	require.NoError(t, err)
+
+	var entries map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &entries))
+	assert.Contains(t, entries, "superpowers-marketplace")
+
+	var entry struct {
+		Source struct {
+			Source string `json:"source"`
+			Repo   string `json:"repo"`
+		} `json:"source"`
+	}
+	require.NoError(t, json.Unmarshal(entries["superpowers-marketplace"], &entry))
+	assert.Equal(t, "github", entry.Source.Source)
+	assert.Equal(t, "anthropics/superpowers-marketplace", entry.Source.Repo)
+}
+
+func TestAutoRegisterFromPlugins_DirectoryOnDisk(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Create marketplace directory with valid marketplace.json.
+	mktDir := filepath.Join(pluginDir, "marketplaces", "custom-marketplace")
+	mkplDir := filepath.Join(mktDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	mkpl := `{"name": "custom-marketplace", "plugins": [{"name": "foo", "source": "./"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"), []byte(mkpl), 0644))
+
+	keys := []string{"foo@custom-marketplace"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Contains(t, registered, "custom-marketplace")
+
+	// Verify it was registered as directory source.
+	assert.Equal(t, "directory", marketplace.MarketplaceSourceType(claudeDir, "custom-marketplace"))
+}
+
+func TestAutoRegisterFromPlugins_DirectoryWithGitHubRemote(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Create marketplace directory as a git repo with GitHub remote.
+	mktDir := filepath.Join(pluginDir, "marketplaces", "gh-marketplace")
+	mkplDir := filepath.Join(mktDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	mkpl := `{"name": "gh-marketplace", "plugins": [{"name": "bar", "source": "./"}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"), []byte(mkpl), 0644))
+
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = mktDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, string(out))
+	}
+	run("init")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "Test")
+	run("remote", "add", "origin", "https://github.com/myorg/gh-marketplace.git")
+
+	keys := []string{"bar@gh-marketplace"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Contains(t, registered, "gh-marketplace")
+
+	// Verify registered as github source.
+	assert.Equal(t, "github", marketplace.MarketplaceSourceType(claudeDir, "gh-marketplace"))
+}
+
+func TestAutoRegisterFromPlugins_AlreadyRegistered(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	km := `{"existing-marketplace": {"source": {"source": "github", "repo": "org/existing"}, "installLocation": "/some/path"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+	keys := []string{"plugin@existing-marketplace"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Empty(t, registered)
+}
+
+func TestAutoRegisterFromPlugins_AlreadyDeclared(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	declared := map[string]config.MarketplaceSource{
+		"declared-mkt": {Source: "github", Repo: "org/declared"},
+	}
+	keys := []string{"plugin@declared-mkt"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, declared)
+	require.NoError(t, err)
+	assert.Empty(t, registered)
+}
+
+func TestAutoRegisterFromPlugins_SkipsForks(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	keys := []string{"my-fork@claude-sync-forks"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Empty(t, registered)
+}
+
+func TestAutoRegisterFromPlugins_UnknownNotOnDisk(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	keys := []string{"plugin@totally-unknown-marketplace"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Empty(t, registered, "unknown marketplace without directory should not be registered")
+}
+
+func TestAutoRegisterFromPlugins_NoPlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, nil, nil)
+	require.NoError(t, err)
+	assert.Nil(t, registered)
+}
+
+func TestAutoRegisterFromPlugins_MixedScenarios(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+
+	// Pre-register one marketplace.
+	km := `{"already-registered": {"source": {"source": "github", "repo": "org/already"}, "installLocation": "/path"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte(km), 0644))
+
+	// Create an on-disk marketplace directory.
+	onDiskDir := filepath.Join(pluginDir, "marketplaces", "on-disk-mkt")
+	mkplDir := filepath.Join(onDiskDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"),
+		[]byte(`{"name": "on-disk-mkt", "plugins": [{"name": "x", "source": "./"}]}`), 0644))
+
+	// Pre-create install dir for well-known marketplace to skip clone.
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginDir, "marketplaces", "beads-marketplace"), 0755))
+
+	declared := map[string]config.MarketplaceSource{
+		"declared-one": {Source: "github", Repo: "org/declared"},
+	}
+
+	keys := []string{
+		"a@already-registered",
+		"b@declared-one",
+		"c@claude-sync-forks",
+		"d@beads-marketplace",
+		"e@on-disk-mkt",
+		"f@completely-unknown",
+		"bare-plugin-no-at",
+	}
+
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, declared)
+	require.NoError(t, err)
+
+	assert.Contains(t, registered, "beads-marketplace")
+	assert.Contains(t, registered, "on-disk-mkt")
+	assert.Len(t, registered, 2)
+}
+
 // ─── QueryRemoteVersion (skipped by default — requires network) ────────────
 
 func TestQueryRemoteVersion_InvalidURL(t *testing.T) {

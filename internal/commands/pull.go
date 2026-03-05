@@ -126,6 +126,11 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		}
 	}
 
+	// Auto-register marketplaces referenced by plugins but not in config.yaml marketplaces section.
+	if _, regErr := marketplace.AutoRegisterFromPlugins(claudeDir, allDesired, cfg.Marketplaces); regErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: auto-registering marketplaces: %v\n", regErr)
+	}
+
 	// Check for plugins referencing undefined marketplaces.
 	undefinedMkts := marketplace.FindUndefinedMarketplaces(claudeDir, allDesired, cfg.Marketplaces)
 
