@@ -305,6 +305,30 @@ func TestJoin_EmptyLocalInstallation(t *testing.T) {
 	assert.Empty(t, result.LocalOnly)
 }
 
+func TestJoin_MissingConfigYaml(t *testing.T) {
+	// Create a remote repo with NO config.yaml.
+	remote := t.TempDir()
+	exec.Command("git", "init", remote).Run()
+	exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
+	os.WriteFile(filepath.Join(remote, "README.md"), []byte("# readme\n"), 0644)
+	exec.Command("git", "-C", remote, "add", ".").Run()
+	exec.Command("git", "-C", remote, "commit", "-m", "init without config").Run()
+
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	_, err := commands.Join(remote, claudeDir, syncDir)
+	require.Error(t, err)
+
+	var missingErr *commands.MissingConfigError
+	assert.ErrorAs(t, err, &missingErr)
+
+	// Sync dir should still exist (clone succeeded).
+	_, statErr := os.Stat(syncDir)
+	assert.NoError(t, statErr)
+}
+
 func TestJoinReplace(t *testing.T) {
 	// Set up an existing sync dir with a cloned repo.
 	remote1 := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})

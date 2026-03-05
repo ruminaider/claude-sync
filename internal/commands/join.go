@@ -13,6 +13,13 @@ import (
 	"github.com/ruminaider/claude-sync/internal/profiles"
 )
 
+// MissingConfigError is returned when the cloned repo has no config.yaml.
+type MissingConfigError struct{}
+
+func (e *MissingConfigError) Error() string {
+	return "config repo has no config.yaml"
+}
+
 // AlreadyJoinedError is returned when the user joins a URL that matches the existing origin.
 type AlreadyJoinedError struct {
 	URL string
@@ -80,7 +87,10 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err != nil {
-		return result, nil
+		if os.IsNotExist(err) {
+			return nil, &MissingConfigError{}
+		}
+		return nil, fmt.Errorf("reading config.yaml: %w", err)
 	}
 
 	cfg, err := config.Parse(cfgData)
