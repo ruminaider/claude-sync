@@ -56,6 +56,10 @@ type PullResult struct {
 	ProjectInitDir             string   // suggested directory for project init (project root, not CWD)
 	AvailableProfiles          []string // profile names from sync dir (set when ProjectInitEligible)
 	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
+	SettingsSkipped            bool     // settings.json had local modifications
+	ClaudeMDSkipped            bool     // CLAUDE.md had local modifications
+	MCPSkipped                 bool     // .mcp.json had local modifications
+	KeybindingsSkipped         bool     // keybindings.json had local modifications
 }
 
 // PullOptions configures pull behavior.
@@ -245,6 +249,8 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 		return nil, err
 	}
 
+	appliedHashes := LoadAppliedHashes(syncDir)
+
 	for _, plugin := range result.ToInstall {
 		if !quiet {
 			fmt.Printf("  Installing %s...\n", plugin)
@@ -333,19 +339,27 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			}
 
 			// Apply settings and hooks (hooks skipped in auto mode).
-			settingsCfg := cfg
-			if skipHooks {
-				settingsCfg.Hooks = nil
-			}
-			applied, hookNames, skippedHooks, applyErr := ApplySettings(claudeDir, settingsCfg)
-			result.HooksSkipped = skippedHooks // always propagate skip info
-			if applyErr != nil {
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
-				}
+			settingsPath := filepath.Join(claudeDir, "settings.json")
+			if appliedHashes.IsLocallyModified("settings", settingsPath) {
+				result.SettingsSkipped = true
 			} else {
-				result.SettingsApplied = applied
-				result.HooksApplied = hookNames
+				settingsCfg := cfg
+				if skipHooks {
+					settingsCfg.Hooks = nil
+				}
+				applied, hookNames, skippedHooks, applyErr := ApplySettings(claudeDir, settingsCfg)
+				result.HooksSkipped = skippedHooks // always propagate skip info
+				if applyErr != nil {
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
+					}
+				} else {
+					result.SettingsApplied = applied
+					result.HooksApplied = hookNames
+					if data, err := os.ReadFile(settingsPath); err == nil {
+						appliedHashes.Set("settings", string(data))
+					}
+				}
 			}
 
 			// Apply permissions (additive merge, skipped in auto mode).
@@ -363,11 +377,16 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				includes = profiles.MergeClaudeMD(includes, *activeProfile)
 			}
 			if len(includes) > 0 {
-				assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
-				if asmErr == nil && assembled != "" {
-					claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
-					if os.WriteFile(claudeMDPath, []byte(assembled), 0644) == nil {
-						result.ClaudeMDAssembled = true
+				claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+				if appliedHashes.IsLocallyModified("claude-md", claudeMDPath) {
+					result.ClaudeMDSkipped = true
+				} else {
+					assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
+					if asmErr == nil && assembled != "" {
+						if os.WriteFile(claudeMDPath, []byte(assembled), 0644) == nil {
+							result.ClaudeMDAssembled = true
+							appliedHashes.Set("claude-md", assembled)
+						}
 					}
 				}
 			}
@@ -410,16 +429,24 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 
 					// Write global servers.
 					if len(globalServers) > 0 {
-						existing, _ := claudecode.ReadMCPConfig(claudeDir)
-						for k, v := range globalServers {
-							existing[k] = v
-						}
-						if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
-							result.MCPApplied = make([]string, 0, len(globalServers))
-							for k := range globalServers {
-								result.MCPApplied = append(result.MCPApplied, k)
+						mcpPath := filepath.Join(claudeDir, ".mcp.json")
+						if appliedHashes.IsLocallyModified("mcp", mcpPath) {
+							result.MCPSkipped = true
+						} else {
+							existing, _ := claudecode.ReadMCPConfig(claudeDir)
+							for k, v := range globalServers {
+								existing[k] = v
 							}
-							sort.Strings(result.MCPApplied)
+							if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
+								result.MCPApplied = make([]string, 0, len(globalServers))
+								for k := range globalServers {
+									result.MCPApplied = append(result.MCPApplied, k)
+								}
+								sort.Strings(result.MCPApplied)
+								if data, err := os.ReadFile(mcpPath); err == nil {
+									appliedHashes.Set("mcp", string(data))
+								}
+							}
 						}
 					}
 
@@ -451,8 +478,16 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				kbConfig = profiles.MergeKeybindings(kbConfig, *activeProfile)
 			}
 			if len(kbConfig) > 0 {
-				if claudecode.WriteKeybindings(claudeDir, kbConfig) == nil {
-					result.KeybindingsApplied = true
+				kbPath := filepath.Join(claudeDir, "keybindings.json")
+				if appliedHashes.IsLocallyModified("keybindings", kbPath) {
+					result.KeybindingsSkipped = true
+				} else {
+					if claudecode.WriteKeybindings(claudeDir, kbConfig) == nil {
+						result.KeybindingsApplied = true
+						if data, err := os.ReadFile(kbPath); err == nil {
+							appliedHashes.Set("keybindings", string(data))
+						}
+					}
 				}
 			}
 
@@ -518,6 +553,8 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			}
 		}
 	}
+
+	_ = appliedHashes.Save()
 
 	// Apply project settings if in a project directory.
 	projectDir := opts.ProjectDir
