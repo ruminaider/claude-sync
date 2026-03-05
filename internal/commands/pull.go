@@ -126,9 +126,15 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 		}
 	}
 
-	// Auto-register marketplaces referenced by plugins but not in config.yaml marketplaces section.
-	if _, regErr := marketplace.AutoRegisterFromPlugins(claudeDir, allDesired, cfg.Marketplaces); regErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: auto-registering marketplaces: %v\n", regErr)
+	// Auto-register marketplaces referenced by plugins but not in config.yaml.
+	// Best-effort: partial successes are fine since FindUndefinedMarketplaces
+	// (called next) catches anything not resolved.
+	// NOTE: Side effects (writes known_marketplaces.json, may clone repos)
+	// mirror the existing EnsureRegistered call above.
+	registered, regErr := marketplace.AutoRegisterFromPlugins(claudeDir, allDesired, cfg.Marketplaces)
+	if regErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: auto-registering marketplaces (registered %d): %v\n",
+			len(registered), regErr)
 	}
 
 	// Check for plugins referencing undefined marketplaces.

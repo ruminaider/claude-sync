@@ -1286,6 +1286,139 @@ func TestAutoRegisterFromPlugins_MixedScenarios(t *testing.T) {
 	assert.Len(t, registered, 2)
 }
 
+func TestAutoRegisterFromPlugins_BootstrapFallback(t *testing.T) {
+	// No plugins/ directory or known_marketplaces.json — triggers Bootstrap path.
+	claudeDir := t.TempDir()
+	// Pre-create install dir so clone is skipped.
+	require.NoError(t, os.MkdirAll(filepath.Join(claudeDir, "plugins", "marketplaces", "superpowers-marketplace"), 0755))
+
+	keys := []string{"my-plugin@superpowers-marketplace"}
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Contains(t, registered, "superpowers-marketplace")
+
+	// Verify known_marketplaces.json was created (bootstrapped).
+	_, statErr := os.Stat(filepath.Join(claudeDir, "plugins", "known_marketplaces.json"))
+	assert.NoError(t, statErr, "known_marketplaces.json should be bootstrapped")
+}
+
+func TestAutoRegisterFromPlugins_ErrorPropagation(t *testing.T) {
+	// EnsureRegistered will fail because the github source can't be cloned.
+	// Directory registration should still succeed and be returned.
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Create an on-disk marketplace directory for directory registration.
+	mktDir := filepath.Join(pluginDir, "marketplaces", "dir-marketplace")
+	mkplDir := filepath.Join(mktDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"),
+		[]byte(`{"name": "dir-marketplace", "plugins": [{"name": "foo", "source": "./"}]}`), 0644))
+
+	// Don't pre-create the install dir for beads-marketplace — the clone will fail
+	// since we can't reach github.com/anthropics/beads-marketplace.
+	keys := []string{
+		"foo@dir-marketplace",
+		"bar@beads-marketplace",
+	}
+
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+
+	// Directory marketplace should succeed even though github clone fails.
+	assert.Contains(t, registered, "dir-marketplace")
+	// Error should be non-nil because github clone failed.
+	assert.Error(t, err, "should propagate EnsureRegistered clone error")
+}
+
+func TestAutoRegisterFromPlugins_Idempotent(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Create on-disk marketplace directory.
+	mktDir := filepath.Join(pluginDir, "marketplaces", "idem-mkt")
+	mkplDir := filepath.Join(mktDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"),
+		[]byte(`{"name": "idem-mkt", "plugins": [{"name": "p", "source": "./"}]}`), 0644))
+
+	keys := []string{"p@idem-mkt"}
+
+	// First call registers it.
+	reg1, err1 := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err1)
+	assert.Contains(t, reg1, "idem-mkt")
+
+	// Second call is a no-op — already registered.
+	reg2, err2 := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err2)
+	assert.Empty(t, reg2, "second call should be a no-op")
+}
+
+func TestAutoRegisterFromPlugins_DeduplicatesMarketplace(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Create on-disk marketplace directory.
+	mktDir := filepath.Join(pluginDir, "marketplaces", "shared-mkt")
+	mkplDir := filepath.Join(mktDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"),
+		[]byte(`{"name": "shared-mkt", "plugins": [{"name": "a", "source": "./"}, {"name": "b", "source": "./"}]}`), 0644))
+
+	// Multiple plugins reference the same marketplace.
+	keys := []string{"a@shared-mkt", "b@shared-mkt", "c@shared-mkt"}
+
+	registered, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shared-mkt"}, registered, "marketplace should only appear once")
+}
+
+func TestAutoRegisterFromPlugins_DirectoryEntryFormat(t *testing.T) {
+	claudeDir := t.TempDir()
+	pluginDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644))
+
+	// Create marketplace directory.
+	mktDir := filepath.Join(pluginDir, "marketplaces", "fmt-check-mkt")
+	mkplDir := filepath.Join(mktDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(mkplDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(mkplDir, "marketplace.json"),
+		[]byte(`{"name": "fmt-check-mkt", "plugins": [{"name": "x", "source": "./"}]}`), 0644))
+
+	keys := []string{"x@fmt-check-mkt"}
+	_, err := marketplace.AutoRegisterFromPlugins(claudeDir, keys, nil)
+	require.NoError(t, err)
+
+	// Read the JSON entry and verify structure.
+	data, err := os.ReadFile(filepath.Join(pluginDir, "known_marketplaces.json"))
+	require.NoError(t, err)
+
+	var entries map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Contains(t, entries, "fmt-check-mkt")
+
+	var entry struct {
+		Source struct {
+			Source string `json:"source"`
+			Path   string `json:"path"`
+		} `json:"source"`
+		InstallLocation string `json:"installLocation"`
+		LastUpdated     string `json:"lastUpdated"`
+	}
+	require.NoError(t, json.Unmarshal(entries["fmt-check-mkt"], &entry))
+	assert.Equal(t, "directory", entry.Source.Source, "source.source should be 'directory'")
+	assert.Equal(t, mktDir, entry.Source.Path, "source.path should match install dir")
+	assert.Equal(t, mktDir, entry.InstallLocation, "installLocation should match dir")
+	assert.NotEmpty(t, entry.LastUpdated, "lastUpdated must be present for Claude Code Zod validation")
+}
+
 // ─── QueryRemoteVersion (skipped by default — requires network) ────────────
 
 func TestQueryRemoteVersion_InvalidURL(t *testing.T) {

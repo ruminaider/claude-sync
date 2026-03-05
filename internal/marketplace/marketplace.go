@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -445,6 +446,10 @@ func UpgradeDirectoryMarketplaces(claudeDir string) int {
 
 // detectGitHubRemote checks if dir is a git repo with a GitHub remote.
 // Returns "org/repo" if found, empty string otherwise.
+//
+// Silently returns "" on any failure (directory missing, not a git repo,
+// no origin remote, non-GitHub remote). Callers treat "" as "not a GitHub
+// repo" and fall back to directory-source registration.
 func detectGitHubRemote(dir string) string {
 	if _, err := os.Stat(dir); err != nil {
 		return ""
@@ -576,6 +581,13 @@ func FindUndefinedMarketplaces(claudeDir string, pluginKeys []string, declared m
 	return undefined
 }
 
+// dirEntry holds a marketplace name and its on-disk directory for batch
+// registration of directory-source marketplaces.
+type dirEntry struct {
+	name string
+	dir  string
+}
+
 // AutoRegisterFromPlugins scans plugin keys for marketplace references that are
 // not in the declared config.yaml marketplaces section and not yet registered in
 // known_marketplaces.json. For each such marketplace it attempts auto-registration:
@@ -585,13 +597,17 @@ func FindUndefinedMarketplaces(claudeDir string, pluginKeys []string, declared m
 //     marketplace.json are registered (as github if a GitHub remote is detected,
 //     otherwise as a directory source).
 //
-// Returns the names of successfully auto-registered marketplaces.
+// Marketplaces that don't match either strategy are silently skipped; callers
+// should use FindUndefinedMarketplaces afterward to surface truly unresolvable
+// references.
+//
+// Best-effort: partial successes are returned alongside a joined error. The
+// returned slice contains every marketplace that was successfully registered,
+// even when some registrations fail.
 func AutoRegisterFromPlugins(claudeDir string, pluginKeys []string, declared map[string]config.MarketplaceSource) ([]string, error) {
-	toRegister := make(map[string]config.MarketplaceSource)
-	var directoryRegistrations []struct {
-		name string
-		dir  string
-	}
+	githubToRegister := make(map[string]config.MarketplaceSource)
+	var directoryEntries []dirEntry
+	directorySeen := make(map[string]bool) // dedup directory entries
 
 	for _, key := range pluginKeys {
 		parts := strings.SplitN(key, "@", 2)
@@ -612,14 +628,18 @@ func AutoRegisterFromPlugins(claudeDir string, pluginKeys []string, declared map
 		if _, found := IsPortableFromKnownMarketplaces(claudeDir, mktName); found {
 			continue
 		}
-		// Skip if already queued.
-		if _, ok := toRegister[mktName]; ok {
+		// Skip if already queued for github registration.
+		if _, ok := githubToRegister[mktName]; ok {
+			continue
+		}
+		// Skip if already queued for directory registration.
+		if directorySeen[mktName] {
 			continue
 		}
 
 		// Strategy 1: Well-known marketplace — derive source from hardcoded map.
 		if org, ok := knownMarketplaces[mktName]; ok {
-			toRegister[mktName] = config.MarketplaceSource{
+			githubToRegister[mktName] = config.MarketplaceSource{
 				Source: "github",
 				Repo:   org + "/" + mktName,
 			}
@@ -629,76 +649,93 @@ func AutoRegisterFromPlugins(claudeDir string, pluginKeys []string, declared map
 		// Strategy 2: Directory exists on disk with valid marketplace.json.
 		mktDir := filepath.Join(claudeDir, "plugins", "marketplaces", mktName)
 		mkplPath := filepath.Join(mktDir, ".claude-plugin", "marketplace.json")
-		if _, err := os.Stat(mkplPath); err == nil {
-			if repo := detectGitHubRemote(mktDir); repo != "" {
-				toRegister[mktName] = config.MarketplaceSource{
-					Source: "github",
-					Repo:   repo,
-				}
-			} else {
-				directoryRegistrations = append(directoryRegistrations, struct {
-					name string
-					dir  string
-				}{mktName, mktDir})
-			}
+		info, err := os.Stat(mkplPath)
+		if err != nil || info.IsDir() {
 			continue
+		}
+		if repo := detectGitHubRemote(mktDir); repo != "" {
+			githubToRegister[mktName] = config.MarketplaceSource{
+				Source: "github",
+				Repo:   repo,
+			}
+		} else {
+			directoryEntries = append(directoryEntries, dirEntry{mktName, mktDir})
+			directorySeen[mktName] = true
 		}
 	}
 
 	var registered []string
+	var errs []error
 
-	// Register directory-source marketplaces directly.
-	for _, dr := range directoryRegistrations {
-		if err := registerDirectoryMarketplace(claudeDir, dr.name, dr.dir); err != nil {
-			return registered, fmt.Errorf("registering directory marketplace %q: %w", dr.name, err)
+	// Phase 1: Batch-register directory sources (single read-modify-write).
+	if len(directoryEntries) > 0 {
+		dirRegistered, dirErr := registerDirectoryMarketplaces(claudeDir, directoryEntries)
+		registered = append(registered, dirRegistered...)
+		if dirErr != nil {
+			errs = append(errs, dirErr)
 		}
-		registered = append(registered, dr.name)
 	}
 
-	// Use existing EnsureRegistered for github/git sources.
-	if len(toRegister) > 0 {
-		if err := EnsureRegistered(claudeDir, toRegister); err != nil {
-			return registered, err
-		}
-		for name := range toRegister {
-			registered = append(registered, name)
+	// Phase 2: Batch-register github/git sources via EnsureRegistered.
+	if len(githubToRegister) > 0 {
+		if err := EnsureRegistered(claudeDir, githubToRegister); err != nil {
+			errs = append(errs, err)
+		} else {
+			for name := range githubToRegister {
+				registered = append(registered, name)
+			}
 		}
 	}
 
 	sort.Strings(registered)
-	return registered, nil
+	return registered, errors.Join(errs...)
 }
 
-// registerDirectoryMarketplace registers a marketplace that already exists on
-// disk as a directory source in known_marketplaces.json.
-func registerDirectoryMarketplace(claudeDir, name, installDir string) error {
+// registerDirectoryMarketplaces batch-registers marketplaces that already exist
+// on disk as directory sources in known_marketplaces.json. Performs a single
+// read-modify-write cycle to avoid TOCTOU races. Returns the names of
+// successfully registered marketplaces and any error encountered.
+func registerDirectoryMarketplaces(claudeDir string, entries []dirEntry) ([]string, error) {
 	mkts, err := claudecode.ReadMarketplaces(claudeDir)
 	if err != nil {
 		if bErr := claudecode.Bootstrap(claudeDir); bErr != nil {
-			return fmt.Errorf("bootstrapping claude dir: %w", bErr)
+			return nil, fmt.Errorf("bootstrapping claude dir: %w", bErr)
 		}
 		mkts, err = claudecode.ReadMarketplaces(claudeDir)
 		if err != nil {
-			return fmt.Errorf("reading marketplaces after bootstrap: %w", err)
+			return nil, fmt.Errorf("reading marketplaces after bootstrap: %w", err)
 		}
 	}
-	if _, exists := mkts[name]; exists {
-		return nil
+
+	var registered []string
+	changed := false
+	for _, e := range entries {
+		if _, exists := mkts[e.name]; exists {
+			continue // idempotent: skip already-registered
+		}
+		entry := map[string]any{
+			"source": map[string]string{
+				"source": "directory",
+				"path":   e.dir,
+			},
+			"installLocation": e.dir,
+			"lastUpdated":     time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		raw, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		mkts[e.name] = json.RawMessage(raw)
+		registered = append(registered, e.name)
+		changed = true
 	}
-	entry := map[string]any{
-		"source": map[string]string{
-			"source": "directory",
-			"path":   installDir,
-		},
-		"installLocation": installDir,
-		"lastUpdated":     time.Now().UTC().Format(time.RFC3339Nano),
+
+	if changed {
+		if err := claudecode.WriteMarketplaces(claudeDir, mkts); err != nil {
+			return nil, fmt.Errorf("writing directory marketplaces: %w", err)
+		}
 	}
-	raw, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	mkts[name] = json.RawMessage(raw)
-	return claudecode.WriteMarketplaces(claudeDir, mkts)
+	return registered, nil
 }
 
 // EnsureRegistered checks if each declared marketplace exists in
