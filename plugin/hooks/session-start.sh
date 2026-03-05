@@ -1,58 +1,87 @@
 #!/bin/bash
-set -e
+# SessionStart hook: pull config, set up per-session state, detect unmanaged projects
+# Fail-safe: timeouts, locking, stale cleanup, visible error messages
 
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-ARCH=$(uname -m)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+set -euo pipefail
 
-case "$ARCH" in
-  x86_64) ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-esac
+source "$(dirname "$0")/lib.sh"
 
-CLAUDE_SYNC="${SCRIPT_DIR}/bin/claude-sync-${OS}-${ARCH}"
-
-if [ ! -x "$CLAUDE_SYNC" ]; then
-  CLAUDE_SYNC=$(command -v claude-sync 2>/dev/null || echo "")
+# If claude-sync is not set up, exit silently
+if [ ! -d "$SYNC_DIR" ]; then
+    echo "{}"
+    exit 0
 fi
 
+CLAUDE_SYNC=$(resolve_claude_sync)
 if [ -z "$CLAUDE_SYNC" ]; then
-  echo "{}"
-  exit 0
+    echo "{}"
+    exit 0
 fi
 
-if [ ! -d "$HOME/.claude-sync" ]; then
-  echo "{}"
-  exit 0
+# --- Step 1: Clean up stale session dirs (dead PIDs) ---
+if [ -d "$SESSIONS_DIR" ]; then
+    for session_dir in "$SESSIONS_DIR"/*/; do
+        [ -d "$session_dir" ] || continue
+        pid=$(basename "$session_dir")
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -rf "$session_dir"
+        fi
+    done
 fi
 
-SYNC_DIR="$HOME/.claude-sync"
-
-LAST_FETCH_FILE="${SYNC_DIR}/.last_fetch"
-FETCH_INTERVAL=30
-
-now=$(date +%s)
-last_fetch=$(cat "$LAST_FETCH_FILE" 2>/dev/null || echo 0)
-
-if [ $((now - last_fetch)) -gt $FETCH_INTERVAL ]; then
-  cd "$SYNC_DIR"
-  timeout 2 git fetch --quiet 2>/dev/null || true
-  echo "$now" > "$LAST_FETCH_FILE"
+# --- Step 2: Pull config with lock and timeout ---
+pull_ok=true
+if acquire_lock; then
+    trap 'release_lock' EXIT
+    if ! run_with_timeout 15 "$CLAUDE_SYNC" pull --auto; then
+        pull_ok=false
+    fi
+    release_lock
+    trap - EXIT
+else
+    pull_ok=false
+    echo "claude-sync: lock wait exceeded (15s) during pull — config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
 fi
 
-cd "$SYNC_DIR"
-LOCAL=$(git rev-parse HEAD 2>/dev/null || echo "")
-REMOTE=$(git rev-parse @{u} 2>/dev/null || echo "$LOCAL")
-
-CONFIG_CHANGES=false
-if [ -n "$LOCAL" ] && [ "$LOCAL" != "$REMOTE" ]; then
-  CONFIG_CHANGES=true
+if [ "$pull_ok" = false ]; then
+    echo "claude-sync pull failed or timed out — config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
 fi
 
-if [ "$CONFIG_CHANGES" = true ]; then
-  MSG="claude-sync: Config changes pending. Run '/sync status' for details. Restart session to apply."
+# --- Step 3: Set up per-session state ---
+SESSION_ID=$(get_session_id)
 
-  cat <<EOF
+if [ -z "$SESSION_ID" ]; then
+    echo "claude-sync: could not determine session ID — change detection disabled for this session." >&2
+    echo "{}"
+    exit 0
+fi
+
+SESSION_DIR="$SESSIONS_DIR/$SESSION_ID"
+mkdir -p "$SESSION_DIR"
+
+# Save baseline hash (change detection works for local edits even if pull failed)
+if [ -f "$CLAUDE_MD" ]; then
+    md5 -q "$CLAUDE_MD" 2>/dev/null > "$SESSION_DIR/hash" \
+        || md5sum "$CLAUDE_MD" 2>/dev/null | cut -d' ' -f1 > "$SESSION_DIR/hash"
+fi
+
+# --- Step 4: Detect unmanaged project ---
+project_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+sync_dir_real=$(cd "$SYNC_DIR" 2>/dev/null && pwd -P)
+
+# Skip if we're in the config repo itself
+if [ -n "$project_root" ] && [ -n "$sync_dir_real" ] && \
+   [ "$(cd "$project_root" 2>/dev/null && pwd -P)" = "$sync_dir_real" ]; then
+    echo "{}"
+    exit 0
+fi
+
+if [ -n "$project_root" ] && [ ! -f "$project_root/.claude/.claude-sync.yaml" ]; then
+    profiles=$(ls "$HOME/.claude-sync/profiles/" 2>/dev/null | sed 's/\.yaml$//' | tr '\n' ', ' | sed 's/,$//')
+    MSG="ACTION REQUIRED: This project ($project_root) is not managed by claude-sync. Hooks and permissions may be missing. Before doing any work, ask the user to run: claude-sync project init --profile <name>. Available profiles: ${profiles:-none}. To skip: claude-sync project init --decline."
+
+    # Output both structured JSON (for Claude's context) and plain text (for display)
+    cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
@@ -60,6 +89,8 @@ if [ "$CONFIG_CHANGES" = true ]; then
   }
 }
 EOF
-else
-  echo "{}"
+    exit 0
 fi
+
+echo "{}"
+exit 0

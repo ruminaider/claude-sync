@@ -315,6 +315,11 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			skipPermissions := opts.Auto
 			skipMCP := opts.Auto
 
+			// Clean up legacy session lifecycle hooks now handled by the plugin.
+			if cleanErr := CleanupLegacyHooks(claudeDir); cleanErr != nil && !quiet {
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up legacy hooks: %v\n", cleanErr)
+			}
+
 			// Apply settings and hooks (hooks skipped in auto mode).
 			settingsCfg := cfg
 			if skipHooks {
@@ -567,6 +572,108 @@ func uninstallPlugin(pluginKey, scope string) error {
 		return fmt.Errorf("%s: %s", err, string(out))
 	}
 	return nil
+}
+
+// CleanupLegacyHooks removes session lifecycle hook entries from settings.json
+// that are now handled by the claude-sync plugin. This is a migration step
+// that runs on every pull but is idempotent.
+func CleanupLegacyHooks(claudeDir string) error {
+	settings, err := claudecode.ReadSettings(claudeDir)
+	if err != nil {
+		return nil // no settings = nothing to clean
+	}
+
+	var hooks map[string]json.RawMessage
+	if hooksRaw, ok := settings["hooks"]; ok {
+		if json.Unmarshal(hooksRaw, &hooks) != nil {
+			return nil
+		}
+	}
+	if hooks == nil {
+		return nil
+	}
+
+	// Patterns that identify legacy hooks now handled by the plugin.
+	legacyPatterns := map[string][]string{
+		"SessionStart": {
+			"claude-sync-session-start.sh",
+			"claude-sync pull --auto",
+		},
+		"SessionEnd": {
+			"claude-sync-session-end.sh",
+			"claude-sync push --auto",
+		},
+		"Stop": {
+			"claude-sync-stop-check.sh",
+			"stop-next-steps.sh",
+		},
+	}
+
+	changed := false
+	for eventName, patterns := range legacyPatterns {
+		raw, ok := hooks[eventName]
+		if !ok {
+			continue
+		}
+
+		type hookAction struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+		}
+		type hookRule struct {
+			Matcher string       `json:"matcher"`
+			Hooks   []hookAction `json:"hooks"`
+		}
+
+		var rules []hookRule
+		if json.Unmarshal(raw, &rules) != nil {
+			continue
+		}
+
+		var kept []hookRule
+		for _, rule := range rules {
+			isLegacy := false
+			for _, h := range rule.Hooks {
+				for _, pat := range patterns {
+					if strings.Contains(h.Command, pat) {
+						isLegacy = true
+						break
+					}
+				}
+				if isLegacy {
+					break
+				}
+			}
+			if !isLegacy {
+				kept = append(kept, rule)
+			}
+		}
+
+		if len(kept) != len(rules) {
+			changed = true
+			if len(kept) == 0 {
+				delete(hooks, eventName)
+			} else {
+				data, err := json.Marshal(kept)
+				if err != nil {
+					continue
+				}
+				hooks[eventName] = json.RawMessage(data)
+			}
+		}
+	}
+
+	if !changed {
+		return nil
+	}
+
+	hooksData, err := json.Marshal(hooks)
+	if err != nil {
+		return fmt.Errorf("marshaling hooks: %w", err)
+	}
+	settings["hooks"] = json.RawMessage(hooksData)
+
+	return claudecode.WriteSettings(claudeDir, settings)
 }
 
 // ApplySettings merges synced settings and hooks from config into settings.json.

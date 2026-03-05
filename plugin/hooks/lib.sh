@@ -1,0 +1,66 @@
+#!/bin/bash
+# Shared utilities for claude-sync plugin hooks
+# Sourced by session-start.sh, session-end.sh, stop-change-check.sh, stop-next-steps.sh
+
+SYNC_DIR="$HOME/.claude-sync"
+SESSIONS_DIR="$SYNC_DIR/sessions"
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+LOCKDIR="$SYNC_DIR/.lock"
+
+# Resolve claude-sync binary: bundled (plugin/bin/) then PATH fallback
+resolve_claude_sync() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    local arch os
+    arch=$(uname -m)
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+    esac
+    local bin="${script_dir}/bin/claude-sync-${os}-${arch}"
+    if [ -x "$bin" ]; then echo "$bin"; return; fi
+    command -v claude-sync 2>/dev/null || echo ""
+}
+
+# macOS-compatible timeout (no coreutils dependency)
+run_with_timeout() {
+    local secs=$1; shift
+    "$@" &
+    local pid=$!
+    ( sleep "$secs" && kill "$pid" 2>/dev/null ) &
+    local watchdog=$!
+    wait "$pid" 2>/dev/null
+    local status=$?
+    kill "$watchdog" 2>/dev/null 2>&1; wait "$watchdog" 2>/dev/null
+    return $status
+}
+
+# mkdir-based lock with stale detection (60s) and blocking wait (15s)
+acquire_lock() {
+    local waited=0
+    local max_wait=15
+
+    while ! mkdir "$LOCKDIR" 2>/dev/null; do
+        # Break stale locks (older than 60s)
+        if find "$LOCKDIR" -maxdepth 0 -mmin +1 2>/dev/null | grep -q .; then
+            rm -rf "$LOCKDIR"
+            continue
+        fi
+        waited=$((waited + 1))
+        if [ $waited -ge $max_wait ]; then
+            return 1
+        fi
+        sleep 1
+    done
+    return 0
+}
+
+release_lock() {
+    rm -rf "$LOCKDIR"
+}
+
+# Session ID = grandparent PID (the claude process)
+get_session_id() {
+    ps -o ppid= -p $PPID 2>/dev/null | tr -d ' '
+}
