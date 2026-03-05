@@ -322,6 +322,7 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				settingsCfg.Hooks = nil
 			}
 			applied, hookNames, skippedHooks, applyErr := ApplySettings(claudeDir, settingsCfg)
+			result.HooksSkipped = skippedHooks // always propagate skip info
 			if applyErr != nil {
 				if !quiet {
 					fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
@@ -329,7 +330,6 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			} else {
 				result.SettingsApplied = applied
 				result.HooksApplied = hookNames
-				result.HooksSkipped = skippedHooks
 			}
 
 			// Apply permissions (additive merge, skipped in auto mode).
@@ -610,7 +610,12 @@ func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, []s
 		}
 
 		for hookName, hookData := range cfg.Hooks {
-			if missing := findMissingHookScripts(hookData); len(missing) > 0 {
+			missing, parseErr := findMissingHookScripts(hookData)
+			if parseErr != nil {
+				hooksSkipped = append(hooksSkipped, fmt.Sprintf("hook %q: %v", hookName, parseErr))
+				continue
+			}
+			if len(missing) > 0 {
 				for _, m := range missing {
 					hooksSkipped = append(hooksSkipped, fmt.Sprintf("hook %q: script not found: %s", hookName, m))
 				}
@@ -644,29 +649,35 @@ var scriptInterpreters = map[string]bool{
 	"ruby": true, "perl": true, "node": true,
 }
 
+// hookEntry represents a single hook entry in the Claude hook JSON format.
+type hookEntry struct {
+	Hooks []struct {
+		Command string `json:"command"`
+	} `json:"hooks"`
+}
+
 // findMissingHookScripts inspects a hook's JSON data for commands that reference
 // external script files. Returns paths of scripts that don't exist on disk.
-func findMissingHookScripts(hookData json.RawMessage) []string {
-	var entries []struct {
-		Hooks []struct {
-			Command string `json:"command"`
-		} `json:"hooks"`
-	}
+// Returns an error if the hook JSON is malformed.
+func findMissingHookScripts(hookData json.RawMessage) ([]string, error) {
+	var entries []hookEntry
 	if err := json.Unmarshal(hookData, &entries); err != nil {
-		return nil
+		return nil, fmt.Errorf("malformed hook JSON: %w", err)
 	}
 	var missing []string
 	for _, entry := range entries {
 		for _, h := range entry.Hooks {
-			if path := extractScriptPath(h.Command); path != "" {
-				expanded := expandHome(path)
-				if _, err := os.Stat(expanded); os.IsNotExist(err) {
-					missing = append(missing, path)
-				}
+			path := extractScriptPath(h.Command)
+			if path == "" {
+				continue
+			}
+			expanded := expandHome(path)
+			if _, err := os.Stat(expanded); err != nil {
+				missing = append(missing, path)
 			}
 		}
 	}
-	return missing
+	return missing, nil
 }
 
 // extractScriptPath returns the script file path from a command string like
@@ -680,10 +691,16 @@ func extractScriptPath(command string) string {
 	if !scriptInterpreters[parts[0]] {
 		return ""
 	}
-	path := parts[1]
-	path = strings.Trim(path, `"'`)
-	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "~/") {
-		return path
+	// Skip flags (e.g. -e, -x) to find the first positional argument.
+	for _, arg := range parts[1:] {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		path := strings.Trim(arg, `"'`)
+		if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "~/") {
+			return path
+		}
+		return ""
 	}
 	return ""
 }

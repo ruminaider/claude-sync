@@ -545,6 +545,54 @@ func TestApplySettings_RelativePathNotValidated(t *testing.T) {
 	assert.Empty(t, skipped)
 }
 
+func TestApplySettings_MalformedHookJSON(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": json.RawMessage("not valid json"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Empty(t, hooks)
+	assert.Len(t, skipped, 1)
+	assert.Contains(t, skipped[0], "SessionEnd")
+	assert.Contains(t, skipped[0], "malformed hook JSON")
+}
+
+func TestApplySettings_InterpreterFlags(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": config.ExpandHookCommand("bash -e /nonexistent/script.sh"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Empty(t, hooks)
+	assert.Len(t, skipped, 1)
+	assert.Contains(t, skipped[0], "/nonexistent/script.sh")
+}
+
+func TestApplySettings_MultiCommandPartialMissing(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	// Build a hook entry with two commands: one valid inline, one missing script.
+	hookJSON := `[{"matcher":"","hooks":[
+		{"type":"command","command":"echo hello"},
+		{"type":"command","command":"bash /nonexistent/deploy.sh"}
+	]}]`
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": json.RawMessage(hookJSON),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Empty(t, hooks, "entire hook should be skipped when any command references a missing script")
+	assert.Len(t, skipped, 1)
+	assert.Contains(t, skipped[0], "/nonexistent/deploy.sh")
+}
+
 // setupPullEnvWithProfile creates a sync dir with a config.yaml listing upstream plugins,
 // a profiles/ directory with a named profile YAML, and optionally sets the active-profile file.
 // Returns (claudeDir, syncDir).
