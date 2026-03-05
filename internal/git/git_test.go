@@ -113,6 +113,69 @@ func TestRemoteURL_NoRemote(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestIsLocalPath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"/home/user/repo", true},
+		{"./relative/path", true},
+		{"../parent/path", true},
+		{"repo-name", true},
+		{"git://github.com/org/repo", false},
+		{"ssh://github.com/org/repo", false},
+		{"https://github.com/org/repo", false},
+		{"http://github.com/org/repo", false},
+		{"git@github.com:org/repo.git", false},
+	}
+	for _, tt := range tests {
+		got := git.IsLocalPath(tt.input)
+		assert.Equal(t, tt.want, got, "IsLocalPath(%q)", tt.input)
+	}
+}
+
+func TestSetRemoteURL(t *testing.T) {
+	src := initTestRepo(t)
+	os.WriteFile(filepath.Join(src, "test.txt"), []byte("hello"), 0644)
+	exec.Command("git", "-C", src, "add", ".").Run()
+	exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+
+	dst := filepath.Join(t.TempDir(), "clone")
+	err := git.Clone(src, dst)
+	require.NoError(t, err)
+
+	newURL := "https://github.com/org/repo.git"
+	err = git.SetRemoteURL(dst, "origin", newURL)
+	require.NoError(t, err)
+
+	got, err := git.RemoteURL(dst, "origin")
+	require.NoError(t, err)
+	assert.Equal(t, newURL, got)
+}
+
+func TestResolveUpstreamURL(t *testing.T) {
+	// Create a repo with an origin remote.
+	src := initTestRepo(t)
+	os.WriteFile(filepath.Join(src, "test.txt"), []byte("hello"), 0644)
+	exec.Command("git", "-C", src, "add", ".").Run()
+	exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+
+	// Clone it so the clone has origin pointing to src.
+	clone := filepath.Join(t.TempDir(), "clone")
+	err := git.Clone(src, clone)
+	require.NoError(t, err)
+
+	got, err := git.ResolveUpstreamURL(clone)
+	require.NoError(t, err)
+	assert.Equal(t, src, got)
+}
+
+func TestResolveUpstreamURL_NoRemote(t *testing.T) {
+	dir := initTestRepo(t)
+	_, err := git.ResolveUpstreamURL(dir)
+	assert.Error(t, err)
+}
+
 func TestAddAndCommit(t *testing.T) {
 	dir := initTestRepo(t)
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
