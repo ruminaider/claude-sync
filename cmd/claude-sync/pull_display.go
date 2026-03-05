@@ -50,6 +50,7 @@ func printPullResult(result *commands.PullResult) {
 	}
 
 	// Warn about surfaces skipped due to local modifications.
+	skippedAny := result.SettingsSkipped || result.ClaudeMDSkipped || result.MCPSkipped || result.KeybindingsSkipped
 	if result.SettingsSkipped {
 		fmt.Fprintf(os.Stderr, "⚠ Settings skipped: settings.json has local modifications\n")
 	}
@@ -61,6 +62,9 @@ func printPullResult(result *commands.PullResult) {
 	}
 	if result.KeybindingsSkipped {
 		fmt.Fprintf(os.Stderr, "⚠ Keybindings skipped: keybindings.json has local modifications\n")
+	}
+	if skippedAny {
+		fmt.Fprintf(os.Stderr, "  To accept upstream: delete the file and re-run pull, or use --force\n")
 	}
 
 	if len(result.SkippedCategories) > 0 {

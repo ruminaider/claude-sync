@@ -1582,3 +1582,120 @@ func TestPull_AppliesWhenNoLocalModification(t *testing.T) {
 	assert.False(t, result2.SettingsSkipped)
 	assert.NotEmpty(t, result2.SettingsApplied)
 }
+
+func TestPull_SkipsLocallyModifiedMCP(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+mcp:
+  memory:
+    command: npx
+    args:
+      - "-y"
+      - "@anthropic/memory-server"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	// First pull — should apply MCP.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Contains(t, result.MCPApplied, "memory")
+	assert.False(t, result.MCPSkipped)
+
+	// Modify .mcp.json locally (simulate user adding a custom server).
+	mcpPath := filepath.Join(claudeDir, ".mcp.json")
+	require.NoError(t, os.WriteFile(mcpPath, []byte(`{"mcpServers":{"custom":{"command":"echo"}}}`), 0644))
+
+	// Second pull — should skip MCP due to local modification.
+	result2, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.True(t, result2.MCPSkipped)
+	assert.Empty(t, result2.MCPApplied)
+
+	// Verify local modification was preserved.
+	data, err := os.ReadFile(mcpPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "custom")
+}
+
+func TestPull_SkipsLocallyModifiedKeybindings(t *testing.T) {
+	claudeDir := t.TempDir()
+	require.NoError(t, claudecode.Bootstrap(claudeDir))
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+	require.NoError(t, os.MkdirAll(syncDir, 0755))
+
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream: []
+keybindings:
+  Ctrl+K: clear_screen
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644))
+	require.NoError(t, exec.Command("git", "init", syncDir).Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+
+	// First pull — should apply keybindings.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.True(t, result.KeybindingsApplied)
+	assert.False(t, result.KeybindingsSkipped)
+
+	// Modify keybindings.json locally.
+	kbPath := filepath.Join(claudeDir, "keybindings.json")
+	require.NoError(t, os.WriteFile(kbPath, []byte(`{"Ctrl+J": "my_custom_action"}`), 0644))
+
+	// Second pull — should skip keybindings due to local modification.
+	result2, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.True(t, result2.KeybindingsSkipped)
+	assert.False(t, result2.KeybindingsApplied)
+
+	// Verify local modification was preserved.
+	data, err := os.ReadFile(kbPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "my_custom_action")
+}
+
+func TestPull_ForceOverwritesLocallyModified(t *testing.T) {
+	claudeDir, syncDir := setupSettingsEnv(t)
+
+	// First pull — apply settings.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.SettingsApplied)
+
+	// Modify settings locally.
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	require.NoError(t, os.WriteFile(settingsPath, []byte(`{"model": "my-custom-model"}`), 0644))
+
+	// Pull with force — should overwrite local modification.
+	result2, err := commands.PullWithOptions(commands.PullOptions{
+		ClaudeDir: claudeDir,
+		SyncDir:   syncDir,
+		Quiet:     true,
+		Force:     true,
+	})
+	require.NoError(t, err)
+	assert.False(t, result2.SettingsSkipped)
+	assert.NotEmpty(t, result2.SettingsApplied)
+
+	// Verify upstream settings were applied (local modification overwritten).
+	data, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "my-custom-model")
+}
