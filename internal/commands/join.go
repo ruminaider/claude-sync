@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -95,7 +96,7 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	cfg, err := config.Parse(cfgData)
 	if err != nil {
-		return result, nil
+		return nil, fmt.Errorf("parsing config.yaml: %w", err)
 	}
 
 	// Expose config categories so the CLI can prompt about them.
@@ -114,7 +115,10 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 		sort.Strings(result.HookNames)
 	}
 
-	profileNames, _ := profiles.ListProfiles(syncDir)
+	profileNames, err := profiles.ListProfiles(syncDir)
+	if err != nil {
+		return nil, fmt.Errorf("listing profiles: %w", err)
+	}
 	if len(profileNames) > 0 {
 		result.HasProfiles = true
 		result.ProfileNames = profileNames
@@ -122,7 +126,10 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
-		return result, nil
+		if errors.Is(err, os.ErrNotExist) {
+			return result, nil // No plugins file yet (fresh install) — skip detection
+		}
+		return nil, fmt.Errorf("detecting local plugins: %w", err)
 	}
 
 	configKeys := make(map[string]bool)
@@ -145,7 +152,9 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 // JoinReplace removes the existing sync dir and performs a fresh join.
 func JoinReplace(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
-	os.RemoveAll(syncDir)
+	if err := os.RemoveAll(syncDir); err != nil {
+		return nil, fmt.Errorf("removing existing config: %w", err)
+	}
 	return Join(repoURL, claudeDir, syncDir)
 }
 

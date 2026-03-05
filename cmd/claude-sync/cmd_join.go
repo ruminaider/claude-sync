@@ -103,7 +103,7 @@ var configJoinCmd = &cobra.Command{
 		}
 		var missingCfgErr *commands.MissingConfigError
 		if errors.As(err, &missingCfgErr) {
-			fmt.Println("✓ Cloned config repo to ~/.claude-sync/")
+			fmt.Printf("✓ Cloned config repo to %s\n", syncDir)
 			fmt.Println()
 			fmt.Println("Config repo has no config.yaml yet.")
 			fmt.Println("Run 'claude-sync init' to initialize it with your current setup.")
@@ -113,7 +113,7 @@ var configJoinCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Println("✓ Cloned config repo to ~/.claude-sync/")
+		fmt.Printf("✓ Cloned config repo to %s\n", syncDir)
 
 		// Show what the config contains.
 		if result.HasSettings {

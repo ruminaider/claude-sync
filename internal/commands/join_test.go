@@ -2,6 +2,7 @@ package commands_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -308,18 +309,19 @@ func TestJoin_EmptyLocalInstallation(t *testing.T) {
 func TestJoin_MissingConfigYaml(t *testing.T) {
 	// Create a remote repo with NO config.yaml.
 	remote := t.TempDir()
-	exec.Command("git", "init", remote).Run()
-	exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "-C", remote, "config", "user.name", "Test").Run()
+	require.NoError(t, exec.Command("git", "init", remote).Run())
+	require.NoError(t, exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", remote, "config", "user.name", "Test").Run())
 	os.WriteFile(filepath.Join(remote, "README.md"), []byte("# readme\n"), 0644)
-	exec.Command("git", "-C", remote, "add", ".").Run()
-	exec.Command("git", "-C", remote, "commit", "-m", "init without config").Run()
+	require.NoError(t, exec.Command("git", "-C", remote, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", remote, "commit", "-m", "init without config").Run())
 
 	claudeDir := setupLocalClaude(t, []string{})
 	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
 
-	_, err := commands.Join(remote, claudeDir, syncDir)
+	result, err := commands.Join(remote, claudeDir, syncDir)
 	require.Error(t, err)
+	assert.Nil(t, result)
 
 	var missingErr *commands.MissingConfigError
 	assert.ErrorAs(t, err, &missingErr)
@@ -327,6 +329,47 @@ func TestJoin_MissingConfigYaml(t *testing.T) {
 	// Sync dir should still exist (clone succeeded).
 	_, statErr := os.Stat(syncDir)
 	assert.NoError(t, statErr)
+}
+
+func TestJoin_CorruptConfigYaml(t *testing.T) {
+	// Create a remote repo with invalid YAML as config.yaml.
+	remote := t.TempDir()
+	require.NoError(t, exec.Command("git", "init", remote).Run())
+	require.NoError(t, exec.Command("git", "-C", remote, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", remote, "config", "user.name", "Test").Run())
+	os.WriteFile(filepath.Join(remote, "config.yaml"), []byte("{{{{not valid yaml!!!!"), 0644)
+	require.NoError(t, exec.Command("git", "-C", remote, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", remote, "commit", "-m", "corrupt config").Run())
+
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	result, err := commands.Join(remote, claudeDir, syncDir)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "parsing config.yaml")
+
+	// Should NOT be a MissingConfigError.
+	var missingErr *commands.MissingConfigError
+	assert.False(t, errors.As(err, &missingErr))
+}
+
+func TestJoin_UnreadableInstalledPlugins(t *testing.T) {
+	// Create a valid remote repo.
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	claudeDir := setupLocalClaude(t, []string{})
+
+	// Replace installed_plugins.json with a directory to trigger a non-NotExist read error.
+	pluginsFile := filepath.Join(claudeDir, "plugins", "installed_plugins.json")
+	os.Remove(pluginsFile)
+	os.MkdirAll(pluginsFile, 0755)
+
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	result, err := commands.Join(remote, claudeDir, syncDir)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "detecting local plugins")
 }
 
 func TestJoinReplace(t *testing.T) {
