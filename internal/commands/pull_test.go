@@ -177,7 +177,7 @@ func TestApplySettings_Model(t *testing.T) {
 		Settings: map[string]any{"model": "claude-sonnet-4-5-20250929"},
 	}
 
-	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
+	applied, hooks, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"model"}, applied)
 	assert.Empty(t, hooks)
@@ -198,7 +198,7 @@ func TestApplySettings_HooksExpanded(t *testing.T) {
 		},
 	}
 
-	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
+	applied, hooks, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Empty(t, applied)
 	assert.Len(t, hooks, 2)
@@ -249,7 +249,7 @@ func TestApplySettings_ExcludedFieldsPreserved(t *testing.T) {
 		},
 	}
 
-	applied, _, err := commands.ApplySettings(claudeDir, cfg)
+	applied, _, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"model"}, applied)
 
@@ -281,7 +281,7 @@ func TestApplySettings_PreservesLocalSettings(t *testing.T) {
 		Hooks:    map[string]json.RawMessage{"PreCompact": config.ExpandHookCommand("bd prime")},
 	}
 
-	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
+	applied, hooks, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"model"}, applied)
 	assert.Equal(t, []string{"PreCompact"}, hooks)
@@ -303,7 +303,7 @@ func TestApplySettings_NoopWhenEmpty(t *testing.T) {
 
 	cfg := config.Config{} // no settings, no hooks
 
-	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
+	applied, hooks, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Nil(t, applied)
 	assert.Nil(t, hooks)
@@ -322,7 +322,7 @@ func TestApplySettings_CreatesSettingsIfMissing(t *testing.T) {
 		Hooks:    map[string]json.RawMessage{"SessionStart": config.ExpandHookCommand("bd prime")},
 	}
 
-	applied, hooks, err := commands.ApplySettings(claudeDir, cfg)
+	applied, hooks, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"model"}, applied)
 	assert.Equal(t, []string{"SessionStart"}, hooks)
@@ -427,7 +427,7 @@ func TestApplySettings_SyncedHookOverridesLocal(t *testing.T) {
 		Hooks: map[string]json.RawMessage{"PreCompact": config.ExpandHookCommand("new-command")},
 	}
 
-	_, hooks, err := commands.ApplySettings(claudeDir, cfg)
+	_, hooks, _, err := commands.ApplySettings(claudeDir, cfg)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"PreCompact"}, hooks)
 
@@ -442,6 +442,107 @@ func TestApplySettings_SyncedHookOverridesLocal(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(hooksMap["PreCompact"], &entries))
 	assert.Equal(t, "new-command", entries[0].Hooks[0].Command)
+}
+
+
+func TestApplySettings_SkipsMissingScriptHooks(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": config.ExpandHookCommand("bash /nonexistent/path/script.sh"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Empty(t, hooks)
+	assert.Len(t, skipped, 1)
+	assert.Contains(t, skipped[0], "script not found")
+	assert.Contains(t, skipped[0], "/nonexistent/path/script.sh")
+	settings := readSettingsJSON(t, claudeDir)
+	if hooksRaw, ok := settings["hooks"]; ok {
+		var hooksMap map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(hooksRaw, &hooksMap))
+		assert.NotContains(t, hooksMap, "SessionEnd")
+	}
+}
+
+func TestApplySettings_InlineCommandsPassValidation(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"PostToolUse":  config.ExpandHookCommand("claude-sync auto-commit --if-changed"),
+			"SessionEnd":   config.ExpandHookCommand("claude-sync push --auto --quiet"),
+			"SessionStart": config.ExpandHookCommand("claude-sync pull --auto"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Len(t, hooks, 3)
+	assert.Empty(t, skipped)
+}
+
+func TestApplySettings_ExistingScriptApplied(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	scriptDir := filepath.Join(claudeDir, "hooks")
+	require.NoError(t, os.MkdirAll(scriptDir, 0755))
+	scriptPath := filepath.Join(scriptDir, "test-hook.sh")
+	require.NoError(t, os.WriteFile(scriptPath, []byte("#!/bin/bash\necho ok"), 0755))
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": config.ExpandHookCommand("bash " + scriptPath),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SessionEnd"}, hooks)
+	assert.Empty(t, skipped)
+}
+
+func TestApplySettings_MixedValidAndInvalidHooks(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionStart": config.ExpandHookCommand("claude-sync pull --auto"),
+			"PreCompact":   config.ExpandHookCommand("bash /nonexistent/missing.sh"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SessionStart"}, hooks)
+	assert.Len(t, skipped, 1)
+	assert.Contains(t, skipped[0], "PreCompact")
+	settings := readSettingsJSON(t, claudeDir)
+	var hooksMap map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(settings["hooks"], &hooksMap))
+	assert.Contains(t, hooksMap, "SessionStart")
+	assert.NotContains(t, hooksMap, "PreCompact")
+}
+
+func TestApplySettings_TildePathMissingScript(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": config.ExpandHookCommand("bash ~/.claude/hooks/nonexistent.sh"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Empty(t, hooks)
+	assert.Len(t, skipped, 1)
+	assert.Contains(t, skipped[0], "~/.claude/hooks/nonexistent.sh")
+}
+
+func TestApplySettings_RelativePathNotValidated(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	cfg := config.Config{
+		Hooks: map[string]json.RawMessage{
+			"SessionEnd": config.ExpandHookCommand("bash script.sh"),
+		},
+	}
+	_, hooks, skipped, err := commands.ApplySettings(claudeDir, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SessionEnd"}, hooks)
+	assert.Empty(t, skipped)
 }
 
 // setupPullEnvWithProfile creates a sync dir with a config.yaml listing upstream plugins,
