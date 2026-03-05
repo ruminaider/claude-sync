@@ -113,6 +113,13 @@ func TestRemoteURL_NoRemote(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// mustExec runs a command and fails the test if it errors.
+func mustExec(t *testing.T, name string, args ...string) {
+	t.Helper()
+	out, err := exec.Command(name, args...).CombinedOutput()
+	require.NoError(t, err, "%s %v failed: %s", name, args, string(out))
+}
+
 func TestIsLocalPath(t *testing.T) {
 	tests := []struct {
 		input string
@@ -127,6 +134,10 @@ func TestIsLocalPath(t *testing.T) {
 		{"https://github.com/org/repo", false},
 		{"http://github.com/org/repo", false},
 		{"git@github.com:org/repo.git", false},
+		{"", true},                              // empty string is not a remote URL
+		{"file:///path/to/repo", false},          // file:// scheme is a git transport
+		{"deploy@host:repo.git", false},          // SCP-style with non-git username
+		{"/home/user@name/repo", true},           // @ in local path, no colon after host
 	}
 	for _, tt := range tests {
 		got := git.IsLocalPath(tt.input)
@@ -137,8 +148,8 @@ func TestIsLocalPath(t *testing.T) {
 func TestSetRemoteURL(t *testing.T) {
 	src := initTestRepo(t)
 	os.WriteFile(filepath.Join(src, "test.txt"), []byte("hello"), 0644)
-	exec.Command("git", "-C", src, "add", ".").Run()
-	exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+	mustExec(t, "git", "-C", src, "add", ".")
+	mustExec(t, "git", "-C", src, "commit", "-m", "initial")
 
 	dst := filepath.Join(t.TempDir(), "clone")
 	err := git.Clone(src, dst)
@@ -157,8 +168,8 @@ func TestResolveUpstreamURL(t *testing.T) {
 	// Create a repo with an origin remote.
 	src := initTestRepo(t)
 	os.WriteFile(filepath.Join(src, "test.txt"), []byte("hello"), 0644)
-	exec.Command("git", "-C", src, "add", ".").Run()
-	exec.Command("git", "-C", src, "commit", "-m", "initial").Run()
+	mustExec(t, "git", "-C", src, "add", ".")
+	mustExec(t, "git", "-C", src, "commit", "-m", "initial")
 
 	// Clone it so the clone has origin pointing to src.
 	clone := filepath.Join(t.TempDir(), "clone")

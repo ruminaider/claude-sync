@@ -326,16 +326,23 @@ func TestJoinReplace(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// mustExec runs a command and fails the test if it errors.
+func mustExec(t *testing.T, name string, args ...string) {
+	t.Helper()
+	out, err := exec.Command(name, args...).CombinedOutput()
+	require.NoError(t, err, "%s %v failed: %s", name, args, string(out))
+}
+
 func TestJoin_LocalPath_ResolvesUpstream(t *testing.T) {
-	// Create a "real upstream" repo simulating a GitHub remote.
+	// Create a bare repo to act as the true upstream (analogous to a GitHub remote).
 	upstream := t.TempDir()
-	exec.Command("git", "init", "--bare", upstream).Run()
+	mustExec(t, "git", "init", "--bare", "-b", "main", upstream)
 
 	// Create a local non-bare checkout that has upstream as its origin.
 	local := t.TempDir()
-	exec.Command("git", "clone", upstream, local).Run()
-	exec.Command("git", "-C", local, "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "-C", local, "config", "user.name", "Test").Run()
+	mustExec(t, "git", "clone", upstream, local)
+	mustExec(t, "git", "-C", local, "config", "user.email", "test@test.com")
+	mustExec(t, "git", "-C", local, "config", "user.name", "Test")
 
 	cfg := config.Config{
 		Version:  "1.0.0",
@@ -345,9 +352,9 @@ func TestJoin_LocalPath_ResolvesUpstream(t *testing.T) {
 	cfgData, err := config.MarshalV2(cfg)
 	require.NoError(t, err)
 	os.WriteFile(filepath.Join(local, "config.yaml"), cfgData, 0644)
-	exec.Command("git", "-C", local, "add", ".").Run()
-	exec.Command("git", "-C", local, "commit", "-m", "init").Run()
-	exec.Command("git", "-C", local, "push", "origin", "main").Run()
+	mustExec(t, "git", "-C", local, "add", ".")
+	mustExec(t, "git", "-C", local, "commit", "-m", "init")
+	mustExec(t, "git", "-C", local, "push", "origin", "main")
 
 	// Join from the local path.
 	claudeDir := setupLocalClaude(t, []string{})
@@ -366,9 +373,9 @@ func TestJoin_LocalPath_ResolvesUpstream(t *testing.T) {
 func TestJoin_LocalPath_NoUpstream_KeepsOriginal(t *testing.T) {
 	// Create a local repo with NO origin remote (standalone).
 	local := t.TempDir()
-	exec.Command("git", "init", local).Run()
-	exec.Command("git", "-C", local, "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "-C", local, "config", "user.name", "Test").Run()
+	mustExec(t, "git", "init", local)
+	mustExec(t, "git", "-C", local, "config", "user.email", "test@test.com")
+	mustExec(t, "git", "-C", local, "config", "user.name", "Test")
 
 	cfg := config.Config{
 		Version:  "1.0.0",
@@ -378,8 +385,8 @@ func TestJoin_LocalPath_NoUpstream_KeepsOriginal(t *testing.T) {
 	cfgData, err := config.MarshalV2(cfg)
 	require.NoError(t, err)
 	os.WriteFile(filepath.Join(local, "config.yaml"), cfgData, 0644)
-	exec.Command("git", "-C", local, "add", ".").Run()
-	exec.Command("git", "-C", local, "commit", "-m", "init").Run()
+	mustExec(t, "git", "-C", local, "add", ".")
+	mustExec(t, "git", "-C", local, "commit", "-m", "init")
 
 	// Join from the local path (which has no upstream).
 	claudeDir := setupLocalClaude(t, []string{})
