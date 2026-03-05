@@ -42,8 +42,9 @@ func SetupAutoSyncHooksDescription() string {
 	return `Auto-sync hooks will be registered in ~/.claude/settings.json:
 
   PostToolUse (Write|Edit) → claude-sync auto-commit --if-changed
-  SessionEnd               → claude-sync push --auto --quiet
-  SessionStart             → claude-sync pull --auto
+
+Session lifecycle hooks (SessionStart, SessionEnd, Stop) are handled by the
+claude-sync plugin and do not need settings.json entries.
 `
 }
 
@@ -76,18 +77,11 @@ func SetupAutoSyncHooks(claudeDir string) error {
 	}
 
 	// Define the hooks we want to register.
+	// Session lifecycle hooks (SessionStart, SessionEnd, Stop) are handled by the plugin.
 	wantedHooks := map[string]hookRule{
 		"PostToolUse": {
 			Matcher: "Write|Edit",
 			Hooks:   []hookAction{{Type: "command", Command: "claude-sync auto-commit --if-changed"}},
-		},
-		"SessionEnd": {
-			Matcher: "",
-			Hooks:   []hookAction{{Type: "command", Command: "claude-sync push --auto --quiet"}},
-		},
-		"SessionStart": {
-			Matcher: "",
-			Hooks:   []hookAction{{Type: "command", Command: "claude-sync pull --auto"}},
 		},
 	}
 
