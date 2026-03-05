@@ -75,11 +75,13 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 		return nil, fmt.Errorf("cloning config repo: %w", err)
 	}
 
-	// If we cloned from a local path, resolve through to the real upstream
-	// remote to avoid push failures against non-bare local checkouts.
+	// If we cloned from a local path, look up that repo's origin remote
+	// so we push to the real upstream instead of the non-bare local checkout.
 	if git.IsLocalPath(repoURL) {
 		if upstream, err := git.ResolveUpstreamURL(repoURL); err == nil && upstream != "" {
-			git.SetRemoteURL(syncDir, "origin", upstream)
+			if err := git.SetRemoteURL(syncDir, "origin", upstream); err != nil {
+				return nil, fmt.Errorf("rewriting remote to upstream URL %q: %w", upstream, err)
+			}
 		}
 	}
 

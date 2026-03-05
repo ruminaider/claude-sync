@@ -233,24 +233,38 @@ func HasUpstream(dir string) bool {
 	return err == nil
 }
 
-// SetRemoteURL changes the URL for an existing remote.
+// SetRemoteURL changes the URL for an existing remote. The named remote
+// must already exist; use RemoteAdd to create a new one.
 func SetRemoteURL(dir, name, url string) error {
 	_, err := Run(dir, "remote", "set-url", name, url)
 	return err
 }
 
 // IsLocalPath returns true if the given string looks like a local filesystem
-// path rather than a remote git URL.
+// path rather than a remote git URL. It checks scheme-based URLs (git://,
+// ssh://, https://, http://, file://) and SCP-style URLs (user@host:path).
 func IsLocalPath(s string) bool {
-	for _, prefix := range []string{"git://", "ssh://", "https://", "http://", "git@"} {
+	for _, prefix := range []string{"git://", "ssh://", "https://", "http://", "file://", "git@"} {
 		if strings.HasPrefix(s, prefix) {
 			return false
+		}
+	}
+	// Detect SCP-style URLs: user@host:path (e.g. deploy@host:repo.git).
+	// The git@ case is already handled by the prefix check above.
+	if atIdx := strings.Index(s, "@"); atIdx >= 0 {
+		rest := s[atIdx+1:]
+		if colonIdx := strings.Index(rest, ":"); colonIdx >= 0 {
+			if !strings.Contains(rest[:colonIdx], "/") {
+				return false
+			}
 		}
 	}
 	return true
 }
 
 // ResolveUpstreamURL returns the origin remote URL of a local git repository.
+// It performs a single-hop lookup only: if the returned URL is itself a local
+// path with its own origin, that chain is not followed.
 func ResolveUpstreamURL(localRepoPath string) (string, error) {
 	return RemoteURL(localRepoPath, "origin")
 }
