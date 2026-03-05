@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
@@ -323,6 +324,75 @@ func TestJoinReplace(t *testing.T) {
 	// Verify the sync dir now has the new repo's content.
 	_, err = os.Stat(filepath.Join(syncDir, "config.yaml"))
 	assert.NoError(t, err)
+}
+
+func TestJoin_LocalPath_ResolvesUpstream(t *testing.T) {
+	// Create a "real upstream" repo simulating a GitHub remote.
+	upstream := t.TempDir()
+	exec.Command("git", "init", "--bare", upstream).Run()
+
+	// Create a local non-bare checkout that has upstream as its origin.
+	local := t.TempDir()
+	exec.Command("git", "clone", upstream, local).Run()
+	exec.Command("git", "-C", local, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", local, "config", "user.name", "Test").Run()
+
+	cfg := config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"context7@claude-plugins-official"},
+		Pinned:   map[string]string{},
+	}
+	cfgData, err := config.MarshalV2(cfg)
+	require.NoError(t, err)
+	os.WriteFile(filepath.Join(local, "config.yaml"), cfgData, 0644)
+	exec.Command("git", "-C", local, "add", ".").Run()
+	exec.Command("git", "-C", local, "commit", "-m", "init").Run()
+	exec.Command("git", "-C", local, "push", "origin", "main").Run()
+
+	// Join from the local path.
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	_, err = commands.Join(local, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// The sync repo's origin should now point to the upstream bare repo,
+	// not the local non-bare checkout.
+	gotURL, err := exec.Command("git", "-C", syncDir, "remote", "get-url", "origin").Output()
+	require.NoError(t, err)
+	assert.Equal(t, upstream, strings.TrimSpace(string(gotURL)))
+}
+
+func TestJoin_LocalPath_NoUpstream_KeepsOriginal(t *testing.T) {
+	// Create a local repo with NO origin remote (standalone).
+	local := t.TempDir()
+	exec.Command("git", "init", local).Run()
+	exec.Command("git", "-C", local, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", local, "config", "user.name", "Test").Run()
+
+	cfg := config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"context7@claude-plugins-official"},
+		Pinned:   map[string]string{},
+	}
+	cfgData, err := config.MarshalV2(cfg)
+	require.NoError(t, err)
+	os.WriteFile(filepath.Join(local, "config.yaml"), cfgData, 0644)
+	exec.Command("git", "-C", local, "add", ".").Run()
+	exec.Command("git", "-C", local, "commit", "-m", "init").Run()
+
+	// Join from the local path (which has no upstream).
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	_, err = commands.Join(local, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// The sync repo's origin should still point to the local path
+	// since there was no upstream to resolve.
+	gotURL, err := exec.Command("git", "-C", syncDir, "remote", "get-url", "origin").Output()
+	require.NoError(t, err)
+	assert.Equal(t, local, strings.TrimSpace(string(gotURL)))
 }
 
 func TestNormalizeURL(t *testing.T) {

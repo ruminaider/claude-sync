@@ -75,6 +75,14 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 		return nil, fmt.Errorf("cloning config repo: %w", err)
 	}
 
+	// If we cloned from a local path, resolve through to the real upstream
+	// remote to avoid push failures against non-bare local checkouts.
+	if git.IsLocalPath(repoURL) {
+		if upstream, err := git.ResolveUpstreamURL(repoURL); err == nil && upstream != "" {
+			git.SetRemoteURL(syncDir, "origin", upstream)
+		}
+	}
+
 	// Detect local-only plugins: installed locally but not in the remote config.
 	result := &JoinResult{}
 

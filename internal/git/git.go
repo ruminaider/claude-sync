@@ -233,6 +233,28 @@ func HasUpstream(dir string) bool {
 	return err == nil
 }
 
+// SetRemoteURL changes the URL for an existing remote.
+func SetRemoteURL(dir, name, url string) error {
+	_, err := Run(dir, "remote", "set-url", name, url)
+	return err
+}
+
+// IsLocalPath returns true if the given string looks like a local filesystem
+// path rather than a remote git URL.
+func IsLocalPath(s string) bool {
+	for _, prefix := range []string{"git://", "ssh://", "https://", "http://", "git@"} {
+		if strings.HasPrefix(s, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+// ResolveUpstreamURL returns the origin remote URL of a local git repository.
+func ResolveUpstreamURL(localRepoPath string) (string, error) {
+	return RemoteURL(localRepoPath, "origin")
+}
+
 // ShallowClone clones a repository with depth 1 into dst.
 func ShallowClone(url, dst, ref string) error {
 	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, url, dst)
