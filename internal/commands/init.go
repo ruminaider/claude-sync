@@ -223,7 +223,7 @@ func Init(opts InitOptions) (*InitResult, error) {
 		return nil, err
 	}
 
-	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\nplugin-sources.yaml\n__pycache__/\n*.pyc\n"
+	gitignore := "user-preferences.yaml\n.last_fetch\nplugins/.claude-plugin/\nactive-profile\npending-changes.yaml\nplugin-sources.yaml\n.applied-hashes.json\n__pycache__/\n*.pyc\n"
 	if err := os.WriteFile(filepath.Join(syncDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return nil, fmt.Errorf("writing .gitignore: %w", err)
 	}
@@ -328,7 +328,7 @@ func Update(opts InitOptions) (*InitResult, error) {
 	os.WriteFile(filepath.Join(pluginsDir, ".gitkeep"), []byte{}, 0644)
 
 	// Ensure .gitignore has patterns added in later versions.
-	ensureGitignorePatterns(syncDir, []string{"__pycache__/", "*.pyc", "plugin-sources.yaml"})
+	ensureGitignorePatterns(syncDir, []string{"__pycache__/", "*.pyc", "plugin-sources.yaml", ".applied-hashes.json"})
 
 	if len(forkedNames) > 0 {
 		if err := forkedplugins.RegisterLocalMarketplace(opts.ClaudeDir, syncDir); err != nil {
