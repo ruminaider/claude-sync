@@ -23,6 +23,11 @@ func printPullResult(result *commands.PullResult) {
 	if len(result.HooksApplied) > 0 {
 		fmt.Printf("✓ Hooks applied: %s\n", strings.Join(result.HooksApplied, ", "))
 	}
+	if len(result.HooksSkipped) > 0 {
+		for _, w := range result.HooksSkipped {
+			fmt.Fprintf(os.Stderr, "  Warning: %s\n", w)
+		}
+	}
 	if result.PermissionsApplied {
 		fmt.Println("✓ Permissions applied")
 	}
@@ -67,7 +72,7 @@ func printPullResult(result *commands.PullResult) {
 	}
 
 	nothingChanged := len(result.ToInstall) == 0 && len(result.Updated) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
-		len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
+		len(result.HooksSkipped) == 0 && len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
 		len(result.MCPApplied) == 0 && len(result.MCPProjectApplied) == 0 && !result.KeybindingsApplied
 	if len(allFailed) > 0 {
 		fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")

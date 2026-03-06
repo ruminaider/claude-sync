@@ -33,6 +33,7 @@ type PullResult struct {
 	Failed                 []string
 	SettingsApplied        []string
 	HooksApplied           []string
+	HooksSkipped           []string // hooks skipped due to missing script files
 	SkippedCategories      []string
 	ActiveProfile          string // active profile applied (empty = base only)
 	PermissionsApplied     bool
@@ -336,7 +337,8 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			if skipHooks {
 				settingsCfg.Hooks = nil
 			}
-			applied, hookNames, applyErr := ApplySettings(claudeDir, settingsCfg)
+			applied, hookNames, skippedHooks, applyErr := ApplySettings(claudeDir, settingsCfg)
+			result.HooksSkipped = skippedHooks // always propagate skip info
 			if applyErr != nil {
 				if !quiet {
 					fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
@@ -689,9 +691,11 @@ func CleanupLegacyHooks(claudeDir string) error {
 
 // ApplySettings merges synced settings and hooks from config into settings.json.
 // It preserves existing local settings and excluded fields.
-func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, error) {
+// Returns (settingsApplied, hooksApplied, hooksSkipped, error).
+// Hooks referencing non-existent script files are skipped with warnings.
+func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, []string, error) {
 	if len(cfg.Settings) == 0 && len(cfg.Hooks) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	settings, err := claudecode.ReadSettings(claudeDir)
@@ -713,6 +717,7 @@ func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, err
 	}
 
 	var hooksApplied []string
+	var hooksSkipped []string
 	if len(cfg.Hooks) > 0 {
 		var existingHooks map[string]json.RawMessage
 		if hooksRaw, ok := settings["hooks"]; ok {
@@ -723,24 +728,115 @@ func ApplySettings(claudeDir string, cfg config.Config) ([]string, []string, err
 		}
 
 		for hookName, hookData := range cfg.Hooks {
+			missing, parseErr := findMissingHookScripts(hookData)
+			if parseErr != nil {
+				hooksSkipped = append(hooksSkipped, fmt.Sprintf("hook %q: %v", hookName, parseErr))
+				continue
+			}
+			if len(missing) > 0 {
+				for _, m := range missing {
+					hooksSkipped = append(hooksSkipped, fmt.Sprintf("hook %q: script not found: %s", hookName, m))
+				}
+				continue
+			}
 			existingHooks[hookName] = hookData
 			hooksApplied = append(hooksApplied, hookName)
 		}
 
 		hooksData, err := json.Marshal(existingHooks)
 		if err != nil {
-			return settingsApplied, nil, fmt.Errorf("marshaling hooks: %w", err)
+			return settingsApplied, nil, hooksSkipped, fmt.Errorf("marshaling hooks: %w", err)
 		}
 		settings["hooks"] = json.RawMessage(hooksData)
 	}
 
 	if err := claudecode.WriteSettings(claudeDir, settings); err != nil {
-		return nil, nil, fmt.Errorf("writing settings: %w", err)
+		return nil, nil, nil, fmt.Errorf("writing settings: %w", err)
 	}
 
 	sort.Strings(settingsApplied)
 	sort.Strings(hooksApplied)
-	return settingsApplied, hooksApplied, nil
+	sort.Strings(hooksSkipped)
+	return settingsApplied, hooksApplied, hooksSkipped, nil
+}
+
+// scriptInterpreters are command prefixes that indicate the next argument is a script file.
+var scriptInterpreters = map[string]bool{
+	"bash": true, "sh": true, "zsh": true,
+	"python": true, "python3": true,
+	"ruby": true, "perl": true, "node": true,
+}
+
+// hookEntry represents a single hook entry in the Claude hook JSON format.
+type hookEntry struct {
+	Hooks []struct {
+		Command string `json:"command"`
+	} `json:"hooks"`
+}
+
+// findMissingHookScripts inspects a hook's JSON data for commands that reference
+// external script files. Returns paths of scripts that don't exist on disk.
+// Returns an error if the hook JSON is malformed.
+func findMissingHookScripts(hookData json.RawMessage) ([]string, error) {
+	var entries []hookEntry
+	if err := json.Unmarshal(hookData, &entries); err != nil {
+		return nil, fmt.Errorf("malformed hook JSON: %w", err)
+	}
+	var missing []string
+	for _, entry := range entries {
+		for _, h := range entry.Hooks {
+			path := extractScriptPath(h.Command)
+			if path == "" {
+				continue
+			}
+			expanded := expandHome(path)
+			if _, err := os.Stat(expanded); err != nil {
+				if os.IsNotExist(err) {
+					missing = append(missing, path)
+				} else {
+					return nil, fmt.Errorf("checking script %s: %w", path, err)
+				}
+			}
+		}
+	}
+	return missing, nil
+}
+
+// extractScriptPath returns the script file path from a command string like
+// "bash ~/.claude/hooks/foo.sh" or "python3 /path/to/script.py".
+// Returns empty string if the command doesn't reference an external script.
+func extractScriptPath(command string) string {
+	parts := strings.Fields(command)
+	if len(parts) < 2 {
+		return ""
+	}
+	if !scriptInterpreters[parts[0]] {
+		return ""
+	}
+	// Skip flags (e.g. -e, -x) to find the first positional argument.
+	for _, arg := range parts[1:] {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		path := strings.Trim(arg, `"'`)
+		if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "~/") {
+			return path
+		}
+		return ""
+	}
+	return ""
+}
+
+// expandHome replaces a leading ~/ with the user's home directory.
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 // applyPermissions additively merges permissions into settings.json.
