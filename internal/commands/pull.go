@@ -58,7 +58,6 @@ type PullResult struct {
 	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
 	SettingsSkipped            bool     // settings.json had local modifications
 	ClaudeMDSkipped            bool     // CLAUDE.md had local modifications
-	MCPSkipped                 bool     // .mcp.json had local modifications
 	KeybindingsSkipped         bool     // keybindings.json had local modifications
 }
 
@@ -391,7 +390,9 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 					if asmErr == nil && assembled != "" {
 						if os.WriteFile(claudeMDPath, []byte(assembled), 0644) == nil {
 							result.ClaudeMDAssembled = true
-							appliedHashes.Set(HashKeyClaudeMD, assembled)
+							if data, err := os.ReadFile(claudeMDPath); err == nil {
+								appliedHashes.Set(HashKeyClaudeMD, string(data))
+							}
 						}
 					}
 				}
@@ -433,28 +434,19 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 						globalServers[name] = raw
 					}
 
-					// Write global servers.
+					// Write global servers (additive merge — no hash protection
+					// since users legitimately add their own servers to .mcp.json).
 					if len(globalServers) > 0 {
-						mcpPath := filepath.Join(claudeDir, ".mcp.json")
-						if !opts.Force && appliedHashes.IsLocallyModified(HashKeyMCP, mcpPath) {
-							result.MCPSkipped = true
-						} else {
-							existing, _ := claudecode.ReadMCPConfig(claudeDir)
-							for k, v := range globalServers {
-								existing[k] = v
+						existing, _ := claudecode.ReadMCPConfig(claudeDir)
+						for k, v := range globalServers {
+							existing[k] = v
+						}
+						if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
+							result.MCPApplied = make([]string, 0, len(globalServers))
+							for k := range globalServers {
+								result.MCPApplied = append(result.MCPApplied, k)
 							}
-							if claudecode.WriteMCPConfig(claudeDir, existing) == nil {
-								result.MCPApplied = make([]string, 0, len(globalServers))
-								for k := range globalServers {
-									result.MCPApplied = append(result.MCPApplied, k)
-								}
-								sort.Strings(result.MCPApplied)
-								if data, err := os.ReadFile(mcpPath); err == nil {
-									appliedHashes.Set(HashKeyMCP, string(data))
-								} else if !quiet {
-									fmt.Fprintf(os.Stderr, "Warning: could not read back %s for hash tracking: %v\n", mcpPath, err)
-								}
-							}
+							sort.Strings(result.MCPApplied)
 						}
 					}
 

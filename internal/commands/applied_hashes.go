@@ -10,10 +10,10 @@ import (
 )
 
 // Hash key constants for managed surfaces.
+// MCP is excluded: it uses additive merge, so user-added servers are safe.
 const (
 	HashKeySettings    = "settings"
 	HashKeyClaudeMD    = "claude-md"
-	HashKeyMCP         = "mcp"
 	HashKeyKeybindings = "keybindings"
 )
 

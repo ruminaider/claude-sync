@@ -50,15 +50,12 @@ func printPullResult(result *commands.PullResult) {
 	}
 
 	// Warn about surfaces skipped due to local modifications.
-	skippedAny := result.SettingsSkipped || result.ClaudeMDSkipped || result.MCPSkipped || result.KeybindingsSkipped
+	skippedAny := result.SettingsSkipped || result.ClaudeMDSkipped || result.KeybindingsSkipped
 	if result.SettingsSkipped {
 		fmt.Fprintf(os.Stderr, "⚠ Settings skipped: settings.json has local modifications\n")
 	}
 	if result.ClaudeMDSkipped {
 		fmt.Fprintf(os.Stderr, "⚠ CLAUDE.md skipped: file has local modifications\n")
-	}
-	if result.MCPSkipped {
-		fmt.Fprintf(os.Stderr, "⚠ MCP config skipped: .mcp.json has local modifications\n")
 	}
 	if result.KeybindingsSkipped {
 		fmt.Fprintf(os.Stderr, "⚠ Keybindings skipped: keybindings.json has local modifications\n")
@@ -92,7 +89,7 @@ func printPullResult(result *commands.PullResult) {
 	nothingChanged := len(result.ToInstall) == 0 && len(result.Updated) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
 		len(result.HooksSkipped) == 0 && len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
 		len(result.MCPApplied) == 0 && len(result.MCPProjectApplied) == 0 && !result.KeybindingsApplied &&
-		!result.SettingsSkipped && !result.ClaudeMDSkipped && !result.MCPSkipped && !result.KeybindingsSkipped
+		!result.SettingsSkipped && !result.ClaudeMDSkipped && !result.KeybindingsSkipped
 	if len(allFailed) > 0 {
 		fmt.Fprintf(os.Stderr, "\nSome plugins could not be installed. Check the errors above.\n")
 	} else if nothingChanged {
