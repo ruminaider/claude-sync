@@ -16,6 +16,7 @@ import (
 
 var quietFlag bool
 var autoFlag bool
+var forceFlag bool
 
 var pullCmd = &cobra.Command{
 	Use:   "pull",
@@ -34,6 +35,7 @@ var pullCmd = &cobra.Command{
 				SyncDir:    syncDir,
 				Quiet:      true,
 				Auto:       true,
+				Force:      forceFlag,
 				ProjectDir: projectDir,
 			})
 		} else {
@@ -44,6 +46,7 @@ var pullCmd = &cobra.Command{
 				ClaudeDir: claudeDir,
 				SyncDir:   syncDir,
 				Quiet:     quietFlag,
+				Force:     forceFlag,
 				DuplicateResolver: func(dupes []plugins.Duplicate) error {
 					for _, d := range dupes {
 						resolution, promptErr := promptDuplicateResolution(d, syncDir)
@@ -204,4 +207,5 @@ func promptProjectInit(claudeDir, syncDir, projectDir string, profileNames []str
 func init() {
 	pullCmd.Flags().BoolVarP(&quietFlag, "quiet", "q", false, "Suppress output")
 	pullCmd.Flags().BoolVar(&autoFlag, "auto", false, "Auto mode: apply safe changes, defer high-risk to pending")
+	pullCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Overwrite locally modified managed files")
 }

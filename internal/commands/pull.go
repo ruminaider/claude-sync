@@ -56,6 +56,9 @@ type PullResult struct {
 	ProjectInitDir             string   // suggested directory for project init (project root, not CWD)
 	AvailableProfiles          []string // profile names from sync dir (set when ProjectInitEligible)
 	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
+	SettingsSkipped            bool     // settings.json had local modifications
+	ClaudeMDSkipped            bool     // CLAUDE.md had local modifications
+	KeybindingsSkipped         bool     // keybindings.json had local modifications
 }
 
 // PullOptions configures pull behavior.
@@ -63,7 +66,8 @@ type PullOptions struct {
 	ClaudeDir string
 	SyncDir   string
 	Quiet     bool
-	Auto      bool // auto mode: safe changes auto-apply, high-risk deferred to pending
+	Auto      bool  // auto mode: safe changes auto-apply, high-risk deferred to pending
+	Force     bool  // bypass local-modification protection and overwrite managed files
 	// MCPTargetResolver resolves the destination path for project-scoped MCP servers.
 	// Called with (serverName, suggestedProjectPath) and returns the confirmed path
 	// (empty string means write to global instead). If nil, uses suggested paths as-is.
@@ -245,6 +249,11 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 		return nil, err
 	}
 
+	appliedHashes, hashLoadErr := LoadAppliedHashes(syncDir)
+	if hashLoadErr != nil && !quiet {
+		fmt.Fprintf(os.Stderr, "Warning: %v — local modification protection may not work correctly\n", hashLoadErr)
+	}
+
 	for _, plugin := range result.ToInstall {
 		if !quiet {
 			fmt.Printf("  Installing %s...\n", plugin)
@@ -333,19 +342,29 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			}
 
 			// Apply settings and hooks (hooks skipped in auto mode).
-			settingsCfg := cfg
-			if skipHooks {
-				settingsCfg.Hooks = nil
-			}
-			applied, hookNames, skippedHooks, applyErr := ApplySettings(claudeDir, settingsCfg)
-			result.HooksSkipped = skippedHooks // always propagate skip info
-			if applyErr != nil {
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
-				}
+			settingsPath := filepath.Join(claudeDir, "settings.json")
+			if !opts.Force && appliedHashes.IsLocallyModified(HashKeySettings, settingsPath) {
+				result.SettingsSkipped = true
 			} else {
-				result.SettingsApplied = applied
-				result.HooksApplied = hookNames
+				settingsCfg := cfg
+				if skipHooks {
+					settingsCfg.Hooks = nil
+				}
+				applied, hookNames, skippedHooks, applyErr := ApplySettings(claudeDir, settingsCfg)
+				result.HooksSkipped = skippedHooks // always propagate skip info
+				if applyErr != nil {
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "Warning: failed to apply settings: %v\n", applyErr)
+					}
+				} else {
+					result.SettingsApplied = applied
+					result.HooksApplied = hookNames
+					if data, err := os.ReadFile(settingsPath); err == nil {
+						appliedHashes.Set(HashKeySettings, string(data))
+					} else if !quiet {
+						fmt.Fprintf(os.Stderr, "Warning: could not read back %s for hash tracking: %v\n", settingsPath, err)
+					}
+				}
 			}
 
 			// Apply permissions (additive merge, skipped in auto mode).
@@ -363,11 +382,18 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				includes = profiles.MergeClaudeMD(includes, *activeProfile)
 			}
 			if len(includes) > 0 {
-				assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
-				if asmErr == nil && assembled != "" {
-					claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
-					if os.WriteFile(claudeMDPath, []byte(assembled), 0644) == nil {
-						result.ClaudeMDAssembled = true
+				claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+				if !opts.Force && appliedHashes.IsLocallyModified(HashKeyClaudeMD, claudeMDPath) {
+					result.ClaudeMDSkipped = true
+				} else {
+					assembled, asmErr := claudemd.AssembleFromDir(syncDir, includes)
+					if asmErr == nil && assembled != "" {
+						if os.WriteFile(claudeMDPath, []byte(assembled), 0644) == nil {
+							result.ClaudeMDAssembled = true
+							if data, err := os.ReadFile(claudeMDPath); err == nil {
+								appliedHashes.Set(HashKeyClaudeMD, string(data))
+							}
+						}
 					}
 				}
 			}
@@ -408,7 +434,8 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 						globalServers[name] = raw
 					}
 
-					// Write global servers.
+					// Write global servers (additive merge — no hash protection
+					// since users legitimately add their own servers to .mcp.json).
 					if len(globalServers) > 0 {
 						existing, _ := claudecode.ReadMCPConfig(claudeDir)
 						for k, v := range globalServers {
@@ -451,8 +478,18 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				kbConfig = profiles.MergeKeybindings(kbConfig, *activeProfile)
 			}
 			if len(kbConfig) > 0 {
-				if claudecode.WriteKeybindings(claudeDir, kbConfig) == nil {
-					result.KeybindingsApplied = true
+				kbPath := filepath.Join(claudeDir, "keybindings.json")
+				if !opts.Force && appliedHashes.IsLocallyModified(HashKeyKeybindings, kbPath) {
+					result.KeybindingsSkipped = true
+				} else {
+					if claudecode.WriteKeybindings(claudeDir, kbConfig) == nil {
+						result.KeybindingsApplied = true
+						if data, err := os.ReadFile(kbPath); err == nil {
+							appliedHashes.Set(HashKeyKeybindings, string(data))
+						} else if !quiet {
+							fmt.Fprintf(os.Stderr, "Warning: could not read back %s for hash tracking: %v\n", kbPath, err)
+						}
+					}
 				}
 			}
 
@@ -516,6 +553,13 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 					result.PendingHighRisk = classified.HighRisk
 				}
 			}
+		}
+	}
+
+	if err := appliedHashes.Save(); err != nil {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save applied hashes: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  Local modification protection may not work on the next pull.\n")
 		}
 	}
 
