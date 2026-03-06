@@ -38,3 +38,24 @@ func TestDispatchAction_UnknownAction(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown action")
 }
+
+func TestDispatchAction_PluginPin_NoArgs(t *testing.T) {
+	action := tui.MenuAction{ID: tui.ActionPluginPin, Type: tui.ActionCLI}
+	err := dispatchAction(nil, action)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a plugin key")
+}
+
+func TestDispatchAction_ProfileSet_EmptyArgs(t *testing.T) {
+	action := tui.MenuAction{ID: tui.ActionProfileSet, Type: tui.ActionCLI}
+	err := dispatchAction(nil, action)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a profile name")
+}
+
+func TestDispatchAction_ProjectRemove_NoArgs(t *testing.T) {
+	action := tui.MenuAction{ID: tui.ActionProjectRemove, Type: tui.ActionCLI}
+	err := dispatchAction(nil, action)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a project path")
+}

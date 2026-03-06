@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/ruminaider/claude-sync/internal/commands"
+import (
+	"path/filepath"
+
+	"github.com/ruminaider/claude-sync/internal/commands"
+)
 
 // BuildMenuItems returns the menu item tree based on the detected state.
 func BuildMenuItems(state commands.MenuState) []menuItem {
@@ -26,13 +30,19 @@ func buildFreshInstallMenu() []menuItem {
 }
 
 func buildConfiguredMenu(state commands.MenuState) []menuItem {
-	return []menuItem{
+	items := []menuItem{
 		buildSyncCategory(),
 		buildConfigCategory(),
-		buildPluginsCategory(),
-		buildProfilesCategory(state),
-		buildAdvancedCategory(state),
+		buildPluginsCategory(state),
 	}
+
+	if profiles := buildProfilesCategory(state); profiles != nil {
+		items = append(items, *profiles)
+	}
+
+	items = append(items, buildProjectsCategory(state))
+	items = append(items, buildAdvancedCategory(state))
+	return items
 }
 
 func buildSyncCategory() menuItem {
@@ -56,23 +66,124 @@ func buildConfigCategory() menuItem {
 	}
 }
 
-func buildPluginsCategory() menuItem {
+func buildPluginsCategory(state commands.MenuState) menuItem {
+	var children []menuItem
+
+	for _, p := range state.Plugins {
+		children = append(children, buildPluginItem(p))
+	}
+
+	// Subscribe + List subscriptions always at bottom
+	children = append(children,
+		menuItem{label: "Subscribe", desc: "follow another config", action: MenuAction{ID: ActionSubscribe, Type: ActionTUI}},
+		menuItem{label: "List subscriptions", action: MenuAction{ID: ActionSubscriptions, Type: ActionCLI}},
+	)
+
 	return menuItem{
-		label: "Plugins",
-		children: []menuItem{
-			{label: "Subscribe", desc: "follow another config", action: MenuAction{ID: ActionSubscribe, Type: ActionTUI}},
-			{label: "List subscriptions", action: MenuAction{ID: ActionSubscriptions, Type: ActionCLI}},
-		},
+		label:    "Plugins",
+		children: children,
 	}
 }
 
-func buildProfilesCategory(state commands.MenuState) menuItem {
+func buildPluginItem(p commands.PluginInfo) menuItem {
+	var desc string
+	var actions []menuItem
+
+	switch p.Status {
+	case "upstream":
+		actions = []menuItem{
+			{label: "Pin to version", action: MenuAction{ID: ActionPluginPin, Type: ActionCLI, Args: []string{p.Key}}},
+			{label: "Fork for local edit", action: MenuAction{ID: ActionPluginFork, Type: ActionCLI, Args: []string{p.Key}}},
+			{label: "Update", action: MenuAction{ID: ActionPluginUpdate, Type: ActionCLI, Args: []string{p.Key}}},
+		}
+	case "pinned":
+		desc = "[pinned v" + p.PinVersion + "]"
+		actions = []menuItem{
+			{label: "Unpin", action: MenuAction{ID: ActionPluginUnpin, Type: ActionCLI, Args: []string{p.Key}}},
+			{label: "Update", action: MenuAction{ID: ActionPluginUpdate, Type: ActionCLI, Args: []string{p.Key}}},
+		}
+	case "forked":
+		desc = "[forked]"
+		actions = []menuItem{
+			{label: "Unfork", action: MenuAction{ID: ActionPluginUnfork, Type: ActionCLI, Args: []string{p.Key}}},
+		}
+	}
+
 	return menuItem{
-		label: "Profiles",
-		children: []menuItem{
-			{label: "List profiles", action: MenuAction{ID: ActionProfileList, Type: ActionCLI}},
-			{label: "Show active profile", action: MenuAction{ID: ActionProfileShow, Type: ActionCLI}},
-		},
+		label:    p.Name,
+		desc:     desc,
+		children: actions,
+	}
+}
+
+func buildProfilesCategory(state commands.MenuState) *menuItem {
+	if len(state.Profiles) == 0 {
+		return nil
+	}
+
+	var children []menuItem
+
+	// "base" always first — selecting it deactivates the current profile
+	children = append(children, menuItem{
+		label:  "base",
+		desc:   descForProfile("", state.ActiveProfile),
+		action: MenuAction{ID: ActionProfileSet, Type: ActionCLI, Args: []string{""}},
+	})
+
+	// Each profile
+	for _, name := range state.Profiles {
+		children = append(children, menuItem{
+			label:  name,
+			desc:   descForProfile(name, state.ActiveProfile),
+			action: MenuAction{ID: ActionProfileSet, Type: ActionCLI, Args: []string{name}},
+		})
+	}
+
+	// Show active profile at bottom
+	children = append(children, menuItem{
+		label:  "Show active profile",
+		action: MenuAction{ID: ActionProfileShow, Type: ActionCLI},
+	})
+
+	return &menuItem{
+		label:    "Profiles",
+		children: children,
+	}
+}
+
+func descForProfile(name, active string) string {
+	if name == active {
+		return "(active)"
+	}
+	return ""
+}
+
+func buildProjectsCategory(state commands.MenuState) menuItem {
+	var children []menuItem
+
+	for _, p := range state.Projects {
+		tag := "[base]"
+		if p.Profile != "" {
+			tag = "[" + p.Profile + "]"
+		}
+		name := filepath.Base(p.Path)
+		children = append(children, menuItem{
+			label: name,
+			desc:  tag,
+			children: []menuItem{
+				{label: "Remove project", action: MenuAction{ID: ActionProjectRemove, Type: ActionCLI, Args: []string{p.Path}}},
+			},
+		})
+	}
+
+	children = append(children, menuItem{
+		label:  "+ Initialize new project",
+		action: MenuAction{ID: ActionProjectInit, Type: ActionTUI},
+	})
+
+	return menuItem{
+		label:    "Projects",
+		children: children,
 	}
 }
 
@@ -88,7 +199,6 @@ func buildAdvancedCategory(state commands.MenuState) menuItem {
 
 	children = append(children,
 		menuItem{label: "Import MCP servers", action: MenuAction{ID: ActionMCPImport, Type: ActionCLI}},
-		menuItem{label: "Manage projects", action: MenuAction{ID: ActionProjects, Type: ActionCLI}},
 	)
 
 	if state.HasConflicts {

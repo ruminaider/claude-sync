@@ -86,8 +86,6 @@ func dispatchAction(cmd *cobra.Command, action tui.MenuAction) error {
 		return subscriptionsCmd.RunE(subscriptionsCmd, nil)
 
 	// Profiles
-	case tui.ActionProfileList:
-		return profileListCmd.RunE(profileListCmd, nil)
 	case tui.ActionProfileShow:
 		return profileShowCmd.RunE(profileShowCmd, nil)
 
@@ -98,10 +96,68 @@ func dispatchAction(cmd *cobra.Command, action tui.MenuAction) error {
 		return rejectCmd.RunE(rejectCmd, nil)
 	case tui.ActionMCPImport:
 		return mcpImportCmd.RunE(mcpImportCmd, nil)
-	case tui.ActionProjects:
-		return projectCmd.Help()
 	case tui.ActionConflicts:
 		return conflictsCmd.RunE(conflictsCmd, nil)
+
+	// Phase 2: Plugin management
+	case tui.ActionPluginPin:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-pin requires a plugin key")
+		}
+		fmt.Print("Pin version (default: latest): ")
+		var version string
+		fmt.Scanln(&version)
+		if version == "" {
+			version = "latest"
+		}
+		return pinCmd.RunE(pinCmd, []string{action.Args[0], version})
+
+	case tui.ActionPluginUnpin:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-unpin requires a plugin key")
+		}
+		return unpinCmd.RunE(unpinCmd, []string{action.Args[0]})
+
+	case tui.ActionPluginFork:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-fork requires a plugin key")
+		}
+		return forkCmd.RunE(forkCmd, []string{action.Args[0]})
+
+	case tui.ActionPluginUnfork:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-unfork requires a plugin key")
+		}
+		return unforkCmd.RunE(unforkCmd, []string{action.Args[0]})
+
+	case tui.ActionPluginUpdate:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("plugin-update requires a plugin key")
+		}
+		return updateCmd.RunE(updateCmd, []string{action.Args[0]})
+
+	// Phase 2: Profile activation
+	case tui.ActionProfileSet:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("profile-set requires a profile name argument")
+		}
+		name := action.Args[0]
+		if name == "" {
+			profileSetNone = true
+			defer func() { profileSetNone = false }()
+			return profileSetCmd.RunE(profileSetCmd, nil)
+		}
+		return profileSetCmd.RunE(profileSetCmd, []string{name})
+
+	// Phase 2: Project management
+	case tui.ActionProjectInit:
+		return projectInitCmd.RunE(projectInitCmd, nil)
+
+	case tui.ActionProjectRemove:
+		if len(action.Args) == 0 {
+			return fmt.Errorf("project-remove requires a project path")
+		}
+		return projectRemoveCmd.RunE(projectRemoveCmd, []string{action.Args[0]})
 
 	default:
 		return fmt.Errorf("unknown action: %s", action.ID)

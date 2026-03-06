@@ -106,15 +106,7 @@ var projectListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all initialized projects",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Scan common parent directories
-		home, _ := os.UserHomeDir()
-		parentDirs := []string{
-			filepath.Join(home, "Work"),
-			filepath.Join(home, "Projects"),
-			filepath.Join(home, "Repositories"),
-			filepath.Join(home, "repos"),
-			filepath.Join(home, "src"),
-		}
+		parentDirs := commands.DefaultProjectSearchDirs()
 
 		results, err := commands.ProjectListScan(parentDirs)
 		if err != nil {
