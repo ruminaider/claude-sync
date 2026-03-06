@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,13 @@ import (
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 )
+
+// MissingConfigError is returned when the cloned repo has no config.yaml.
+type MissingConfigError struct{}
+
+func (e *MissingConfigError) Error() string {
+	return "config repo has no config.yaml"
+}
 
 // AlreadyJoinedError is returned when the user joins a URL that matches the existing origin.
 type AlreadyJoinedError struct {
@@ -90,12 +98,15 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err != nil {
-		return result, nil
+		if os.IsNotExist(err) {
+			return nil, &MissingConfigError{}
+		}
+		return nil, fmt.Errorf("reading config.yaml: %w", err)
 	}
 
 	cfg, err := config.Parse(cfgData)
 	if err != nil {
-		return result, nil
+		return nil, fmt.Errorf("parsing config.yaml: %w", err)
 	}
 
 	// Expose config categories so the CLI can prompt about them.
@@ -114,7 +125,10 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 		sort.Strings(result.HookNames)
 	}
 
-	profileNames, _ := profiles.ListProfiles(syncDir)
+	profileNames, err := profiles.ListProfiles(syncDir)
+	if err != nil {
+		return nil, fmt.Errorf("listing profiles: %w", err)
+	}
 	if len(profileNames) > 0 {
 		result.HasProfiles = true
 		result.ProfileNames = profileNames
@@ -122,7 +136,10 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
-		return result, nil
+		if errors.Is(err, os.ErrNotExist) {
+			return result, nil // No plugins file yet (fresh install) — skip detection
+		}
+		return nil, fmt.Errorf("detecting local plugins: %w", err)
 	}
 
 	configKeys := make(map[string]bool)
@@ -145,7 +162,9 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 // JoinReplace removes the existing sync dir and performs a fresh join.
 func JoinReplace(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
-	os.RemoveAll(syncDir)
+	if err := os.RemoveAll(syncDir); err != nil {
+		return nil, fmt.Errorf("removing existing config: %w", err)
+	}
 	return Join(repoURL, claudeDir, syncDir)
 }
 
