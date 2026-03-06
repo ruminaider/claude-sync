@@ -673,7 +673,11 @@ func findMissingHookScripts(hookData json.RawMessage) ([]string, error) {
 			}
 			expanded := expandHome(path)
 			if _, err := os.Stat(expanded); err != nil {
-				missing = append(missing, path)
+				if os.IsNotExist(err) {
+					missing = append(missing, path)
+				} else {
+					return nil, fmt.Errorf("checking script %s: %w", path, err)
+				}
 			}
 		}
 	}
