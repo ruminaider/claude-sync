@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ruminaider/claude-sync/internal/bundled"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/cmdskill"
@@ -346,6 +347,13 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 	claudeDir := opts.ClaudeDir
 	syncDir := opts.SyncDir
 
+	// Extract the bundled claude-sync plugin so every config includes
+	// the claude-sync skill, hooks, and commands out of the box.
+	bundledPluginDir := filepath.Join(syncDir, "plugins", bundled.PluginName)
+	if err := bundled.ExtractPlugin(bundledPluginDir); err != nil {
+		return nil, nil, fmt.Errorf("extracting bundled plugin: %w", err)
+	}
+
 	plugins, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading plugins: %w", err)
@@ -421,6 +429,18 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 			forkedNames = append(forkedNames, name)
 			result.AutoForked = append(result.AutoForked, key)
 		}
+	}
+
+	// Always include the bundled claude-sync plugin as forked.
+	hasBundled := false
+	for _, name := range forkedNames {
+		if name == bundled.PluginName {
+			hasBundled = true
+			break
+		}
+	}
+	if !hasBundled {
+		forkedNames = append(forkedNames, bundled.PluginName)
 	}
 
 	// Scan settings and hooks from Claude Code.
