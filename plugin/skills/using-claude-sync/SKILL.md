@@ -41,6 +41,17 @@ Three categories with different behaviors:
 
 This is the workflow agents get wrong most often.
 
+### Before forking: check status first
+
+Always run `claude-sync status` before `claude-sync fork`. If the plugin already shows as `@claude-sync-forks`, it's already forked — edit it directly in `~/.claude-sync/plugins/<name>/` without running fork again.
+
+```bash
+# Check if already forked
+claude-sync status
+# If output shows: ✓ plugin-name@claude-sync-forks → already forked, just edit
+# If output shows: ✓ plugin-name@some-marketplace → needs forking first
+```
+
 ### To modify a plugin:
 
 ```bash
@@ -110,4 +121,5 @@ Push auto-detects and replaces secrets with `${VAR}` references. Pull expands th
 | Running push without checking status | Run `claude-sync status` first |
 | Pushing with dirty working tree | Commit or stash in `~/.claude-sync/` first |
 | Forgetting to push after forking | `claude-sync fork` + edit + `claude-sync push` |
+| Running `fork` on already-forked plugin | Check `claude-sync status` first — if `@claude-sync-forks`, edit directly |
 | Editing commands during active sync | Pull may overwrite; edits are hash-protected but time your changes between syncs |

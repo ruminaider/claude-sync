@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ruminaider/claude-sync/internal/bundled"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
@@ -91,6 +92,13 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 				return nil, fmt.Errorf("rewriting remote to upstream URL %q: %w", upstream, err)
 			}
 		}
+	}
+
+	// Ensure the bundled claude-sync plugin exists in the config repo.
+	// This covers configs created before auto-install was added.
+	bundledPluginDir := filepath.Join(syncDir, "plugins", bundled.PluginName)
+	if err := bundled.ExtractPlugin(bundledPluginDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not extract bundled plugin: %v\n", err)
 	}
 
 	// Detect local-only plugins: installed locally but not in the remote config.
