@@ -119,7 +119,7 @@ func (m AppModel) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) viewDashboard() string {
-	return "Dashboard (press enter for actions, q to quit)"
+	return renderDashboard(m.state, m.width, m.height, m.version)
 }
 
 // --- Actions view ---

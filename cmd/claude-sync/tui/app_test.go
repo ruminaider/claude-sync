@@ -180,12 +180,14 @@ func TestAppModel_SetVersion(t *testing.T) {
 	assert.Equal(t, "1.2.3", m.version)
 }
 
-func TestAppModel_ViewDashboard_ShowsPlaceholder(t *testing.T) {
+func TestAppModel_ViewDashboard_ShowsDashboard(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
 
 	view := m.View()
-	assert.Contains(t, view, "Dashboard")
+	assert.Contains(t, view, "claude-sync")
+	assert.Contains(t, view, "enter")
+	assert.Contains(t, view, "quit")
 }
 
 func TestAppModel_ViewActions_ShowsPlaceholder(t *testing.T) {
