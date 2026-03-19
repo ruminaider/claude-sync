@@ -72,15 +72,15 @@ func renderUserConfigSection(state commands.MenuState) string {
 
 	// Active profile
 	if state.ActiveProfile != "" {
-		lines = append(lines, textStyle.Render("Active profile: ")+
+		lines = append(lines, textStyle.Render("Settings profile: ")+
 			greenStyle.Render("● ")+textStyle.Render(state.ActiveProfile))
 	} else if len(state.Profiles) > 0 {
-		lines = append(lines, textStyle.Render("Active profile: ")+
-			dimStyle.Render("none")+
-			dimStyle.Render(fmt.Sprintf("  (%d available)", len(state.Profiles))))
+		lines = append(lines, textStyle.Render("Settings profile: ")+
+			dimStyle.Render("base (default)")+
+			dimStyle.Render(fmt.Sprintf("  %d other profiles available", len(state.Profiles))))
 	} else {
-		lines = append(lines, textStyle.Render("Active profile: ")+
-			dimStyle.Render("none"))
+		lines = append(lines, textStyle.Render("Settings profile: ")+
+			dimStyle.Render("base (default)"))
 	}
 
 	// Plugin + settings summary

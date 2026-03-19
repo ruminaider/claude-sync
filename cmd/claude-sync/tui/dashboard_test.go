@@ -133,8 +133,8 @@ func TestRenderDashboard_WithConfigRepo(t *testing.T) {
 func TestRenderDashboard_NoProfilesShowsNone(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, Profiles: nil}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	// No separate profiles section, but User Config shows "none"
-	assert.Contains(t, view, "none")
+	// No separate profiles section, User Config shows "base (default)"
+	assert.Contains(t, view, "base (default)")
 }
 
 func TestRenderDashboard_PluginUpstreamShowsMarketplace(t *testing.T) {
@@ -202,7 +202,7 @@ func TestRenderDashboard_ProfileCountInUserConfig(t *testing.T) {
 	}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	// Profile count shown in User Config section
-	assert.Contains(t, view, "3 available")
+	assert.Contains(t, view, "3 other profiles available")
 }
 
 func TestRenderDashboard_ActiveProfileInUserConfig(t *testing.T) {
