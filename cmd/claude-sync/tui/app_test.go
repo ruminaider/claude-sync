@@ -1,0 +1,202 @@
+package tui
+
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Test helpers — separate from menu_test.go helpers to avoid conflicts
+// when menu_test.go is eventually deleted.
+func appSendKey(m tea.Model, key string) tea.Model {
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+	return updated
+}
+
+func appSendSpecialKey(m tea.Model, key tea.KeyType) tea.Model {
+	updated, _ := m.Update(tea.KeyMsg{Type: key})
+	return updated
+}
+
+func TestAppModel_InitialState_IsDashboard(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	assert.Equal(t, viewDashboard, m.activeView)
+	assert.False(t, m.quitting)
+	assert.Equal(t, 0, m.dashboardScroll)
+	assert.Equal(t, 0, m.actionCursor)
+	assert.Equal(t, "", m.version)
+}
+
+func TestAppModel_EnterFromDashboard_GoesToActions(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	model = appSendSpecialKey(model, tea.KeyEnter)
+	app := model.(AppModel)
+
+	assert.Equal(t, viewActions, app.activeView)
+}
+
+func TestAppModel_EscFromActions_GoesToDashboard(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	// Go to actions first
+	model = appSendSpecialKey(model, tea.KeyEnter)
+	app := model.(AppModel)
+	assert.Equal(t, viewActions, app.activeView)
+
+	// Esc back to dashboard
+	model = appSendSpecialKey(model, tea.KeyEscape)
+	app = model.(AppModel)
+	assert.Equal(t, viewDashboard, app.activeView)
+}
+
+func TestAppModel_QuitFromDashboard(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	app := model.(AppModel)
+
+	assert.True(t, app.quitting)
+	require.NotNil(t, cmd)
+}
+
+func TestAppModel_QuitFromActions(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	// Go to actions first
+	model = appSendSpecialKey(model, tea.KeyEnter)
+
+	// Quit with q
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	app := model.(AppModel)
+
+	assert.True(t, app.quitting)
+	require.NotNil(t, cmd)
+}
+
+func TestAppModel_CtrlC_Quits(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	app := model.(AppModel)
+
+	assert.True(t, app.quitting)
+	require.NotNil(t, cmd)
+}
+
+func TestAppModel_WindowResize(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	app := model.(AppModel)
+
+	assert.Equal(t, 120, app.width)
+	assert.Equal(t, 40, app.height)
+}
+
+func TestAppModel_DashboardScroll(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+
+	// Scroll down with j
+	model = appSendKey(model, "j")
+	app := model.(AppModel)
+	assert.Equal(t, 1, app.dashboardScroll)
+
+	// Scroll down again
+	model = appSendKey(model, "j")
+	app = model.(AppModel)
+	assert.Equal(t, 2, app.dashboardScroll)
+
+	// Scroll up with k
+	model = appSendKey(model, "k")
+	app = model.(AppModel)
+	assert.Equal(t, 1, app.dashboardScroll)
+
+	// Scroll up past zero should stay at zero
+	model = appSendKey(model, "k")
+	model = appSendKey(model, "k")
+	app = model.(AppModel)
+	assert.Equal(t, 0, app.dashboardScroll)
+}
+
+func TestAppModel_ActionCursor(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+
+	// Go to actions view first
+	model = appSendSpecialKey(model, tea.KeyEnter)
+	app := model.(AppModel)
+	assert.Equal(t, viewActions, app.activeView)
+
+	// Move cursor down with j
+	model = appSendKey(model, "j")
+	app = model.(AppModel)
+	assert.Equal(t, 1, app.actionCursor)
+
+	// Move cursor down again
+	model = appSendKey(model, "j")
+	app = model.(AppModel)
+	assert.Equal(t, 2, app.actionCursor)
+
+	// Move cursor up with k
+	model = appSendKey(model, "k")
+	app = model.(AppModel)
+	assert.Equal(t, 1, app.actionCursor)
+
+	// Move up past zero should stay at zero
+	model = appSendKey(model, "k")
+	model = appSendKey(model, "k")
+	app = model.(AppModel)
+	assert.Equal(t, 0, app.actionCursor)
+}
+
+func TestAppModel_SetVersion(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	m.SetVersion("1.2.3")
+	assert.Equal(t, "1.2.3", m.version)
+}
+
+func TestAppModel_ViewDashboard_ShowsPlaceholder(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	view := m.View()
+	assert.Contains(t, view, "Dashboard")
+}
+
+func TestAppModel_ViewActions_ShowsPlaceholder(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	// Transition to actions
+	var model tea.Model = m
+	model = appSendSpecialKey(model, tea.KeyEnter)
+	app := model.(AppModel)
+
+	view := app.View()
+	assert.Contains(t, view, "Actions")
+}
