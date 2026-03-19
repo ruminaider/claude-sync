@@ -26,6 +26,7 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 	var sections []string
 
 	sections = append(sections, renderHeader(state, version))
+	sections = append(sections, renderUserConfigSection(state))
 	sections = append(sections, renderProjectSection(state))
 	sections = append(sections, renderSyncSection(state))
 	sections = append(sections, renderPluginsSection(state))
@@ -43,25 +44,49 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 	return boxStyle.Render(content)
 }
 
-// renderHeader renders the title and user-level config status.
+// renderHeader renders just the title line.
 func renderHeader(state commands.MenuState, version string) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	return titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
+}
+
+// renderUserConfigSection renders the user-level configuration status.
+func renderUserConfigSection(state commands.MenuState) string {
+	header := sectionHeader("User Config")
+	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-
-	title := titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
+	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 
 	var lines []string
-	lines = append(lines, title)
+	lines = append(lines, header)
 
-	// User-level config status
+	// Config repo
 	if state.ConfigRepo != "" {
-		lines = append(lines, textStyle.Render("Config: ")+dimStyle.Render(state.ConfigRepo)+
+		lines = append(lines, textStyle.Render("Config repo: ")+dimStyle.Render(state.ConfigRepo)+
 			"  "+greenStyle.Render("✓ connected"))
 	} else {
-		lines = append(lines, textStyle.Render("Config: ")+dimStyle.Render("not configured"))
+		lines = append(lines, textStyle.Render("Config repo: ")+
+			yellowStyle.Render("not configured"))
 	}
+
+	// Active profile
+	if state.ActiveProfile != "" {
+		lines = append(lines, textStyle.Render("Active profile: ")+
+			greenStyle.Render("● ")+textStyle.Render(state.ActiveProfile))
+	} else if len(state.Profiles) > 0 {
+		lines = append(lines, textStyle.Render("Active profile: ")+
+			dimStyle.Render("none")+
+			dimStyle.Render(fmt.Sprintf("  (%d available)", len(state.Profiles))))
+	} else {
+		lines = append(lines, textStyle.Render("Active profile: ")+
+			dimStyle.Render("none"))
+	}
+
+	// Plugin + settings summary
+	lines = append(lines, textStyle.Render("Plugins: ")+
+		dimStyle.Render(fmt.Sprintf("%d installed", len(state.Plugins))))
 
 	return strings.Join(lines, "\n")
 }
