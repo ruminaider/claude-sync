@@ -36,7 +36,7 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
+		BorderForeground(colorSurface0).
 		Padding(1, 2).
 		Width(maxWidth)
 
@@ -45,56 +45,59 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 
 // renderHeader renders just the title line.
 func renderHeader(state commands.MenuState, version string) string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 	return titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
 }
 
 // renderUserConfigSection renders the user-level configuration status.
 func renderUserConfigSection(state commands.MenuState) string {
 	header := sectionHeader("User Config")
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
+	labelStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	valueStyle := lipgloss.NewStyle().Foreground(colorText)
+	tealStyle := lipgloss.NewStyle().Foreground(colorTeal)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
+	peachStyle := lipgloss.NewStyle().Foreground(colorPeach)
 
 	var lines []string
 	lines = append(lines, header)
 
 	// Config repo
 	if state.ConfigRepo != "" {
-		lines = append(lines, textStyle.Render("Config repo: ")+dimStyle.Render(state.ConfigRepo)+
-			"  "+greenStyle.Render("✓ connected"))
+		lines = append(lines, labelStyle.Render("Config repo  ")+
+			valueStyle.Render(state.ConfigRepo)+"  "+tealStyle.Render("✓ connected"))
 	} else {
-		lines = append(lines, textStyle.Render("Config repo: ")+
+		lines = append(lines, labelStyle.Render("Config repo  ")+
 			yellowStyle.Render("not configured"))
 	}
 
 	// Active profile
 	if state.ActiveProfile != "" {
-		lines = append(lines, textStyle.Render("Settings profile: ")+
-			greenStyle.Render("● ")+textStyle.Render(state.ActiveProfile))
+		lines = append(lines, labelStyle.Render("Profile      ")+
+			greenStyle.Render("● ")+valueStyle.Render(state.ActiveProfile))
 	} else if len(state.Profiles) > 0 {
-		lines = append(lines, textStyle.Render("Settings profile: ")+
-			dimStyle.Render("base (default)")+
-			dimStyle.Render(fmt.Sprintf("  %d other profiles available", len(state.Profiles))))
+		lines = append(lines, labelStyle.Render("Profile      ")+
+			valueStyle.Render("base (default)")+"  "+
+			peachStyle.Render(fmt.Sprintf("%d other profiles available", len(state.Profiles))))
 	} else {
-		lines = append(lines, textStyle.Render("Settings profile: ")+
-			dimStyle.Render("base (default)"))
+		lines = append(lines, labelStyle.Render("Profile      ")+
+			valueStyle.Render("base (default)"))
 	}
 
-	// Plugin + settings summary
-	lines = append(lines, textStyle.Render("Plugins: ")+
-		dimStyle.Render(fmt.Sprintf("%d installed", len(state.Plugins))))
+	// Plugin count
+	lines = append(lines, labelStyle.Render("Plugins      ")+
+		valueStyle.Render(fmt.Sprintf("%d installed", len(state.Plugins))))
 
 	return strings.Join(lines, "\n")
 }
 
 // renderSyncSection renders the sync status lines.
 func renderSyncSection(state commands.MenuState) string {
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	tealStyle := lipgloss.NewStyle().Foreground(colorTeal)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 	redStyle := lipgloss.NewStyle().Foreground(colorRed)
+	maroonStyle := lipgloss.NewStyle().Foreground(colorMaroon)
 
 	header := sectionHeader("Sync")
 	var lines []string
@@ -108,11 +111,11 @@ func renderSyncSection(state commands.MenuState) string {
 		msg := fmt.Sprintf("⚠ Config is %d commits behind", state.CommitsBehind)
 		lines = append(lines, yellowStyle.Render(msg))
 	} else {
-		lines = append(lines, greenStyle.Render("✓ Config up to date"))
+		lines = append(lines, tealStyle.Render("✓ Config up to date"))
 	}
 
 	if state.HasPending {
-		lines = append(lines, yellowStyle.Render("⚠ pending change(s) awaiting approval"))
+		lines = append(lines, maroonStyle.Render("⚠ pending change(s) awaiting approval"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -144,10 +147,12 @@ func renderPluginsSection(state commands.MenuState) string {
 		}
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	labelStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	nameStyle := lipgloss.NewStyle().Foreground(colorLavender)
 	blueStyle := lipgloss.NewStyle().Foreground(colorBlue)
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	pinkStyle := lipgloss.NewStyle().Foreground(colorPink)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
+	peachStyle := lipgloss.NewStyle().Foreground(colorPeach)
 
 	var lines []string
 	lines = append(lines, header)
@@ -158,25 +163,24 @@ func renderPluginsSection(state commands.MenuState) string {
 
 		switch p.Status {
 		case "upstream":
-			statusTag = dimStyle.Render("upstream")
+			statusTag = labelStyle.Render("upstream")
 			if p.Marketplace != "" {
-				extra = dimStyle.Render(p.Marketplace)
+				extra = labelStyle.Render(p.Marketplace)
 			}
 		case "pinned":
 			statusTag = blueStyle.Render("pinned")
-			extra = dimStyle.Render("v" + p.PinVersion)
+			extra = labelStyle.Render("v" + p.PinVersion)
 			if p.LatestVersion != "" {
-				extra += dimStyle.Render(" (latest: v" + p.LatestVersion + ")")
+				extra += peachStyle.Render(" (latest: v" + p.LatestVersion + ")")
 			}
 		case "forked":
-			statusTag = greenStyle.Render("forked")
-			extra = dimStyle.Render("local edits")
+			statusTag = pinkStyle.Render("forked")
+			extra = labelStyle.Render("local edits")
 		default:
-			statusTag = dimStyle.Render(p.Status)
+			statusTag = labelStyle.Render(p.Status)
 		}
 
-		line := "  " + lipgloss.NewStyle().Foreground(colorText).Render(name) +
-			"  " + statusTag
+		line := "  " + nameStyle.Render(name) + "  " + statusTag
 		if extra != "" {
 			line += "  " + extra
 		}
@@ -193,7 +197,8 @@ func renderPluginsSection(state commands.MenuState) string {
 				name = key[:idx]
 			}
 			paddedName := fmt.Sprintf("%-*s", maxNameLen, name)
-			lines = append(lines, "  "+yellowStyle.Render(paddedName)+"  "+yellowStyle.Render("installed locally"))
+			lines = append(lines, "  "+yellowStyle.Render(paddedName)+"  "+
+				labelStyle.Render("installed locally"))
 		}
 	}
 
@@ -203,33 +208,34 @@ func renderPluginsSection(state commands.MenuState) string {
 // renderProjectSection renders the "This Project" section.
 func renderProjectSection(state commands.MenuState) string {
 	header := sectionHeader("This Project")
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
+	labelStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	valueStyle := lipgloss.NewStyle().Foreground(colorText)
+	pathStyle := lipgloss.NewStyle().Foreground(colorPeach)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 
 	if state.ProjectDir == "" {
-		return header + "\n" + dimStyle.Render("Not in a project directory")
+		return header + "\n" + labelStyle.Render("Not in a project directory")
 	}
 
 	shortPath := shortenPath(state.ProjectDir)
 	var lines []string
 	lines = append(lines, header)
-	lines = append(lines, textStyle.Render("Path: ")+dimStyle.Render(shortPath))
+	lines = append(lines, labelStyle.Render("Path         ")+pathStyle.Render(shortPath))
 
 	if !state.ProjectInitialized {
 		lines = append(lines, yellowStyle.Render("⚠ No settings profile assigned to this project"))
-		lines = append(lines, dimStyle.Render("  Using your base config. Assign a profile to customize."))
+		lines = append(lines, labelStyle.Render("  Using your base config. Assign a profile to customize."))
 		return strings.Join(lines, "\n")
 	}
 
 	// Show which settings profile applies
 	if state.ProjectProfile != "" {
-		lines = append(lines, textStyle.Render("Settings profile: ")+
-			greenStyle.Render("● ")+textStyle.Render(state.ProjectProfile))
+		lines = append(lines, labelStyle.Render("Profile      ")+
+			greenStyle.Render("● ")+valueStyle.Render(state.ProjectProfile))
 	} else {
-		lines = append(lines, textStyle.Render("Settings profile: ")+
-			dimStyle.Render("base (default)"))
+		lines = append(lines, labelStyle.Render("Profile      ")+
+			valueStyle.Render("base (default)"))
 	}
 
 	// CLAUDE.md and MCP counts
@@ -241,19 +247,19 @@ func renderProjectSection(state commands.MenuState) string {
 	if state.MCPCount != 1 {
 		mcpInfo += "s"
 	}
-	lines = append(lines, textStyle.Render("CLAUDE.md: ")+dimStyle.Render(mdInfo)+
-		textStyle.Render(" │ MCP: ")+dimStyle.Render(mcpInfo))
+	lines = append(lines, labelStyle.Render("CLAUDE.md    ")+valueStyle.Render(mdInfo)+
+		labelStyle.Render("  │  ")+labelStyle.Render("MCP  ")+valueStyle.Render(mcpInfo))
 
 	return strings.Join(lines, "\n")
 }
 
 // renderFooter renders the keyboard shortcut hints.
 func renderFooter() string {
-	ctaStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMauve)
+	hintStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 
-	return ctaStyle.Render("enter") + dimStyle.Render(" see what you can do") +
-		"    " + dimStyle.Render("q quit")
+	return keyStyle.Render("enter") + hintStyle.Render(" see what you can do") +
+		"    " + hintStyle.Render("q quit")
 }
 
 // renderFreshInstall renders the welcome screen for a fresh installation.
@@ -302,7 +308,7 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
+		BorderForeground(colorSurface0).
 		Padding(1, 2).
 		Width(maxWidth)
 
@@ -311,8 +317,8 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 
 // sectionHeader renders a section divider with a label.
 func sectionHeader(label string) string {
-	dimStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-	textStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
-	return dimStyle.Render("── ") + textStyle.Render(label) + " " + dimStyle.Render(strings.Repeat("─", 40))
+	lineStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+	labelStyle := lipgloss.NewStyle().Foreground(colorMauve).Bold(true)
+	return lineStyle.Render("── ") + labelStyle.Render(label) + " " + lineStyle.Render(strings.Repeat("─", 40))
 }
 
