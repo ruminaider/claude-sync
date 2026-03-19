@@ -43,34 +43,24 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 	return boxStyle.Render(content)
 }
 
-// renderHeader renders the title, config repo, profile, and project dir.
+// renderHeader renders the title and user-level config status.
 func renderHeader(state commands.MenuState, version string) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
+	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 
 	title := titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
 
-	configRepo := state.ConfigRepo
-	if configRepo == "" {
-		configRepo = "no config"
-	}
+	var lines []string
+	lines = append(lines, title)
 
-	profile := state.ActiveProfile
-	if profile == "" {
-		profile = "none"
-	}
-
-	projectDir := shortenPath(state.ProjectDir)
-	if projectDir == "" {
-		projectDir = "unknown"
-	}
-
-	lines := []string{
-		title,
-		textStyle.Render("Config: ") + dimStyle.Render(configRepo),
-		textStyle.Render("Profile: ") + dimStyle.Render(profile) +
-			textStyle.Render(" │ Project: ") + dimStyle.Render(projectDir),
+	// User-level config status
+	if state.ConfigRepo != "" {
+		lines = append(lines, textStyle.Render("Config: ")+dimStyle.Render(state.ConfigRepo)+
+			"  "+greenStyle.Render("✓ connected"))
+	} else {
+		lines = append(lines, textStyle.Render("Config: ")+dimStyle.Render("not configured"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -198,6 +188,7 @@ func renderProjectSection(state commands.MenuState) string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
+	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 
 	if state.ProjectDir == "" {
 		return header + "\n" + dimStyle.Render("Not in a project directory")
@@ -209,15 +200,19 @@ func renderProjectSection(state commands.MenuState) string {
 	lines = append(lines, textStyle.Render("Path: ")+dimStyle.Render(shortPath))
 
 	if !state.ProjectInitialized {
-		lines = append(lines, yellowStyle.Render("⚠ Not initialized with claude-sync"))
+		lines = append(lines, yellowStyle.Render("⚠ No settings profile assigned to this project"))
+		lines = append(lines, dimStyle.Render("  Using your base config. Assign a profile to customize."))
 		return strings.Join(lines, "\n")
 	}
 
-	profile := state.ProjectProfile
-	if profile == "" {
-		profile = "none"
+	// Show which settings profile applies
+	if state.ProjectProfile != "" {
+		lines = append(lines, textStyle.Render("Settings profile: ")+
+			greenStyle.Render("● ")+textStyle.Render(state.ProjectProfile))
+	} else {
+		lines = append(lines, textStyle.Render("Settings profile: ")+
+			dimStyle.Render("base (default)"))
 	}
-	lines = append(lines, textStyle.Render("Profile: ")+dimStyle.Render(profile))
 
 	// CLAUDE.md and MCP counts
 	mdInfo := fmt.Sprintf("%d synced section", state.ClaudeMDCount)

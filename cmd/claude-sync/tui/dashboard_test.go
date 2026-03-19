@@ -120,13 +120,14 @@ func TestRenderDashboard_Footer(t *testing.T) {
 func TestRenderDashboard_NoConfigRepo(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, ConfigRepo: ""}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "no config")
+	assert.Contains(t, view, "not configured")
 }
 
-func TestRenderDashboard_NoActiveProfile(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true, ActiveProfile: ""}
+func TestRenderDashboard_WithConfigRepo(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true, ConfigRepo: "user/repo"}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "none")
+	assert.Contains(t, view, "user/repo")
+	assert.Contains(t, view, "connected")
 }
 
 func TestRenderDashboard_NoProfiles(t *testing.T) {
