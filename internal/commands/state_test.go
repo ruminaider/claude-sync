@@ -241,6 +241,7 @@ func TestDetectMenuState_ProjectDir(t *testing.T) {
 	state := detectMenuStateWithPwd(claudeDir, syncDir, projDir)
 
 	assert.Equal(t, projDir, state.ProjectDir)
+	assert.True(t, state.ProjectInitialized)
 	assert.Equal(t, "work", state.ProjectProfile)
 }
 
@@ -259,7 +260,8 @@ func TestDetectMenuState_ProjectDir_NotManaged(t *testing.T) {
 
 	state := detectMenuStateWithPwd(claudeDir, syncDir, projDir)
 
-	assert.Empty(t, state.ProjectDir)
+	assert.Equal(t, projDir, state.ProjectDir) // always set to pwd
+	assert.False(t, state.ProjectInitialized)  // not initialized
 	assert.Empty(t, state.ProjectProfile)
 }
 
@@ -319,7 +321,8 @@ func TestDetectMenuState_EmptyConfig(t *testing.T) {
 	assert.Equal(t, 0, state.CommitsBehind)
 	assert.Empty(t, state.Plugins)
 	assert.Empty(t, state.Projects)
-	assert.Empty(t, state.ProjectDir)
+	assert.NotEmpty(t, state.ProjectDir) // always set to pwd
+	assert.False(t, state.ProjectInitialized)
 	assert.Empty(t, state.ProjectProfile)
 	assert.Equal(t, 0, state.ClaudeMDCount)
 	assert.Equal(t, 0, state.MCPCount)

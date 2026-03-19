@@ -61,8 +61,9 @@ type MenuState struct {
 	CommitsBehind  int          // how many commits behind remote
 	Plugins        []PluginInfo // all plugins with status
 	Projects       []ProjectInfo
-	ProjectDir     string // current $PWD project path if initialized
-	ProjectProfile string // profile assigned to current project
+	ProjectDir         string // current $PWD (always set)
+	ProjectInitialized bool   // true if project has .claude-sync.yaml
+	ProjectProfile     string // profile assigned to current project
 	ClaudeMDCount  int    // number of synced CLAUDE.md sections
 	MCPCount       int    // number of MCP servers configured
 }
@@ -134,11 +135,12 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 		}
 	}
 
-	// Project dir: check if pwd is a managed project
+	// Project dir: always set to pwd, check if initialized
 	if pwd != "" {
+		state.ProjectDir = pwd
 		pcfg, readErr := project.ReadProjectConfig(pwd)
 		if readErr == nil && !pcfg.Declined {
-			state.ProjectDir = pwd
+			state.ProjectInitialized = true
 			state.ProjectProfile = pcfg.Profile
 		}
 	}

@@ -26,10 +26,10 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 	var sections []string
 
 	sections = append(sections, renderHeader(state, version))
+	sections = append(sections, renderProjectSection(state))
 	sections = append(sections, renderSyncSection(state))
 	sections = append(sections, renderPluginsSection(state))
 	sections = append(sections, renderProfilesSection(state))
-	sections = append(sections, renderProjectSection(state))
 	sections = append(sections, renderFooter())
 
 	content := strings.Join(sections, "\n\n")
@@ -63,7 +63,7 @@ func renderHeader(state commands.MenuState, version string) string {
 
 	projectDir := shortenPath(state.ProjectDir)
 	if projectDir == "" {
-		projectDir = "-"
+		projectDir = "unknown"
 	}
 
 	lines := []string{
@@ -197,20 +197,26 @@ func renderProjectSection(state commands.MenuState) string {
 	header := sectionHeader("This Project")
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
+	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 
 	if state.ProjectDir == "" {
-		return header + "\n" + dimStyle.Render("Not in an initialized project")
+		return header + "\n" + dimStyle.Render("Not in a project directory")
 	}
 
 	shortPath := shortenPath(state.ProjectDir)
+	var lines []string
+	lines = append(lines, header)
+	lines = append(lines, textStyle.Render("Path: ")+dimStyle.Render(shortPath))
+
+	if !state.ProjectInitialized {
+		lines = append(lines, yellowStyle.Render("⚠ Not initialized with claude-sync"))
+		return strings.Join(lines, "\n")
+	}
+
 	profile := state.ProjectProfile
 	if profile == "" {
 		profile = "none"
 	}
-
-	var lines []string
-	lines = append(lines, header)
-	lines = append(lines, textStyle.Render("Path: ")+dimStyle.Render(shortPath))
 	lines = append(lines, textStyle.Render("Profile: ")+dimStyle.Render(profile))
 
 	// CLAUDE.md and MCP counts

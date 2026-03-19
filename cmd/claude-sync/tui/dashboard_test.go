@@ -83,11 +83,12 @@ func TestRenderDashboard_ShowsProfiles(t *testing.T) {
 
 func TestRenderDashboard_ShowsProjectInfo(t *testing.T) {
 	state := commands.MenuState{
-		ConfigExists:   true,
-		ProjectDir:     "/Users/test/Repos/claude-sync",
-		ProjectProfile: "work",
-		ClaudeMDCount:  3,
-		MCPCount:       2,
+		ConfigExists:       true,
+		ProjectDir:         "/Users/test/Repos/claude-sync",
+		ProjectInitialized: true,
+		ProjectProfile:     "work",
+		ClaudeMDCount:      3,
+		MCPCount:           2,
 	}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "claude-sync")
@@ -98,7 +99,7 @@ func TestRenderDashboard_ShowsProjectInfo(t *testing.T) {
 func TestRenderDashboard_NoProject(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Not in an initialized project")
+	assert.Contains(t, view, "Not in a project directory")
 }
 
 func TestRenderDashboard_FreshInstall(t *testing.T) {
