@@ -203,3 +203,100 @@ func TestAppModel_ViewActions_ShowsActionScreen(t *testing.T) {
 	assert.Contains(t, view, "Needs attention")
 	assert.Contains(t, view, "I want to")
 }
+
+func TestAppModel_EditConfig_SetsLaunchFlag(t *testing.T) {
+	// Use a state with profiles and plugins so there are zero recommendations,
+	// making the intent index predictable.
+	state := commands.MenuState{
+		ConfigExists: true,
+		Profiles:     []string{"work"},
+		Plugins:      []commands.PluginInfo{{Name: "test", Status: "upstream"}},
+	}
+	m := NewAppModel(state)
+
+	// Transition to actions view
+	var model tea.Model = m
+	model = appSendSpecialKey(model, tea.KeyEnter)
+	app := model.(AppModel)
+	require.Equal(t, viewActions, app.activeView)
+
+	// Find the "edit-config" intent index
+	editIdx := -1
+	for i, it := range app.intents {
+		if it.action.id == "edit-config" {
+			editIdx = len(app.recommendations) + i
+			break
+		}
+	}
+	require.NotEqual(t, -1, editIdx, "edit-config intent not found")
+
+	// Move cursor to the edit-config intent
+	for app.actionCursor < editIdx {
+		model = appSendKey(model, "j")
+		app = model.(AppModel)
+	}
+	require.Equal(t, editIdx, app.actionCursor)
+
+	// Press enter to select edit-config
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app = model.(AppModel)
+
+	assert.True(t, app.LaunchConfigEditor, "LaunchConfigEditor should be true")
+	assert.NotNil(t, cmd, "should return a tea.Quit command")
+}
+
+func TestAppModel_EditConfig_DoesNotSetQuitting(t *testing.T) {
+	// Selecting edit-config should set LaunchConfigEditor but not quitting,
+	// so the caller can distinguish between user quit and config editor launch.
+	state := commands.MenuState{
+		ConfigExists: true,
+		Profiles:     []string{"work"},
+		Plugins:      []commands.PluginInfo{{Name: "test", Status: "upstream"}},
+	}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	model = appSendSpecialKey(model, tea.KeyEnter)
+	app := model.(AppModel)
+
+	// Find edit-config index
+	editIdx := -1
+	for i, it := range app.intents {
+		if it.action.id == "edit-config" {
+			editIdx = len(app.recommendations) + i
+			break
+		}
+	}
+	require.NotEqual(t, -1, editIdx)
+
+	// Navigate to edit-config
+	for app.actionCursor < editIdx {
+		model = appSendKey(model, "j")
+		app = model.(AppModel)
+	}
+
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app = model.(AppModel)
+
+	assert.True(t, app.LaunchConfigEditor)
+	assert.False(t, app.quitting, "quitting should remain false so caller can distinguish")
+}
+
+func TestAppModel_LaunchConfigEditor_DefaultFalse(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	assert.False(t, m.LaunchConfigEditor, "LaunchConfigEditor should default to false")
+}
+
+func TestAppModel_NormalQuit_DoesNotSetLaunchFlag(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	app := model.(AppModel)
+
+	assert.True(t, app.quitting)
+	assert.False(t, app.LaunchConfigEditor, "normal quit should not set LaunchConfigEditor")
+}

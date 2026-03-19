@@ -42,6 +42,9 @@ type AppModel struct {
 
 	// sub-view state (populated when activeView == viewSubView)
 	subView tea.Model
+
+	// Exit signals for the caller
+	LaunchConfigEditor bool // true = caller should run config editor, then re-launch AppModel
 }
 
 // NewAppModel creates an AppModel from detected state, starting on the dashboard.
@@ -221,6 +224,9 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			jf.syncDir = m.syncDir
 			m.subView = jf
 			m.activeView = viewSubView
+		case "edit-config":
+			m.LaunchConfigEditor = true
+			return m, tea.Quit
 		}
 	}
 	return m, nil
