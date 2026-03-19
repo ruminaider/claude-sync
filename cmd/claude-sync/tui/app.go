@@ -31,8 +31,9 @@ type AppModel struct {
 	syncDir   string
 
 	// cursor positions preserved per view
-	dashboardScroll int
-	actionCursor    int
+	dashboardScroll    int
+	actionCursor       int
+	freshInstallCursor int // 0 = Create, 1 = Join (only used when !ConfigExists)
 
 	// Action screen state
 	recommendations []recommendation
@@ -172,6 +173,35 @@ func (m AppModel) View() string {
 // --- Dashboard view ---
 
 func (m AppModel) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.state.ConfigExists {
+		// Fresh install mode: navigate between Create and Join
+		switch msg.String() {
+		case "up", "k":
+			if m.freshInstallCursor > 0 {
+				m.freshInstallCursor--
+			}
+		case "down", "j":
+			if m.freshInstallCursor < 1 {
+				m.freshInstallCursor++
+			}
+		case "enter":
+			if m.freshInstallCursor == 0 {
+				// Create new config → launch config editor
+				m.LaunchConfigEditor = true
+				return m, tea.Quit
+			}
+			// Join shared config → launch JoinFlow
+			jf := NewJoinFlow(m.width, m.height)
+			jf.claudeDir = m.claudeDir
+			jf.syncDir = m.syncDir
+			m.subView = jf
+			m.activeView = viewSubView
+			return m, jf.Init()
+		}
+		return m, nil
+	}
+
+	// Normal configured mode
 	switch msg.String() {
 	case "enter":
 		m.recommendations = buildRecommendations(m.state)
@@ -189,7 +219,7 @@ func (m AppModel) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) viewDashboard() string {
-	return renderDashboard(m.state, m.width, m.height, m.version)
+	return renderDashboard(m.state, m.width, m.height, m.version, m.freshInstallCursor)
 }
 
 // --- Actions view ---

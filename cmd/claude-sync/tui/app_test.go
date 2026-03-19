@@ -568,3 +568,94 @@ func TestAppModel_FilterMode_NoResults(t *testing.T) {
 	view := m.View()
 	assert.Contains(t, view, "No matching actions")
 }
+
+// --- Fresh install flow tests ---
+
+func TestAppModel_FreshInstall_CursorNavigation(t *testing.T) {
+	state := commands.MenuState{ConfigExists: false}
+	m := NewAppModel(state)
+	assert.Equal(t, 0, m.freshInstallCursor)
+
+	// Move down
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	app := updated.(AppModel)
+	assert.Equal(t, 1, app.freshInstallCursor)
+
+	// Move down again (should stay at 1)
+	updated, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	app = updated.(AppModel)
+	assert.Equal(t, 1, app.freshInstallCursor)
+
+	// Move up
+	updated, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	app = updated.(AppModel)
+	assert.Equal(t, 0, app.freshInstallCursor)
+
+	// Move up again (should stay at 0)
+	updated, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	app = updated.(AppModel)
+	assert.Equal(t, 0, app.freshInstallCursor)
+}
+
+func TestAppModel_FreshInstall_CreateLaunchesEditor(t *testing.T) {
+	state := commands.MenuState{ConfigExists: false}
+	m := NewAppModel(state)
+	m.freshInstallCursor = 0 // Create
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	assert.True(t, app.LaunchConfigEditor)
+	assert.NotNil(t, cmd) // tea.Quit
+}
+
+func TestAppModel_FreshInstall_JoinLaunchesJoinFlow(t *testing.T) {
+	state := commands.MenuState{ConfigExists: false}
+	m := NewAppModel(state)
+	m.freshInstallCursor = 1 // Join
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	assert.Equal(t, viewSubView, app.activeView)
+	assert.NotNil(t, app.subView)
+}
+
+func TestRenderFreshInstall_ShowsCursor(t *testing.T) {
+	view := renderFreshInstall(70, 30, "0.7.0", 0)
+	assert.Contains(t, view, "Create")
+	assert.Contains(t, view, "Join")
+	assert.Contains(t, view, ">") // cursor on first item
+}
+
+func TestAppModel_FreshInstall_EnterDoesNotGoToActions(t *testing.T) {
+	// In fresh install mode, Enter should NOT go to the action screen
+	state := commands.MenuState{ConfigExists: false}
+	m := NewAppModel(state)
+	m.freshInstallCursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	// Should either launch editor or join flow, NOT go to viewActions
+	assert.NotEqual(t, viewActions, app.activeView)
+}
+
+func TestAppModel_FreshInstall_ArrowKeysWork(t *testing.T) {
+	state := commands.MenuState{ConfigExists: false}
+	m := NewAppModel(state)
+
+	// Down arrow
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	app := updated.(AppModel)
+	assert.Equal(t, 1, app.freshInstallCursor)
+
+	// Up arrow
+	updated, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	app = updated.(AppModel)
+	assert.Equal(t, 0, app.freshInstallCursor)
+}
+
+func TestRenderFreshInstall_CursorOnJoin(t *testing.T) {
+	view := renderFreshInstall(70, 30, "0.7.0", 1)
+	assert.Contains(t, view, "Create")
+	assert.Contains(t, view, "Join")
+	assert.Contains(t, view, ">")
+}

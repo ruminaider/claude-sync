@@ -10,9 +10,9 @@ import (
 
 // renderDashboard renders the full status dashboard from MenuState.
 // It returns a styled string suitable for display in a terminal.
-func renderDashboard(state commands.MenuState, width, height int, version string) string {
+func renderDashboard(state commands.MenuState, width, height int, version string, freshInstallCursor int) string {
 	if !state.ConfigExists {
-		return renderFreshInstall(width, height, version)
+		return renderFreshInstall(width, height, version, freshInstallCursor)
 	}
 
 	maxWidth := width - 2
@@ -235,7 +235,8 @@ func renderFooter() string {
 }
 
 // renderFreshInstall renders the welcome screen for a fresh installation.
-func renderFreshInstall(width, height int, version string) string {
+// cursor indicates which option is selected: 0 = Create, 1 = Join.
+func renderFreshInstall(width, height int, version string, cursor int) string {
 	maxWidth := width - 2
 	if maxWidth > 70 {
 		maxWidth = 70
@@ -247,16 +248,31 @@ func renderFreshInstall(width, height int, version string) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
+	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 
 	title := titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
+
+	// Build option lines with cursor indicator
+	createPrefix := "  "
+	createLabel := textStyle.Render("Create new config")
+	joinPrefix := "  "
+	joinLabel := textStyle.Render("Join a shared config")
+
+	if cursor == 0 {
+		createPrefix = "> "
+		createLabel = selectedStyle.Render("Create new config")
+	} else {
+		joinPrefix = "> "
+		joinLabel = selectedStyle.Render("Join a shared config")
+	}
 
 	var lines []string
 	lines = append(lines, title)
 	lines = append(lines, "")
 	lines = append(lines, textStyle.Render("No config found. Get started:"))
 	lines = append(lines, "")
-	lines = append(lines, textStyle.Render("> Create new config")+"  "+dimStyle.Render("from this machine's Claude Code setup"))
-	lines = append(lines, textStyle.Render("  Join a shared config")+"  "+dimStyle.Render("clone a shared config repo"))
+	lines = append(lines, textStyle.Render(createPrefix)+createLabel+"  "+dimStyle.Render("from this machine's Claude Code setup"))
+	lines = append(lines, textStyle.Render(joinPrefix)+joinLabel+"  "+dimStyle.Render("clone a shared config repo"))
 	lines = append(lines, "")
 	lines = append(lines, dimStyle.Render("↑↓ navigate  enter select  q quit"))
 

@@ -9,7 +9,7 @@ import (
 
 func TestRenderDashboard_ShowsVersion(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "0.7.0")
 }
 
@@ -18,31 +18,31 @@ func TestRenderDashboard_ShowsConfigRepo(t *testing.T) {
 		ConfigExists: true,
 		ConfigRepo:   "ruminaider/claude-sync-config",
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "ruminaider/claude-sync-config")
 }
 
 func TestRenderDashboard_SyncUpToDate(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "up to date")
 }
 
 func TestRenderDashboard_SyncBehind(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, CommitsBehind: 3}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "3 commits behind")
 }
 
 func TestRenderDashboard_PendingChanges(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, HasPending: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "pending")
 }
 
 func TestRenderDashboard_Conflicts(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, HasConflicts: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "conflict")
 }
 
@@ -55,7 +55,7 @@ func TestRenderDashboard_ShowsPlugins(t *testing.T) {
 			{Name: "my-tool", Status: "forked"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "beads")
 	assert.Contains(t, view, "superpowers")
 	assert.Contains(t, view, "pinned")
@@ -65,7 +65,7 @@ func TestRenderDashboard_ShowsPlugins(t *testing.T) {
 
 func TestRenderDashboard_NoPlugins(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "No plugins")
 }
 
@@ -75,7 +75,7 @@ func TestRenderDashboard_ShowsProfiles(t *testing.T) {
 		Profiles:      []string{"work", "personal"},
 		ActiveProfile: "work",
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "work")
 	assert.Contains(t, view, "personal")
 	assert.Contains(t, view, "active")
@@ -89,7 +89,7 @@ func TestRenderDashboard_ShowsProjectInfo(t *testing.T) {
 		ClaudeMDCount:  3,
 		MCPCount:       2,
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "claude-sync")
 	assert.Contains(t, view, "3")
 	assert.Contains(t, view, "2")
@@ -97,13 +97,13 @@ func TestRenderDashboard_ShowsProjectInfo(t *testing.T) {
 
 func TestRenderDashboard_NoProject(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "Not in an initialized project")
 }
 
 func TestRenderDashboard_FreshInstall(t *testing.T) {
 	state := commands.MenuState{ConfigExists: false}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "No config found")
 	assert.Contains(t, view, "Create")
 	assert.Contains(t, view, "Join")
@@ -111,26 +111,26 @@ func TestRenderDashboard_FreshInstall(t *testing.T) {
 
 func TestRenderDashboard_Footer(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "enter")
 	assert.Contains(t, view, "quit")
 }
 
 func TestRenderDashboard_NoConfigRepo(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, ConfigRepo: ""}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "no config")
 }
 
 func TestRenderDashboard_NoActiveProfile(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, ActiveProfile: ""}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "none")
 }
 
 func TestRenderDashboard_NoProfiles(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, Profiles: nil}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "No profiles")
 }
 
@@ -141,7 +141,7 @@ func TestRenderDashboard_PluginUpstreamShowsMarketplace(t *testing.T) {
 			{Name: "beads", Status: "upstream", Marketplace: "beads-marketplace"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "beads-marketplace")
 }
 
@@ -152,7 +152,7 @@ func TestRenderDashboard_PluginPinnedShowsVersion(t *testing.T) {
 			{Name: "superpowers", Status: "pinned", PinVersion: "1.2.3"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "v1.2.3")
 }
 
@@ -163,7 +163,7 @@ func TestRenderDashboard_PluginPinnedShowsLatestVersion(t *testing.T) {
 			{Name: "superpowers", Status: "pinned", PinVersion: "1.2.3", LatestVersion: "1.3.0"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "v1.2.3")
 	assert.Contains(t, view, "latest: v1.3.0")
 }
@@ -175,7 +175,7 @@ func TestRenderDashboard_PluginForkedShowsLocalEdits(t *testing.T) {
 			{Name: "my-tool", Status: "forked"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "local edits")
 }
 
@@ -188,7 +188,7 @@ func TestRenderDashboard_PluginCount(t *testing.T) {
 			{Name: "c", Status: "upstream"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "Plugins (3)")
 }
 
@@ -197,7 +197,7 @@ func TestRenderDashboard_ProfileCount(t *testing.T) {
 		ConfigExists: true,
 		Profiles:     []string{"work", "personal", "base"},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "Profiles (3)")
 }
 
@@ -207,7 +207,7 @@ func TestRenderDashboard_ActiveProfileMarker(t *testing.T) {
 		Profiles:      []string{"work", "personal"},
 		ActiveProfile: "work",
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0")
+	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	// Active profile should have a bullet marker
 	assert.Contains(t, view, "●")
 }
