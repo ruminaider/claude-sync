@@ -318,7 +318,7 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 // sectionHeader renders a section divider with a label.
 func sectionHeader(label string) string {
 	lineStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-	labelStyle := lipgloss.NewStyle().Foreground(colorPink).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
 	return lineStyle.Render("── ") + labelStyle.Render(label) + " " + lineStyle.Render(strings.Repeat("─", 40))
 }
 
