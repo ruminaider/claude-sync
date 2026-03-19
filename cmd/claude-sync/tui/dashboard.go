@@ -30,7 +30,6 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 	sections = append(sections, renderProjectSection(state))
 	sections = append(sections, renderSyncSection(state))
 	sections = append(sections, renderPluginsSection(state))
-	sections = append(sections, renderProfilesSection(state))
 	sections = append(sections, renderFooter())
 
 	content := strings.Join(sections, "\n\n")
@@ -119,26 +118,36 @@ func renderSyncSection(state commands.MenuState) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderPluginsSection renders the plugins list.
+// renderPluginsSection renders the plugins list with untracked detection.
 func renderPluginsSection(state commands.MenuState) string {
-	header := sectionHeader(fmt.Sprintf("Plugins (%d)", len(state.Plugins)))
+	header := sectionHeader(fmt.Sprintf("Active Plugins (%d)", len(state.Plugins)))
 
-	if len(state.Plugins) == 0 {
+	if len(state.Plugins) == 0 && len(state.UntrackedPlugins) == 0 {
 		dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 		return header + "\n" + dimStyle.Render("No plugins configured")
 	}
 
-	// Calculate max name width for alignment
+	// Calculate max name width for alignment (across both synced and untracked)
 	maxNameLen := 0
 	for _, p := range state.Plugins {
 		if len(p.Name) > maxNameLen {
 			maxNameLen = len(p.Name)
 		}
 	}
+	for _, key := range state.UntrackedPlugins {
+		name := key
+		if idx := strings.Index(key, "@"); idx >= 0 {
+			name = key[:idx]
+		}
+		if len(name) > maxNameLen {
+			maxNameLen = len(name)
+		}
+	}
 
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	blueStyle := lipgloss.NewStyle().Foreground(colorBlue)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 
 	var lines []string
 	lines = append(lines, header)
@@ -174,33 +183,17 @@ func renderPluginsSection(state commands.MenuState) string {
 		lines = append(lines, line)
 	}
 
-	return strings.Join(lines, "\n")
-}
-
-// renderProfilesSection renders the profiles list.
-func renderProfilesSection(state commands.MenuState) string {
-	header := sectionHeader(fmt.Sprintf("Profiles (%d)", len(state.Profiles)))
-
-	if len(state.Profiles) == 0 {
-		dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-		return header + "\n" + dimStyle.Render("No profiles configured")
-	}
-
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-
-	var lines []string
-	lines = append(lines, header)
-
-	for _, p := range state.Profiles {
-		if p == state.ActiveProfile {
-			marker := greenStyle.Render("●")
-			name := greenStyle.Render(p)
-			suffix := dimStyle.Render(" (active)")
-			lines = append(lines, "  "+marker+" "+name+suffix)
-		} else {
-			lines = append(lines, "    "+textStyle.Render(p))
+	// Untracked plugins subsection
+	if len(state.UntrackedPlugins) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, yellowStyle.Render("Not in synced config:"))
+		for _, key := range state.UntrackedPlugins {
+			name := key
+			if idx := strings.Index(key, "@"); idx >= 0 {
+				name = key[:idx]
+			}
+			paddedName := fmt.Sprintf("%-*s", maxNameLen, name)
+			lines = append(lines, "  "+yellowStyle.Render(paddedName)+"  "+yellowStyle.Render("installed locally"))
 		}
 	}
 
@@ -256,8 +249,11 @@ func renderProjectSection(state commands.MenuState) string {
 
 // renderFooter renders the keyboard shortcut hints.
 func renderFooter() string {
+	ctaStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	return dimStyle.Render("enter actions  q quit")
+
+	return ctaStyle.Render("enter") + dimStyle.Render(" see what you can do") +
+		"    " + dimStyle.Render("q quit")
 }
 
 // renderFreshInstall renders the welcome screen for a fresh installation.

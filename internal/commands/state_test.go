@@ -372,3 +372,64 @@ func TestDetectMenuState_CommitsBehind(t *testing.T) {
 
 	assert.Equal(t, 1, state.CommitsBehind)
 }
+
+func TestDetectMenuState_UntrackedPlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+
+	// Config has one plugin
+	cfgYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - beads@beads-marketplace
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(cfgYAML), 0644))
+
+	// Installed plugins include beads plus two extras not in config
+	pluginsDir := filepath.Join(claudeDir, "plugins")
+	require.NoError(t, os.MkdirAll(pluginsDir, 0755))
+	installedJSON := `{
+		"version": 1,
+		"plugins": {
+			"beads@beads-marketplace": [{"scope": "user", "installPath": "/tmp/beads", "version": "1.0.0", "installedAt": "2026-01-01", "lastUpdated": "2026-01-01"}],
+			"playwright@some-mkt": [{"scope": "user", "installPath": "/tmp/playwright", "version": "1.0.0", "installedAt": "2026-01-01", "lastUpdated": "2026-01-01"}],
+			"episodic-memory@other-mkt": [{"scope": "user", "installPath": "/tmp/episodic-memory", "version": "1.0.0", "installedAt": "2026-01-01", "lastUpdated": "2026-01-01"}]
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(installedJSON), 0644))
+
+	// Override DefaultProjectSearchDirs to avoid scanning real dirs
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	assert.Len(t, state.Plugins, 1)
+	assert.Len(t, state.UntrackedPlugins, 2)
+	assert.Contains(t, state.UntrackedPlugins, "playwright@some-mkt")
+	assert.Contains(t, state.UntrackedPlugins, "episodic-memory@other-mkt")
+}
+
+func TestDetectMenuState_NoUntrackedWhenNoInstalledPlugins(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+
+	cfgYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - beads@beads-marketplace
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(cfgYAML), 0644))
+
+	// No installed_plugins.json — ReadInstalledPlugins will fail gracefully
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	assert.Len(t, state.Plugins, 1)
+	assert.Empty(t, state.UntrackedPlugins)
+}

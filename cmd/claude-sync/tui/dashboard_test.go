@@ -69,16 +69,15 @@ func TestRenderDashboard_NoPlugins(t *testing.T) {
 	assert.Contains(t, view, "No plugins")
 }
 
-func TestRenderDashboard_ShowsProfiles(t *testing.T) {
+func TestRenderDashboard_ShowsActiveProfile(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
 		Profiles:      []string{"work", "personal"},
 		ActiveProfile: "work",
 	}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
+	// Active profile shown in User Config section
 	assert.Contains(t, view, "work")
-	assert.Contains(t, view, "personal")
-	assert.Contains(t, view, "active")
 }
 
 func TestRenderDashboard_ShowsProjectInfo(t *testing.T) {
@@ -114,7 +113,8 @@ func TestRenderDashboard_Footer(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
 	assert.Contains(t, view, "enter")
-	assert.Contains(t, view, "quit")
+	assert.Contains(t, view, "see what you can do")
+	assert.Contains(t, view, "q quit")
 }
 
 func TestRenderDashboard_NoConfigRepo(t *testing.T) {
@@ -130,10 +130,11 @@ func TestRenderDashboard_WithConfigRepo(t *testing.T) {
 	assert.Contains(t, view, "connected")
 }
 
-func TestRenderDashboard_NoProfiles(t *testing.T) {
+func TestRenderDashboard_NoProfilesShowsNone(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, Profiles: nil}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "No profiles")
+	// No separate profiles section, but User Config shows "none"
+	assert.Contains(t, view, "none")
 }
 
 func TestRenderDashboard_PluginUpstreamShowsMarketplace(t *testing.T) {
@@ -191,25 +192,54 @@ func TestRenderDashboard_PluginCount(t *testing.T) {
 		},
 	}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Plugins (3)")
+	assert.Contains(t, view, "Active Plugins (3)")
 }
 
-func TestRenderDashboard_ProfileCount(t *testing.T) {
+func TestRenderDashboard_ProfileCountInUserConfig(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 		Profiles:     []string{"work", "personal", "base"},
 	}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Profiles (3)")
+	// Profile count shown in User Config section
+	assert.Contains(t, view, "3 available")
 }
 
-func TestRenderDashboard_ActiveProfileMarker(t *testing.T) {
+func TestRenderDashboard_ActiveProfileInUserConfig(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
 		Profiles:      []string{"work", "personal"},
 		ActiveProfile: "work",
 	}
 	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	// Active profile should have a bullet marker
+	// Active profile shown in User Config section with bullet marker
 	assert.Contains(t, view, "●")
+	assert.Contains(t, view, "work")
+}
+
+func TestRenderDashboard_UntrackedPlugins(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Status: "upstream", Marketplace: "beads-marketplace"},
+		},
+		UntrackedPlugins: []string{"playwright@some-mkt", "episodic-memory@other-mkt"},
+	}
+	view := renderDashboard(state, 80, 30, "0.7.0", 0)
+	assert.Contains(t, view, "Active Plugins (1)")
+	assert.Contains(t, view, "Not in synced config")
+	assert.Contains(t, view, "playwright")
+	assert.Contains(t, view, "episodic-memory")
+	assert.Contains(t, view, "installed locally")
+}
+
+func TestRenderDashboard_UntrackedPluginsOnly(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:     true,
+		UntrackedPlugins: []string{"playwright@some-mkt"},
+	}
+	view := renderDashboard(state, 80, 30, "0.7.0", 0)
+	assert.Contains(t, view, "Active Plugins (0)")
+	assert.Contains(t, view, "Not in synced config")
+	assert.Contains(t, view, "playwright")
 }

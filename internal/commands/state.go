@@ -8,10 +8,12 @@ import (
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
+	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
+	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
 
 // DefaultProjectSearchDirs returns the parent directories to scan for managed projects.
@@ -64,8 +66,9 @@ type MenuState struct {
 	ProjectDir         string // current $PWD (always set)
 	ProjectInitialized bool   // true if project has .claude-sync.yaml
 	ProjectProfile     string // profile assigned to current project
-	ClaudeMDCount  int    // number of synced CLAUDE.md sections
-	MCPCount       int    // number of MCP servers configured
+	ClaudeMDCount    int      // number of synced CLAUDE.md sections
+	MCPCount         int      // number of MCP servers configured
+	UntrackedPlugins []string // plugins installed locally but not in config
 }
 
 // DetectMenuState checks the current claude-sync state for menu rendering.
@@ -107,12 +110,14 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 	}
 
 	// Parse config.yaml for plugins, MCP count
+	var cfg *config.Config
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err == nil {
-		cfg, parseErr := config.Parse(cfgData)
+		parsed, parseErr := config.Parse(cfgData)
 		if parseErr == nil {
-			state.Plugins = buildPluginInfos(cfg)
-			state.MCPCount = len(cfg.MCP)
+			cfg = &parsed
+			state.Plugins = buildPluginInfos(parsed)
+			state.MCPCount = len(parsed.MCP)
 		}
 	}
 
@@ -121,6 +126,13 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 
 	// Commits behind: check local tracking info
 	state.CommitsBehind = detectCommitsBehind(syncDir)
+
+	// Detect untracked plugins (installed locally but not in config)
+	installedPlugins, readErr := claudecode.ReadInstalledPlugins(claudeDir)
+	if readErr == nil && cfg != nil {
+		diff := csync.ComputePluginDiff(cfg.AllPluginKeys(), installedPlugins.PluginKeys())
+		state.UntrackedPlugins = diff.Untracked
+	}
 
 	// Projects: scan default search dirs
 	if searchDirs := DefaultProjectSearchDirs(); len(searchDirs) > 0 {
