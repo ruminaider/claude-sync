@@ -93,6 +93,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recommendations = buildRecommendations(m.state)
 		m.intents = buildIntents(m.state)
 		return m, nil
+	case subViewCloseMsg:
+		m.activeView = viewActions
+		m.subView = nil
+		if msg.refreshState {
+			m.state = commands.DetectMenuState(m.claudeDir, m.syncDir)
+			m.recommendations = buildRecommendations(m.state)
+			m.intents = buildIntents(m.state)
+		}
+		return m, nil
+	case profileSwitchResultMsg:
+		// Route to sub-view
+		if m.subView != nil {
+			var cmd tea.Cmd
+			m.subView, cmd = m.subView.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Global keys (work in any view)
 		if msg.String() == "q" || msg.String() == "ctrl+c" {
@@ -179,8 +196,15 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.executingIndex = m.actionCursor
 			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
 		}
-		// Sub-view navigation (wired in Tasks 7-10)
-		// For now, no-op for non-inline actions
+		// Sub-view navigation
+		switch action.id {
+		case "switch-profile":
+			picker := NewProfilePicker(m.state, m.width, m.height)
+			picker.SetPaths(m.claudeDir, m.syncDir)
+			m.subView = picker
+			m.activeView = viewSubView
+		}
+		// Other sub-views wired in Tasks 8-10
 	}
 	return m, nil
 }
@@ -192,16 +216,15 @@ func (m AppModel) viewActions() string {
 // --- Sub-view ---
 
 func (m AppModel) updateSubView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.activeView = viewActions
-		m.subView = nil
-		return m, nil
-	}
 	if m.subView != nil {
 		var cmd tea.Cmd
 		m.subView, cmd = m.subView.Update(msg)
 		return m, cmd
+	}
+	// Fallback: no sub-view loaded, esc goes back
+	if msg.String() == "esc" {
+		m.activeView = viewActions
+		return m, nil
 	}
 	return m, nil
 }
