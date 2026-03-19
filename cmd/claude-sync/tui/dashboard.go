@@ -45,7 +45,7 @@ func renderDashboard(state commands.MenuState, width, height int, version string
 
 // renderHeader renders just the title line.
 func renderHeader(state commands.MenuState, version string) string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorLavender)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
 	return titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
 }
@@ -53,12 +53,12 @@ func renderHeader(state commands.MenuState, version string) string {
 // renderUserConfigSection renders the user-level configuration status.
 func renderUserConfigSection(state commands.MenuState) string {
 	header := sectionHeader("User Config")
-	labelStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	labelStyle := lipgloss.NewStyle().Foreground(colorPeach)
 	valueStyle := lipgloss.NewStyle().Foreground(colorText)
 	tealStyle := lipgloss.NewStyle().Foreground(colorTeal)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
-	peachStyle := lipgloss.NewStyle().Foreground(colorPeach)
+	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 
 	var lines []string
 	lines = append(lines, header)
@@ -79,7 +79,7 @@ func renderUserConfigSection(state commands.MenuState) string {
 	} else if len(state.Profiles) > 0 {
 		lines = append(lines, labelStyle.Render("Profile      ")+
 			valueStyle.Render("base (default)")+"  "+
-			peachStyle.Render(fmt.Sprintf("%d other profiles available", len(state.Profiles))))
+			dimStyle.Render(fmt.Sprintf("%d other profiles available", len(state.Profiles))))
 	} else {
 		lines = append(lines, labelStyle.Render("Profile      ")+
 			valueStyle.Render("base (default)"))
@@ -148,7 +148,7 @@ func renderPluginsSection(state commands.MenuState) string {
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	nameStyle := lipgloss.NewStyle().Foreground(colorLavender)
+	nameStyle := lipgloss.NewStyle().Foreground(colorMauve)
 	blueStyle := lipgloss.NewStyle().Foreground(colorBlue)
 	pinkStyle := lipgloss.NewStyle().Foreground(colorPink)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
@@ -208,24 +208,24 @@ func renderPluginsSection(state commands.MenuState) string {
 // renderProjectSection renders the "This Project" section.
 func renderProjectSection(state commands.MenuState) string {
 	header := sectionHeader("This Project")
-	labelStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	labelStyle := lipgloss.NewStyle().Foreground(colorPeach)
 	valueStyle := lipgloss.NewStyle().Foreground(colorText)
-	pathStyle := lipgloss.NewStyle().Foreground(colorPeach)
+	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 
 	if state.ProjectDir == "" {
-		return header + "\n" + labelStyle.Render("Not in a project directory")
+		return header + "\n" + dimStyle.Render("Not in a project directory")
 	}
 
 	shortPath := shortenPath(state.ProjectDir)
 	var lines []string
 	lines = append(lines, header)
-	lines = append(lines, labelStyle.Render("Path         ")+pathStyle.Render(shortPath))
+	lines = append(lines, labelStyle.Render("Path         ")+valueStyle.Render(shortPath))
 
 	if !state.ProjectInitialized {
 		lines = append(lines, yellowStyle.Render("⚠ No settings profile assigned to this project"))
-		lines = append(lines, labelStyle.Render("  Using your base config. Assign a profile to customize."))
+		lines = append(lines, dimStyle.Render("  Using your base config. Assign a profile to customize."))
 		return strings.Join(lines, "\n")
 	}
 
@@ -318,7 +318,7 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 // sectionHeader renders a section divider with a label.
 func sectionHeader(label string) string {
 	lineStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-	labelStyle := lipgloss.NewStyle().Foreground(colorMauve).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(colorPink).Bold(true)
 	return lineStyle.Render("── ") + labelStyle.Render(label) + " " + lineStyle.Render(strings.Repeat("─", 40))
 }
 
