@@ -203,8 +203,12 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			picker.SetPaths(m.claudeDir, m.syncDir)
 			m.subView = picker
 			m.activeView = viewSubView
+		case "browse-plugins":
+			browser := NewPluginBrowser(m.state, m.width, m.height)
+			m.subView = browser
+			m.activeView = viewSubView
 		}
-		// Other sub-views wired in Tasks 8-10
+		// Other sub-views wired in Tasks 9-10
 	}
 	return m, nil
 }
