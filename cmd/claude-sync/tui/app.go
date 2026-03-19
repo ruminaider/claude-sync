@@ -35,6 +35,11 @@ type AppModel struct {
 	recommendations []recommendation
 	intents         []intent
 
+	// Inline action execution state
+	executing        bool                   // true while action is running
+	executingIndex   int                    // which item is executing
+	executionResults map[int]actionResultMsg // results keyed by item index
+
 	// sub-view state (populated when activeView == viewSubView)
 	subView tea.Model
 }
@@ -42,8 +47,9 @@ type AppModel struct {
 // NewAppModel creates an AppModel from detected state, starting on the dashboard.
 func NewAppModel(state commands.MenuState) AppModel {
 	return AppModel{
-		state:      state,
-		activeView: viewDashboard,
+		state:            state,
+		activeView:       viewDashboard,
+		executionResults: make(map[int]actionResultMsg),
 	}
 }
 
@@ -71,6 +77,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+	case actionStartMsg:
+		m.executing = true
+		m.executingIndex = msg.itemIndex
+		return m, nil
+	case actionResultMsg:
+		m.executing = false
+		if m.executionResults == nil {
+			m.executionResults = make(map[int]actionResultMsg)
+		}
+		m.executionResults[msg.itemIndex] = msg
+		// Re-detect state and rebuild recommendations
+		m.state = commands.DetectMenuState(m.claudeDir, m.syncDir)
+		m.recommendations = buildRecommendations(m.state)
+		m.intents = buildIntents(m.state)
 		return m, nil
 	case tea.KeyMsg:
 		// Global keys (work in any view)
@@ -145,13 +166,27 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.actionCursor--
 		}
 	case "enter":
-		// Action execution will be wired in Task 6; no-op for now.
+		if m.executing {
+			return m, nil // ignore while executing
+		}
+		action := selectedAction(m.recommendations, m.intents, m.actionCursor)
+		if action == nil {
+			return m, nil
+		}
+		if action.inline {
+			// Execute inline
+			m.executing = true
+			m.executingIndex = m.actionCursor
+			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
+		}
+		// Sub-view navigation (wired in Tasks 7-10)
+		// For now, no-op for non-inline actions
 	}
 	return m, nil
 }
 
 func (m AppModel) viewActions() string {
-	return renderActions(m.recommendations, m.intents, m.actionCursor, m.width, m.height)
+	return renderActionsWithState(m.recommendations, m.intents, m.actionCursor, m.width, m.height, m.executing, m.executingIndex, m.executionResults)
 }
 
 // --- Sub-view ---

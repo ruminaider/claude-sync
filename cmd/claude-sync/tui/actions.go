@@ -105,7 +105,14 @@ func selectedAction(recs []recommendation, intents []intent, cursor int) *action
 }
 
 // renderActions renders the combined action screen with recommendations and intents.
+// This is the backward-compatible version without execution state.
 func renderActions(recs []recommendation, intents []intent, cursor int, width, height int) string {
+	return renderActionsWithState(recs, intents, cursor, width, height, false, -1, nil)
+}
+
+// renderActionsWithState renders the combined action screen with execution state.
+func renderActionsWithState(recs []recommendation, intents []intent, cursor int, width, height int,
+	executing bool, executingIndex int, results map[int]actionResultMsg) string {
 	maxWidth := width - 2
 	if maxWidth > 70 {
 		maxWidth = 70
@@ -123,14 +130,14 @@ func renderActions(recs []recommendation, intents []intent, cursor int, width, h
 	var sections []string
 
 	// --- Needs attention section ---
-	sections = append(sections, renderRecsSection(recs, cursor, innerWidth))
+	sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
 
 	// --- Divider ---
 	divStyle := lipgloss.NewStyle().Foreground(colorSurface1)
 	sections = append(sections, divStyle.Render(strings.Repeat("\u2500", innerWidth)))
 
 	// --- I want to... section ---
-	sections = append(sections, renderIntentsSection(intents, len(recs), cursor, innerWidth))
+	sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
 
 	// --- Footer ---
 	sections = append(sections, renderActionsFooter())
@@ -146,12 +153,20 @@ func renderActions(recs []recommendation, intents []intent, cursor int, width, h
 	return boxStyle.Render(content)
 }
 
-// renderRecsSection renders the "Needs attention" section.
+// renderRecsSection renders the "Needs attention" section (backward-compatible).
 func renderRecsSection(recs []recommendation, cursor int, innerWidth int) string {
+	return renderRecsSectionWithState(recs, cursor, innerWidth, false, -1, nil)
+}
+
+// renderRecsSectionWithState renders the "Needs attention" section with execution state.
+func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth int,
+	executing bool, executingIndex int, results map[int]actionResultMsg) string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	redStyle := lipgloss.NewStyle().Foreground(colorRed)
 	boldBlue := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 
 	var lines []string
@@ -172,23 +187,40 @@ func renderRecsSection(recs []recommendation, cursor int, innerWidth int) string
 			lines = append(lines, dimStyle.Render("  "+rec.detail))
 		}
 
-		// Action line (selectable)
-		hint := "enter"
-		if !rec.action.inline {
-			hint = "\u2192"
-		}
-
-		if cursor == i {
-			actionLine := boldBlue.Render("> " + rec.action.label)
-			hintText := dimStyle.Render(hint)
-			gap := innerWidth - lipgloss.Width(actionLine) - lipgloss.Width(hintText)
-			if gap < 1 {
-				gap = 1
+		// Check for execution state on this item
+		if result, hasResult := results[i]; hasResult {
+			// Show result
+			if result.success {
+				lines = append(lines, greenStyle.Render("\u2713 "+result.message))
+			} else {
+				errMsg := result.message
+				if errMsg == "" && result.err != nil {
+					errMsg = result.err.Error()
+				}
+				lines = append(lines, redStyle.Render("\u2717 "+errMsg))
 			}
-			lines = append(lines, actionLine+strings.Repeat(" ", gap)+hintText)
+		} else if executing && executingIndex == i {
+			// Show executing spinner
+			lines = append(lines, yellowStyle.Render("\u27f3 "+rec.action.label+"..."))
 		} else {
-			actionLine := dimStyle.Render("  " + rec.action.label)
-			lines = append(lines, actionLine)
+			// Normal action line (selectable)
+			hint := "enter"
+			if !rec.action.inline {
+				hint = "\u2192"
+			}
+
+			if cursor == i {
+				actionLine := boldBlue.Render("> " + rec.action.label)
+				hintText := dimStyle.Render(hint)
+				gap := innerWidth - lipgloss.Width(actionLine) - lipgloss.Width(hintText)
+				if gap < 1 {
+					gap = 1
+				}
+				lines = append(lines, actionLine+strings.Repeat(" ", gap)+hintText)
+			} else {
+				actionLine := dimStyle.Render("  " + rec.action.label)
+				lines = append(lines, actionLine)
+			}
 		}
 
 		// Add spacing between recommendations (but not after the last one)
@@ -200,11 +232,20 @@ func renderRecsSection(recs []recommendation, cursor int, innerWidth int) string
 	return strings.Join(lines, "\n")
 }
 
-// renderIntentsSection renders the "I want to..." section.
+// renderIntentsSection renders the "I want to..." section (backward-compatible).
 func renderIntentsSection(intents []intent, recCount, cursor int, innerWidth int) string {
+	return renderIntentsSectionWithState(intents, recCount, cursor, innerWidth, false, -1, nil)
+}
+
+// renderIntentsSectionWithState renders the "I want to..." section with execution state.
+func renderIntentsSectionWithState(intents []intent, recCount, cursor int, innerWidth int,
+	executing bool, executingIndex int, results map[int]actionResultMsg) string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	redStyle := lipgloss.NewStyle().Foreground(colorRed)
 	boldBlue := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 
 	var lines []string
@@ -214,6 +255,27 @@ func renderIntentsSection(intents []intent, recCount, cursor int, innerWidth int
 	for i, it := range intents {
 		globalIdx := recCount + i
 		isSelected := cursor == globalIdx
+
+		// Check for execution state on this item
+		if result, hasResult := results[globalIdx]; hasResult {
+			// Show result
+			if result.success {
+				lines = append(lines, greenStyle.Render("\u2713 "+result.message))
+			} else {
+				errMsg := result.message
+				if errMsg == "" && result.err != nil {
+					errMsg = result.err.Error()
+				}
+				lines = append(lines, redStyle.Render("\u2717 "+errMsg))
+			}
+			continue
+		}
+
+		if executing && executingIndex == globalIdx {
+			// Show executing spinner
+			lines = append(lines, yellowStyle.Render("\u27f3 "+it.action.label+"..."))
+			continue
+		}
 
 		if isSelected {
 			label := boldBlue.Render("> " + it.label)
