@@ -266,6 +266,9 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			jf.syncDir = m.syncDir
 			m.subView = jf
 			m.activeView = viewSubView
+		case "view-config":
+			m.subView = NewConfigDetails(m.state, m.width, m.height)
+			m.activeView = viewSubView
 		case "edit-config":
 			m.LaunchConfigEditor = true
 			return m, tea.Quit
@@ -319,6 +322,9 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			jf.claudeDir = m.claudeDir
 			jf.syncDir = m.syncDir
 			m.subView = jf
+			m.activeView = viewSubView
+		case "view-config":
+			m.subView = NewConfigDetails(m.state, m.width, m.height)
 			m.activeView = viewSubView
 		case "edit-config":
 			m.LaunchConfigEditor = true
