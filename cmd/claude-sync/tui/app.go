@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ruminaider/claude-sync/internal/commands"
 )
 
@@ -34,6 +37,13 @@ type AppModel struct {
 	// Action screen state
 	recommendations []recommendation
 	intents         []intent
+
+	// Filter mode state
+	filterMode bool
+	filterText string
+
+	// Help overlay state
+	showHelp bool
 
 	// Inline action execution state
 	executing        bool                   // true while action is running
@@ -122,8 +132,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
-		// Global keys (work in any view)
-		if msg.String() == "q" || msg.String() == "ctrl+c" {
+		// Global keys (work in any view unless filter/help is active)
+		if msg.String() == "ctrl+c" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		if msg.String() == "q" && !m.filterMode && !m.showHelp {
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -181,9 +195,37 @@ func (m AppModel) viewDashboard() string {
 // --- Actions view ---
 
 func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	total := actionItemCount(m.recommendations, m.intents)
+	// Help overlay takes priority — any key dismisses it
+	if m.showHelp {
+		m.showHelp = false
+		return m, nil
+	}
+
+	// Filter mode — route keystrokes to filter input
+	if m.filterMode {
+		return m.updateFilterMode(msg)
+	}
+
+	// Get filtered lists for navigation
+	filteredRecs := filterRecommendations(m.recommendations, m.filterText)
+	filteredIntents := filterIntents(m.intents, m.filterText)
+	total := actionItemCount(filteredRecs, filteredIntents)
+
 	switch msg.String() {
+	case "/":
+		m.filterMode = true
+		m.filterText = ""
+		m.actionCursor = 0
+		return m, nil
+	case "?":
+		m.showHelp = true
+		return m, nil
 	case "esc":
+		if m.filterText != "" {
+			m.filterText = ""
+			m.actionCursor = 0
+			return m, nil
+		}
 		m.activeView = viewDashboard
 	case "j", "down":
 		if m.actionCursor < total-1 {
@@ -197,12 +239,12 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.executing {
 			return m, nil // ignore while executing
 		}
-		action := selectedAction(m.recommendations, m.intents, m.actionCursor)
+		action := selectedAction(filteredRecs, filteredIntents, m.actionCursor)
 		if action == nil {
 			return m, nil
 		}
 		if action.inline {
-			// Execute inline
+			// Execute inline — find the real index in the unfiltered list for result tracking
 			m.executing = true
 			m.executingIndex = m.actionCursor
 			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
@@ -232,8 +274,131 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.filterMode = false
+		m.filterText = ""
+		m.actionCursor = 0
+		return m, nil
+	case tea.KeyBackspace:
+		if len(m.filterText) > 0 {
+			m.filterText = m.filterText[:len(m.filterText)-1]
+			m.actionCursor = 0
+		}
+		return m, nil
+	case tea.KeyEnter:
+		m.filterMode = false
+		// Execute the selected item from filtered list
+		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
+		filteredIntents := filterIntents(m.intents, m.filterText)
+		action := selectedAction(filteredRecs, filteredIntents, m.actionCursor)
+		if action == nil {
+			return m, nil
+		}
+		if m.executing {
+			return m, nil
+		}
+		if action.inline {
+			m.executing = true
+			m.executingIndex = m.actionCursor
+			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
+		}
+		switch action.id {
+		case "switch-profile":
+			picker := NewProfilePicker(m.state, m.width, m.height)
+			picker.SetPaths(m.claudeDir, m.syncDir)
+			m.subView = picker
+			m.activeView = viewSubView
+		case "browse-plugins":
+			browser := NewPluginBrowser(m.state, m.width, m.height)
+			m.subView = browser
+			m.activeView = viewSubView
+		case "join-config":
+			jf := NewJoinFlow(m.width, m.height)
+			jf.claudeDir = m.claudeDir
+			jf.syncDir = m.syncDir
+			m.subView = jf
+			m.activeView = viewSubView
+		case "edit-config":
+			m.LaunchConfigEditor = true
+			return m, tea.Quit
+		}
+		return m, nil
+	case tea.KeyRunes:
+		m.filterText += string(msg.Runes)
+		m.actionCursor = 0
+		return m, nil
+	}
+
+	// Arrow key navigation within filter mode (j/k are typed as filter text)
+	switch msg.Type {
+	case tea.KeyDown:
+		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
+		filteredIntents := filterIntents(m.intents, m.filterText)
+		total := actionItemCount(filteredRecs, filteredIntents)
+		if m.actionCursor < total-1 {
+			m.actionCursor++
+		}
+	case tea.KeyUp:
+		if m.actionCursor > 0 {
+			m.actionCursor--
+		}
+	}
+	return m, nil
+}
+
 func (m AppModel) viewActions() string {
-	return renderActionsWithState(m.recommendations, m.intents, m.actionCursor, m.width, m.height, m.executing, m.executingIndex, m.executionResults)
+	if m.showHelp {
+		return m.viewActionsHelp()
+	}
+
+	recs := filterRecommendations(m.recommendations, m.filterText)
+	intents := filterIntents(m.intents, m.filterText)
+
+	return renderActionsFiltered(recs, intents, m.actionCursor, m.width, m.height,
+		m.executing, m.executingIndex, m.executionResults,
+		m.filterMode, m.filterText)
+}
+
+func (m AppModel) viewActionsHelp() string {
+	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+
+	maxWidth := m.width - 2
+	if maxWidth > 70 {
+		maxWidth = 70
+	}
+	if maxWidth < 30 {
+		maxWidth = 30
+	}
+
+	var lines []string
+	lines = append(lines, titleStyle.Render("Help"))
+	lines = append(lines, "")
+	lines = append(lines, headerStyle.Render("Navigation"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2191/k")+"     Move up"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2193/j")+"     Move down"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("enter")+"   Execute action or open sub-view"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("esc")+"     Go back to dashboard"))
+	lines = append(lines, "")
+	lines = append(lines, headerStyle.Render("Actions"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("/")+"       Filter actions"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("?")+"       Show this help"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("q")+"       Quit"))
+	lines = append(lines, "")
+	lines = append(lines, dimStyle.Render("press any key to close"))
+
+	content := strings.Join(lines, "\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorBlue).
+		Padding(1, 2).
+		Width(maxWidth)
+
+	return boxStyle.Render(content)
 }
 
 // --- Sub-view ---

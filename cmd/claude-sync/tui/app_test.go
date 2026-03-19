@@ -300,3 +300,271 @@ func TestAppModel_NormalQuit_DoesNotSetLaunchFlag(t *testing.T) {
 	assert.True(t, app.quitting)
 	assert.False(t, app.LaunchConfigEditor, "normal quit should not set LaunchConfigEditor")
 }
+
+// --- Filter mode tests ---
+
+func TestAppModel_FilterMode_SlashEnters(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true, Profiles: []string{"w"}, Plugins: []commands.PluginInfo{{Name: "t", Status: "upstream"}}}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	app := updated.(AppModel)
+	assert.True(t, app.filterMode)
+	assert.Equal(t, "", app.filterText)
+	assert.Equal(t, 0, app.actionCursor)
+}
+
+func TestAppModel_FilterMode_EscExits(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterMode = true
+	m.filterText = "test"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app := updated.(AppModel)
+	assert.False(t, app.filterMode)
+	assert.Equal(t, "", app.filterText)
+}
+
+func TestAppModel_FilterMode_TypingAppendsText(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterMode = true
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	app := updated.(AppModel)
+	assert.Equal(t, "p", app.filterText)
+
+	updated, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	app = updated.(AppModel)
+	assert.Equal(t, "pl", app.filterText)
+}
+
+func TestAppModel_FilterMode_BackspaceRemovesChar(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterMode = true
+	m.filterText = "plug"
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	app := updated.(AppModel)
+	assert.Equal(t, "plu", app.filterText)
+}
+
+func TestAppModel_FilterMode_CursorResetsOnKeystroke(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterMode = true
+	m.actionCursor = 3
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	app := updated.(AppModel)
+	assert.Equal(t, 0, app.actionCursor)
+}
+
+func TestAppModel_FilterMode_QDoesNotQuit(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterMode = true
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	app := updated.(AppModel)
+	assert.False(t, app.quitting, "q should not quit while in filter mode")
+	assert.Nil(t, cmd)
+	assert.Equal(t, "q", app.filterText) // q typed into filter
+}
+
+func TestAppModel_FilterMode_EscWithFilterTextClearsFilter(t *testing.T) {
+	// When there's active filter text and not in filterMode,
+	// esc should clear the filter text instead of going to dashboard.
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterText = "plug"
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app := updated.(AppModel)
+	assert.Equal(t, viewActions, app.activeView, "should stay on actions view")
+	assert.Equal(t, "", app.filterText, "filter text should be cleared")
+}
+
+// --- Filter function tests ---
+
+func TestFilterRecommendations(t *testing.T) {
+	recs := []recommendation{
+		{title: "Config is behind", detail: "3 commits"},
+		{title: "Plugin update available"},
+	}
+	filtered := filterRecommendations(recs, "plugin")
+	assert.Len(t, filtered, 1)
+	assert.Contains(t, filtered[0].title, "Plugin")
+}
+
+func TestFilterRecommendations_MatchesDetail(t *testing.T) {
+	recs := []recommendation{
+		{title: "Config is behind", detail: "3 commits behind remote"},
+		{title: "Plugin update available"},
+	}
+	filtered := filterRecommendations(recs, "commits")
+	assert.Len(t, filtered, 1)
+	assert.Contains(t, filtered[0].detail, "commits")
+}
+
+func TestFilterRecommendations_MatchesActionLabel(t *testing.T) {
+	recs := []recommendation{
+		{title: "Config is behind", action: actionItem{label: "Pull and apply now"}},
+		{title: "Plugin update available", action: actionItem{label: "Update to v2"}},
+	}
+	filtered := filterRecommendations(recs, "pull")
+	assert.Len(t, filtered, 1)
+	assert.Contains(t, filtered[0].action.label, "Pull")
+}
+
+func TestFilterRecommendations_EmptyQuery(t *testing.T) {
+	recs := []recommendation{{title: "test1"}, {title: "test2"}}
+	assert.Len(t, filterRecommendations(recs, ""), 2)
+}
+
+func TestFilterRecommendations_CaseInsensitive(t *testing.T) {
+	recs := []recommendation{
+		{title: "Plugin Update Available"},
+	}
+	filtered := filterRecommendations(recs, "PLUGIN")
+	assert.Len(t, filtered, 1)
+}
+
+func TestFilterIntents(t *testing.T) {
+	intents := []intent{
+		{label: "Add or discover new plugins"},
+		{label: "Switch settings profile"},
+		{label: "Push my local changes"},
+	}
+	filtered := filterIntents(intents, "plug")
+	assert.Len(t, filtered, 1)
+	assert.Contains(t, filtered[0].label, "plugins")
+}
+
+func TestFilterIntents_EmptyQuery(t *testing.T) {
+	intents := []intent{{label: "test1"}, {label: "test2"}}
+	assert.Len(t, filterIntents(intents, ""), 2)
+}
+
+func TestFilterIntents_NoMatch(t *testing.T) {
+	intents := []intent{
+		{label: "Add plugins"},
+		{label: "Push changes"},
+	}
+	filtered := filterIntents(intents, "zzzzz")
+	assert.Len(t, filtered, 0)
+}
+
+// --- Help overlay tests ---
+
+func TestAppModel_HelpOverlay_QuestionMarkOpens(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	app := updated.(AppModel)
+	assert.True(t, app.showHelp)
+}
+
+func TestAppModel_HelpOverlay_AnyKeyCloses(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.showHelp = true
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	app := updated.(AppModel)
+	assert.False(t, app.showHelp)
+}
+
+func TestAppModel_HelpOverlay_EscCloses(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.showHelp = true
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app := updated.(AppModel)
+	assert.False(t, app.showHelp)
+}
+
+func TestAppModel_HelpOverlay_QDoesNotQuit(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.showHelp = true
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	app := updated.(AppModel)
+	assert.False(t, app.quitting, "q should dismiss help, not quit")
+	assert.False(t, app.showHelp)
+	assert.Nil(t, cmd)
+}
+
+func TestAppModel_HelpOverlay_ViewContainsHelpText(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.showHelp = true
+	m.width = 80
+	m.height = 40
+
+	view := m.View()
+	assert.Contains(t, view, "Help")
+	assert.Contains(t, view, "Navigation")
+	assert.Contains(t, view, "Actions")
+	assert.Contains(t, view, "press any key to close")
+}
+
+func TestAppModel_FilterMode_ViewShowsFilterBar(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterMode = true
+	m.filterText = "plug"
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+	m.width = 80
+	m.height = 40
+
+	view := m.View()
+	assert.Contains(t, view, "plug")
+}
+
+func TestAppModel_FilterMode_NoResults(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewActions
+	m.filterText = "zzzznonexistent"
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+	m.width = 80
+	m.height = 40
+
+	view := m.View()
+	assert.Contains(t, view, "No matching actions")
+}

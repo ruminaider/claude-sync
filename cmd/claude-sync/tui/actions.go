@@ -299,6 +299,100 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 	return strings.Join(lines, "\n")
 }
 
+// renderActionsFiltered renders the action screen with optional filter bar.
+func renderActionsFiltered(recs []recommendation, intents []intent, cursor int, width, height int,
+	executing bool, executingIndex int, results map[int]actionResultMsg,
+	filterMode bool, filterText string) string {
+
+	maxWidth := width - 2
+	if maxWidth > 70 {
+		maxWidth = 70
+	}
+	if maxWidth < 30 {
+		maxWidth = 30
+	}
+
+	// Available width inside the box (subtract border + padding: 2 border + 4 padding)
+	innerWidth := maxWidth - 6
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+
+	var sections []string
+
+	// --- Filter bar (when active) ---
+	if filterMode || filterText != "" {
+		filterStyle := lipgloss.NewStyle().Foreground(colorBlue)
+		cursorChar := ""
+		if filterMode {
+			cursorChar = "\u2588" // block cursor
+		}
+		sections = append(sections, filterStyle.Render("/ "+filterText+cursorChar))
+	}
+
+	// --- No results message ---
+	if len(recs) == 0 && len(intents) == 0 && filterText != "" {
+		dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+		sections = append(sections, dimStyle.Render("No matching actions"))
+	} else {
+		// --- Needs attention section ---
+		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
+
+		// --- Divider ---
+		divStyle := lipgloss.NewStyle().Foreground(colorSurface1)
+		sections = append(sections, divStyle.Render(strings.Repeat("\u2500", innerWidth)))
+
+		// --- I want to... section ---
+		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
+	}
+
+	// --- Footer ---
+	sections = append(sections, renderActionsFooter())
+
+	content := strings.Join(sections, "\n\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorSurface1).
+		Padding(1, 2).
+		Width(maxWidth)
+
+	return boxStyle.Render(content)
+}
+
+// filterRecommendations filters recommendations by case-insensitive substring match
+// on title, detail, or action label.
+func filterRecommendations(recs []recommendation, query string) []recommendation {
+	if query == "" {
+		return recs
+	}
+	query = strings.ToLower(query)
+	var filtered []recommendation
+	for _, r := range recs {
+		if strings.Contains(strings.ToLower(r.title), query) ||
+			strings.Contains(strings.ToLower(r.detail), query) ||
+			strings.Contains(strings.ToLower(r.action.label), query) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// filterIntents filters intents by case-insensitive substring match on label.
+func filterIntents(intents []intent, query string) []intent {
+	if query == "" {
+		return intents
+	}
+	query = strings.ToLower(query)
+	var filtered []intent
+	for _, i := range intents {
+		if strings.Contains(strings.ToLower(i.label), query) {
+			filtered = append(filtered, i)
+		}
+	}
+	return filtered
+}
+
 // renderActionsFooter renders the keyboard shortcut hints for the actions view.
 func renderActionsFooter() string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
