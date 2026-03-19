@@ -31,6 +31,10 @@ type AppModel struct {
 	dashboardScroll int
 	actionCursor    int
 
+	// Action screen state
+	recommendations []recommendation
+	intents         []intent
+
 	// sub-view state (populated when activeView == viewSubView)
 	subView tea.Model
 }
@@ -107,6 +111,9 @@ func (m AppModel) View() string {
 func (m AppModel) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
+		m.recommendations = buildRecommendations(m.state)
+		m.intents = buildIntents(m.state)
+		m.actionCursor = 0
 		m.activeView = viewActions
 	case "j", "down":
 		m.dashboardScroll++
@@ -125,21 +132,26 @@ func (m AppModel) viewDashboard() string {
 // --- Actions view ---
 
 func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	total := actionItemCount(m.recommendations, m.intents)
 	switch msg.String() {
 	case "esc":
 		m.activeView = viewDashboard
 	case "j", "down":
-		m.actionCursor++
+		if m.actionCursor < total-1 {
+			m.actionCursor++
+		}
 	case "k", "up":
 		if m.actionCursor > 0 {
 			m.actionCursor--
 		}
+	case "enter":
+		// Action execution will be wired in Task 6; no-op for now.
 	}
 	return m, nil
 }
 
 func (m AppModel) viewActions() string {
-	return "Actions (press esc for dashboard, q to quit)"
+	return renderActions(m.recommendations, m.intents, m.actionCursor, m.width, m.height)
 }
 
 // --- Sub-view ---

@@ -190,7 +190,7 @@ func TestAppModel_ViewDashboard_ShowsDashboard(t *testing.T) {
 	assert.Contains(t, view, "quit")
 }
 
-func TestAppModel_ViewActions_ShowsPlaceholder(t *testing.T) {
+func TestAppModel_ViewActions_ShowsActionScreen(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
 
@@ -200,5 +200,6 @@ func TestAppModel_ViewActions_ShowsPlaceholder(t *testing.T) {
 	app := model.(AppModel)
 
 	view := app.View()
-	assert.Contains(t, view, "Actions")
+	assert.Contains(t, view, "Needs attention")
+	assert.Contains(t, view, "I want to")
 }
