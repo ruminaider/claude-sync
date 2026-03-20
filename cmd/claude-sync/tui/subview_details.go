@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -115,7 +114,7 @@ func buildConfigDetailsContent(state commands.MenuState) string {
 		lines = append(lines, dimStyle.Render("No managed projects"))
 	} else {
 		for _, proj := range state.Projects {
-			path := shortenHomePath(proj.Path)
+			path := shortenPath(proj.Path)
 			profileTag := ""
 			if proj.Profile != "" {
 				profileTag = " [" + proj.Profile + "]"
@@ -143,7 +142,7 @@ func buildConfigDetailsContent(state commands.MenuState) string {
 	// --- This Project section ---
 	lines = append(lines, sectionLine(sectionStyle, "This Project", 60))
 	if state.ProjectDir != "" {
-		lines = append(lines, textStyle.Render("Path: "+shortenHomePath(state.ProjectDir)))
+		lines = append(lines, textStyle.Render("Path: "+shortenPath(state.ProjectDir)))
 		if state.ProjectProfile != "" {
 			lines = append(lines, textStyle.Render("Profile: "+state.ProjectProfile))
 		} else {
@@ -170,18 +169,6 @@ func sectionLine(style lipgloss.Style, label string, width int) string {
 		prefix += strings.Repeat("\u2500", remaining)
 	}
 	return style.Render(prefix)
-}
-
-// shortenHomePath replaces the home directory prefix with ~.
-func shortenHomePath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	if strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
-	}
-	return path
 }
 
 func (m ConfigDetails) Init() tea.Cmd {
