@@ -58,9 +58,19 @@ func executeAction(index int, actionID string, args []string,
 				msg = "No changes to push"
 			} else {
 				err = commands.PushApply(commands.PushApplyOptions{
-					ClaudeDir: claudeDir,
-					SyncDir:   syncDir,
-					// TODO: populate from scan result in later task
+					ClaudeDir:         claudeDir,
+					SyncDir:           syncDir,
+					AddPlugins:        scanResult.AddedPlugins,
+					RemovePlugins:     scanResult.RemovedPlugins,
+					UpdatePermissions: scanResult.ChangedPermissions,
+					UpdateClaudeMD:    scanResult.ChangedClaudeMD != nil,
+					UpdateMCP:         scanResult.ChangedMCP,
+					UpdateKeybindings: scanResult.ChangedKeybindings,
+					UpdateCommands:    scanResult.ChangedCommands,
+					UpdateSkills:      scanResult.ChangedSkills,
+					OrphanedCommands:  scanResult.OrphanedCommands,
+					OrphanedSkills:    scanResult.OrphanedSkills,
+					DirtyWorkingTree:  scanResult.DirtyWorkingTree,
 				})
 				if err == nil {
 					msg = "Changes pushed successfully"
