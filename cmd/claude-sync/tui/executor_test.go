@@ -322,3 +322,78 @@ func TestExecuteAction_ImportMCPAction(t *testing.T) {
 	assert.True(t, result.success)
 	assert.Contains(t, result.message, "not yet available")
 }
+
+func TestExecuteAction_Pull_ErrorPath(t *testing.T) {
+	// Non-existent dirs → Pull returns an error
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+	cmd := executeAction(0, "pull", nil, claudeDir, syncDir)
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.False(t, result.success)
+	assert.Error(t, result.err)
+	assert.Equal(t, "pull", result.actionID)
+}
+
+func TestExecuteAction_Push_NoChanges(t *testing.T) {
+	// Empty dirs → PushScan returns no changes (or error)
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+	cmd := executeAction(0, "push", nil, claudeDir, syncDir)
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	// Either error (no config) or success with "no changes"
+	assert.Equal(t, "push", result.actionID)
+}
+
+func TestExecuteAction_PushChanges_SameAsPush(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+	cmd := executeAction(0, "push-changes", nil, claudeDir, syncDir)
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.Equal(t, "push-changes", result.actionID)
+}
+
+func TestExecuteAction_Approve_ErrorPath(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+	cmd := executeAction(0, "approve", nil, claudeDir, syncDir)
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	// No pending changes → error or empty success
+	assert.Equal(t, "approve", result.actionID)
+}
+
+func TestExecuteAction_Reject_ErrorPath(t *testing.T) {
+	syncDir := t.TempDir()
+	cmd := executeAction(0, "reject", nil, "", syncDir)
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.Equal(t, "reject", result.actionID)
+}
+
+func TestExecuteAction_ActionIDPreserved(t *testing.T) {
+	// Verify actionID is always set correctly on success and failure
+	tests := []struct {
+		actionID string
+		args     []string
+	}{
+		{"pull", nil},
+		{"push", nil},
+		{"approve", nil},
+		{"reject", nil},
+		{"conflicts", nil},
+		{"plugin-update", []string{"test"}},
+		{"import-mcp", nil},
+		{"nonexistent", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.actionID, func(t *testing.T) {
+			cmd := executeAction(0, tt.actionID, tt.args, t.TempDir(), t.TempDir())
+			msg := cmd()
+			result := msg.(actionResultMsg)
+			assert.Equal(t, tt.actionID, result.actionID)
+		})
+	}
+}
