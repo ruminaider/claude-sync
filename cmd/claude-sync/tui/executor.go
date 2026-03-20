@@ -8,12 +8,6 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 )
 
-// actionStartMsg signals an inline action has started executing.
-type actionStartMsg struct {
-	itemIndex int
-	actionID  string
-}
-
 // actionResultMsg signals an inline action has completed.
 type actionResultMsg struct {
 	itemIndex int

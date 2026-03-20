@@ -116,10 +116,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recommendations = buildRecommendations(m.state)
 		m.intents = buildIntents(m.state)
 		return m, nil
-	case actionStartMsg:
-		m.executing = true
-		m.executingActionID = msg.actionID
-		return m, nil
 	case actionResultMsg:
 		m.executing = false
 		m.executionResults = map[string]actionResultMsg{

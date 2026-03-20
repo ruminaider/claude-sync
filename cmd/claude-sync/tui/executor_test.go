@@ -10,25 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestAppModel_InlineExecution_SetsExecuting(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists:  true,
-		CommitsBehind: 3,
-		Profiles:      []string{"work"},
-		Plugins:       []commands.PluginInfo{{Name: "test", Status: "upstream"}},
-	}
-	m := NewAppModel(state)
-	m.activeView = viewMain
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
-
-	// Simulate action start
-	updated, _ := m.Update(actionStartMsg{itemIndex: 0, actionID: "pull"})
-	app := updated.(AppModel)
-	assert.True(t, app.executing)
-	assert.Equal(t, "pull", app.executingActionID)
-}
-
 func TestAppModel_InlineExecution_HandlesResult(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
