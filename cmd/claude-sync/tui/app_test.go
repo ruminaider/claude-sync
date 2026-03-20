@@ -620,6 +620,20 @@ func TestAppModel_ViewPlugins_OpensSubView(t *testing.T) {
 	assert.NotNil(t, app.subView)
 }
 
+// --- openSubView Init tests ---
+
+func TestAppModel_OpenSubView_JoinConfig_ReturnsInitCmd(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+
+	updated, cmd := m.openSubView("join-config")
+	app := updated.(AppModel)
+	assert.Equal(t, viewSubView, app.activeView)
+	assert.NotNil(t, cmd, "JoinFlow.Init() returns textinput.Blink, should not be nil")
+}
+
 // --- Sub-view q key does not quit ---
 
 func TestAppModel_QDoesNotQuitInSubView(t *testing.T) {

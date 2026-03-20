@@ -345,6 +345,9 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 		m.LaunchConfigEditor = true
 		return m, tea.Quit
 	}
+	if m.subView != nil {
+		return m, m.subView.Init()
+	}
 	return m, nil
 }
 
