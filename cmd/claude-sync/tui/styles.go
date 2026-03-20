@@ -199,6 +199,43 @@ var (
 				Foreground(colorSurface1)
 )
 
+// Shared text styles used across TUI views.
+var (
+	stDim     = lipgloss.NewStyle().Foreground(colorSubtext0)
+	stText    = lipgloss.NewStyle().Foreground(colorText)
+	stGreen   = lipgloss.NewStyle().Foreground(colorGreen)
+	stRed     = lipgloss.NewStyle().Foreground(colorRed)
+	stYellow  = lipgloss.NewStyle().Foreground(colorYellow)
+	stBlue    = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	stSection = lipgloss.NewStyle().Foreground(colorSurface1)
+)
+
+// clampWidth returns a maxWidth clamped to [30, 70] from terminal width,
+// and an innerWidth accounting for border (2) + padding (4).
+func clampWidth(termWidth int) (maxWidth, innerWidth int) {
+	maxWidth = termWidth - 2
+	if maxWidth > 70 {
+		maxWidth = 70
+	}
+	if maxWidth < 30 {
+		maxWidth = 30
+	}
+	innerWidth = maxWidth - 6
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+	return maxWidth, innerWidth
+}
+
+// contentBox returns a rounded-border box style at the given width and border color.
+func contentBox(maxWidth int, borderColor lipgloss.Color) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Width(maxWidth)
+}
+
 // Tab bar container style.
 var (
 	// TabBarStyle is the background strip for the tab bar row.
