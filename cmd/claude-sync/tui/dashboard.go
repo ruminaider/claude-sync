@@ -14,9 +14,6 @@ func renderSummary(state commands.MenuState, version string) string {
 	labelStyle := lipgloss.NewStyle().Foreground(colorPeach)
 	valueStyle := lipgloss.NewStyle().Foreground(colorText)
 	tealStyle := lipgloss.NewStyle().Foreground(colorTeal)
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 
 	var lines []string
 
@@ -26,7 +23,7 @@ func renderSummary(state commands.MenuState, version string) string {
 			valueStyle.Render(state.ConfigRepo)+"  "+tealStyle.Render("✓ connected"))
 	} else {
 		lines = append(lines, labelStyle.Render("User config     ")+
-			yellowStyle.Render("not configured"))
+			stYellow.Render("not configured"))
 	}
 
 	// User profile line
@@ -36,7 +33,7 @@ func renderSummary(state commands.MenuState, version string) string {
 	} else if len(state.Profiles) > 0 {
 		lines = append(lines, labelStyle.Render("User profile    ")+
 			valueStyle.Render("base (default)")+"  "+
-			dimStyle.Render(fmt.Sprintf("%d others available", len(state.Profiles))))
+			stDim.Render(fmt.Sprintf("%d others available", len(state.Profiles))))
 	} else {
 		lines = append(lines, labelStyle.Render("User profile    ")+
 			valueStyle.Render("base (default)"))
@@ -55,16 +52,16 @@ func renderSummary(state commands.MenuState, version string) string {
 		lines = append(lines, labelStyle.Render("This project    ")+valueStyle.Render(shortPath))
 
 		if !state.ProjectInitialized {
-			lines = append(lines, yellowStyle.Render("⚠ No settings profile assigned to this project"))
+			lines = append(lines, stYellow.Render("⚠ No settings profile assigned to this project"))
 		} else if state.ProjectProfile != "" {
 			lines = append(lines, labelStyle.Render("Project profile ")+
-				greenStyle.Render("● ")+valueStyle.Render(state.ProjectProfile))
+				stGreen.Render("● ")+valueStyle.Render(state.ProjectProfile))
 		} else {
 			lines = append(lines, labelStyle.Render("Project profile ")+
 				valueStyle.Render("base (default)"))
 		}
 	} else {
-		lines = append(lines, dimStyle.Render("Not in a project directory"))
+		lines = append(lines, stDim.Render("Not in a project directory"))
 	}
 
 	return strings.Join(lines, "\n")
@@ -140,8 +137,7 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 
 // renderMainFooter renders the keyboard shortcut hints for the main screen.
 func renderMainFooter() string {
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	return dimStyle.Render("/ filter  ? help  q quit")
+	return stDim.Render("/ filter  ? help  q quit")
 }
 
 // renderFreshInstall renders the welcome screen for a fresh installation.
@@ -156,17 +152,15 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 
-	title := titleStyle.Render("claude-sync") + " " + dimStyle.Render("v"+version)
+	title := titleStyle.Render("claude-sync") + " " + stDim.Render("v"+version)
 
 	// Build option lines with cursor indicator
 	createPrefix := "  "
-	createLabel := textStyle.Render("Create new config")
+	createLabel := stText.Render("Create new config")
 	joinPrefix := "  "
-	joinLabel := textStyle.Render("Join a shared config")
+	joinLabel := stText.Render("Join a shared config")
 
 	if cursor == 0 {
 		createPrefix = "> "
@@ -179,12 +173,12 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 	var lines []string
 	lines = append(lines, title)
 	lines = append(lines, "")
-	lines = append(lines, textStyle.Render("No config found. Get started:"))
+	lines = append(lines, stText.Render("No config found. Get started:"))
 	lines = append(lines, "")
-	lines = append(lines, textStyle.Render(createPrefix)+createLabel+"  "+dimStyle.Render("from this machine's Claude Code setup"))
-	lines = append(lines, textStyle.Render(joinPrefix)+joinLabel+"  "+dimStyle.Render("clone a shared config repo"))
+	lines = append(lines, stText.Render(createPrefix)+createLabel+"  "+stDim.Render("from this machine's Claude Code setup"))
+	lines = append(lines, stText.Render(joinPrefix)+joinLabel+"  "+stDim.Render("clone a shared config repo"))
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("↑↓ navigate  enter select  q quit"))
+	lines = append(lines, stDim.Render("↑↓ navigate  enter select  q quit"))
 
 	content := strings.Join(lines, "\n")
 

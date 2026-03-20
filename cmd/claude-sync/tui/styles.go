@@ -199,6 +199,17 @@ var (
 				Foreground(colorSurface1)
 )
 
+// Shared text styles used across TUI views.
+var (
+	stDim     = lipgloss.NewStyle().Foreground(colorSubtext0)
+	stText    = lipgloss.NewStyle().Foreground(colorText)
+	stGreen   = lipgloss.NewStyle().Foreground(colorGreen)
+	stRed     = lipgloss.NewStyle().Foreground(colorRed)
+	stYellow  = lipgloss.NewStyle().Foreground(colorYellow)
+	stBlue    = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	stSection = lipgloss.NewStyle().Foreground(colorSurface1)
+)
+
 // Tab bar container style.
 var (
 	// TabBarStyle is the background strip for the tab bar row.

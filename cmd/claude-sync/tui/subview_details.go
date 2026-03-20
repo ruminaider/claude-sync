@@ -48,11 +48,6 @@ func NewConfigDetails(state commands.MenuState, width, height int) ConfigDetails
 // buildConfigDetailsContent builds the pre-rendered text content from MenuState.
 func buildConfigDetailsContent(state commands.MenuState) string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
-	sectionStyle := lipgloss.NewStyle().Foreground(colorSurface1)
 
 	var lines []string
 
@@ -60,24 +55,24 @@ func buildConfigDetailsContent(state commands.MenuState) string {
 	lines = append(lines, "")
 
 	// --- Config section ---
-	lines = append(lines, sectionLine(sectionStyle, "Config", 60))
+	lines = append(lines, sectionLine(stSection, "Config", 60))
 	if state.ConfigRepo != "" {
-		lines = append(lines, textStyle.Render("Repository: "+state.ConfigRepo))
+		lines = append(lines, stText.Render("Repository: "+state.ConfigRepo))
 	} else {
-		lines = append(lines, dimStyle.Render("Repository: (none)"))
+		lines = append(lines, stDim.Render("Repository: (none)"))
 	}
 	if state.ActiveProfile != "" {
-		lines = append(lines, textStyle.Render("Active profile: "+state.ActiveProfile))
+		lines = append(lines, stText.Render("Active profile: "+state.ActiveProfile))
 	} else {
-		lines = append(lines, dimStyle.Render("Active profile: (base)"))
+		lines = append(lines, stDim.Render("Active profile: (base)"))
 	}
 	lines = append(lines, "")
 
 	// --- Plugins section ---
 	pluginCount := len(state.Plugins)
-	lines = append(lines, sectionLine(sectionStyle, fmt.Sprintf("Plugins (%d)", pluginCount), 60))
+	lines = append(lines, sectionLine(stSection, fmt.Sprintf("Plugins (%d)", pluginCount), 60))
 	if pluginCount == 0 {
-		lines = append(lines, dimStyle.Render("No plugins installed"))
+		lines = append(lines, stDim.Render("No plugins installed"))
 	} else {
 		for _, p := range state.Plugins {
 			meta := p.Status
@@ -87,31 +82,31 @@ func buildConfigDetailsContent(state commands.MenuState) string {
 			if p.Marketplace != "" {
 				meta += "  " + p.Marketplace
 			}
-			lines = append(lines, textStyle.Render(fmt.Sprintf("  %-16s %s", p.Name, meta)))
+			lines = append(lines, stText.Render(fmt.Sprintf("  %-16s %s", p.Name, meta)))
 		}
 	}
 	lines = append(lines, "")
 
 	// --- Profiles section ---
 	profileCount := len(state.Profiles)
-	lines = append(lines, sectionLine(sectionStyle, fmt.Sprintf("Profiles (%d)", profileCount), 60))
+	lines = append(lines, sectionLine(stSection, fmt.Sprintf("Profiles (%d)", profileCount), 60))
 	if profileCount == 0 {
-		lines = append(lines, dimStyle.Render("No profiles configured"))
+		lines = append(lines, stDim.Render("No profiles configured"))
 	} else {
 		for _, name := range state.Profiles {
 			if name == state.ActiveProfile {
-				lines = append(lines, greenStyle.Render(fmt.Sprintf("  \u25cf %s (active)", name)))
+				lines = append(lines, stGreen.Render(fmt.Sprintf("  \u25cf %s (active)", name)))
 			} else {
-				lines = append(lines, textStyle.Render("    "+name))
+				lines = append(lines, stText.Render("    "+name))
 			}
 		}
 	}
 	lines = append(lines, "")
 
 	// --- Projects section ---
-	lines = append(lines, sectionLine(sectionStyle, "Projects", 60))
+	lines = append(lines, sectionLine(stSection, "Projects", 60))
 	if len(state.Projects) == 0 {
-		lines = append(lines, dimStyle.Render("No managed projects"))
+		lines = append(lines, stDim.Render("No managed projects"))
 	} else {
 		for _, proj := range state.Projects {
 			path := shortenPath(proj.Path)
@@ -119,43 +114,43 @@ func buildConfigDetailsContent(state commands.MenuState) string {
 			if proj.Profile != "" {
 				profileTag = " [" + proj.Profile + "]"
 			}
-			lines = append(lines, textStyle.Render("  "+path+profileTag))
+			lines = append(lines, stText.Render("  "+path+profileTag))
 		}
 	}
 	lines = append(lines, "")
 
 	// --- Sync Status section ---
-	lines = append(lines, sectionLine(sectionStyle, "Sync Status", 60))
-	lines = append(lines, textStyle.Render(fmt.Sprintf("Behind: %d commits", state.CommitsBehind)))
+	lines = append(lines, sectionLine(stSection, "Sync Status", 60))
+	lines = append(lines, stText.Render(fmt.Sprintf("Behind: %d commits", state.CommitsBehind)))
 	if state.HasPending {
-		lines = append(lines, yellowStyle.Render("Pending approvals: yes"))
+		lines = append(lines, stYellow.Render("Pending approvals: yes"))
 	} else {
-		lines = append(lines, dimStyle.Render("Pending approvals: none"))
+		lines = append(lines, stDim.Render("Pending approvals: none"))
 	}
 	if state.HasConflicts {
-		lines = append(lines, yellowStyle.Render("Conflicts: yes"))
+		lines = append(lines, stYellow.Render("Conflicts: yes"))
 	} else {
-		lines = append(lines, dimStyle.Render("Conflicts: none"))
+		lines = append(lines, stDim.Render("Conflicts: none"))
 	}
 	lines = append(lines, "")
 
 	// --- This Project section ---
-	lines = append(lines, sectionLine(sectionStyle, "This Project", 60))
+	lines = append(lines, sectionLine(stSection, "This Project", 60))
 	if state.ProjectDir != "" {
-		lines = append(lines, textStyle.Render("Path: "+shortenPath(state.ProjectDir)))
+		lines = append(lines, stText.Render("Path: "+shortenPath(state.ProjectDir)))
 		if state.ProjectProfile != "" {
-			lines = append(lines, textStyle.Render("Profile: "+state.ProjectProfile))
+			lines = append(lines, stText.Render("Profile: "+state.ProjectProfile))
 		} else {
-			lines = append(lines, dimStyle.Render("Profile: (base)"))
+			lines = append(lines, stDim.Render("Profile: (base)"))
 		}
 	} else {
-		lines = append(lines, dimStyle.Render("Not in a managed project"))
+		lines = append(lines, stDim.Render("Not in a managed project"))
 	}
 	if state.ClaudeMDCount > 0 {
-		lines = append(lines, textStyle.Render(fmt.Sprintf("CLAUDE.md sections: %d", state.ClaudeMDCount)))
+		lines = append(lines, stText.Render(fmt.Sprintf("CLAUDE.md sections: %d", state.ClaudeMDCount)))
 	}
 	if state.MCPCount > 0 {
-		lines = append(lines, textStyle.Render(fmt.Sprintf("MCP servers: %d", state.MCPCount)))
+		lines = append(lines, stText.Render(fmt.Sprintf("MCP servers: %d", state.MCPCount)))
 	}
 
 	return strings.Join(lines, "\n")
@@ -223,8 +218,6 @@ func (m ConfigDetails) View() string {
 		maxWidth = 30
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-
 	// Split content into lines and apply scroll
 	allLines := strings.Split(m.content, "\n")
 
@@ -248,7 +241,7 @@ func (m ConfigDetails) View() string {
 	var output []string
 	output = append(output, strings.Join(visibleLines, "\n"))
 	output = append(output, "")
-	output = append(output, dimStyle.Render("j/k scroll  esc back"))
+	output = append(output, stDim.Render("j/k scroll  esc back"))
 
 	content := strings.Join(output, "\n")
 

@@ -47,13 +47,10 @@ func NewActivePluginsView(state commands.MenuState, width, height int) ActivePlu
 // buildActivePluginsContent builds the pre-rendered text for the active plugins view.
 func buildActivePluginsContent(state commands.MenuState) string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	nameStyle := lipgloss.NewStyle().Foreground(colorMauve)
 	blueStyle := lipgloss.NewStyle().Foreground(colorBlue)
 	pinkStyle := lipgloss.NewStyle().Foreground(colorPink)
-	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 	peachStyle := lipgloss.NewStyle().Foreground(colorPeach)
-	sectionStyle := lipgloss.NewStyle().Foreground(colorSurface1)
 
 	var lines []string
 
@@ -61,7 +58,7 @@ func buildActivePluginsContent(state commands.MenuState) string {
 	lines = append(lines, "")
 
 	if len(state.Plugins) == 0 && len(state.UntrackedPlugins) == 0 {
-		lines = append(lines, dimStyle.Render("No plugins configured"))
+		lines = append(lines, stDim.Render("No plugins configured"))
 		return strings.Join(lines, "\n")
 	}
 
@@ -89,7 +86,7 @@ func buildActivePluginsContent(state commands.MenuState) string {
 		if remaining > 0 {
 			prefix += strings.Repeat("─", remaining)
 		}
-		lines = append(lines, sectionStyle.Render(prefix))
+		lines = append(lines, stSection.Render(prefix))
 
 		for _, p := range state.Plugins {
 			name := fmt.Sprintf("%-*s", maxNameLen, p.Name)
@@ -97,21 +94,21 @@ func buildActivePluginsContent(state commands.MenuState) string {
 
 			switch p.Status {
 			case "upstream":
-				statusTag = dimStyle.Render("upstream")
+				statusTag = stDim.Render("upstream")
 				if p.Marketplace != "" {
-					extra = dimStyle.Render(p.Marketplace)
+					extra = stDim.Render(p.Marketplace)
 				}
 			case "pinned":
 				statusTag = blueStyle.Render("pinned")
-				extra = dimStyle.Render("v" + p.PinVersion)
+				extra = stDim.Render("v" + p.PinVersion)
 				if p.LatestVersion != "" {
 					extra += peachStyle.Render(" (latest: v" + p.LatestVersion + ")")
 				}
 			case "forked":
 				statusTag = pinkStyle.Render("forked")
-				extra = dimStyle.Render("local edits")
+				extra = stDim.Render("local edits")
 			default:
-				statusTag = dimStyle.Render(p.Status)
+				statusTag = stDim.Render(p.Status)
 			}
 
 			line := "  " + nameStyle.Render(name) + "  " + statusTag
@@ -130,7 +127,7 @@ func buildActivePluginsContent(state commands.MenuState) string {
 		if remaining > 0 {
 			prefix += strings.Repeat("─", remaining)
 		}
-		lines = append(lines, sectionStyle.Render(prefix))
+		lines = append(lines, stSection.Render(prefix))
 
 		for _, key := range state.UntrackedPlugins {
 			name := key
@@ -138,8 +135,8 @@ func buildActivePluginsContent(state commands.MenuState) string {
 				name = key[:idx]
 			}
 			paddedName := fmt.Sprintf("%-*s", maxNameLen, name)
-			lines = append(lines, "  "+yellowStyle.Render(paddedName)+"  "+
-				dimStyle.Render("installed locally"))
+			lines = append(lines, "  "+stYellow.Render(paddedName)+"  "+
+				stDim.Render("installed locally"))
 		}
 	}
 
@@ -196,8 +193,6 @@ func (m ActivePluginsView) View() string {
 		maxWidth = 30
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-
 	// Split content into lines and apply scroll
 	allLines := strings.Split(m.content, "\n")
 
@@ -221,7 +216,7 @@ func (m ActivePluginsView) View() string {
 	var output []string
 	output = append(output, strings.Join(visibleLines, "\n"))
 	output = append(output, "")
-	output = append(output, dimStyle.Render("j/k scroll  esc back"))
+	output = append(output, stDim.Render("j/k scroll  esc back"))
 
 	content := strings.Join(output, "\n")
 

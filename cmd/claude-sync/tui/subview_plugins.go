@@ -311,11 +311,6 @@ func (m PluginBrowser) View() string {
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	boldBlue := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-	sectionStyle := lipgloss.NewStyle().Foreground(colorSurface1)
 
 	var lines []string
 
@@ -324,19 +319,19 @@ func (m PluginBrowser) View() string {
 
 	// Filter line
 	if m.filterMode {
-		lines = append(lines, boldBlue.Render("/ "+m.filterText+"\u2588"))
+		lines = append(lines, stBlue.Render("/ "+m.filterText+"\u2588"))
 	} else {
-		lines = append(lines, dimStyle.Render("/ filter..."))
+		lines = append(lines, stDim.Render("/ filter..."))
 	}
 	lines = append(lines, "")
 
 	// No plugins state
 	if len(m.items) == 0 {
-		lines = append(lines, dimStyle.Render("No plugins installed."))
+		lines = append(lines, stDim.Render("No plugins installed."))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("Subscribe to more via 'Join a shared config'."))
+		lines = append(lines, stDim.Render("Subscribe to more via 'Join a shared config'."))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("esc back"))
+		lines = append(lines, stDim.Render("esc back"))
 	} else {
 		visible := m.visibleItems()
 		hasVisiblePlugin := false
@@ -353,7 +348,7 @@ func (m PluginBrowser) View() string {
 				if remaining > 0 {
 					headerLine += strings.Repeat("\u2500", remaining)
 				}
-				lines = append(lines, sectionStyle.Render(headerLine))
+				lines = append(lines, stSection.Render(headerLine))
 				continue
 			}
 
@@ -362,7 +357,7 @@ func (m PluginBrowser) View() string {
 			// Checkbox
 			checkbox := "[ ]"
 			if item.selected {
-				checkbox = greenStyle.Render("[\u2713]")
+				checkbox = stGreen.Render("[\u2713]")
 			}
 
 			// Status and version
@@ -376,16 +371,16 @@ func (m PluginBrowser) View() string {
 			isCurrent := m.cursor == i
 
 			if isCurrent {
-				label := fmt.Sprintf("%s %s", checkbox, boldBlue.Render(nameStr))
-				metaText := dimStyle.Render(meta)
+				label := fmt.Sprintf("%s %s", checkbox, stBlue.Render(nameStr))
+				metaText := stDim.Render(meta)
 				gap := innerWidth - lipgloss.Width(label) - lipgloss.Width(metaText)
 				if gap < 1 {
 					gap = 1
 				}
 				lines = append(lines, label+strings.Repeat(" ", gap)+metaText)
 			} else {
-				label := fmt.Sprintf("%s %s", checkbox, textStyle.Render(nameStr))
-				metaText := dimStyle.Render(meta)
+				label := fmt.Sprintf("%s %s", checkbox, stText.Render(nameStr))
+				metaText := stDim.Render(meta)
 				gap := innerWidth - lipgloss.Width(label) - lipgloss.Width(metaText)
 				if gap < 1 {
 					gap = 1
@@ -395,7 +390,7 @@ func (m PluginBrowser) View() string {
 		}
 
 		if !hasVisiblePlugin && m.filterText != "" {
-			lines = append(lines, dimStyle.Render("No plugins match filter."))
+			lines = append(lines, stDim.Render("No plugins match filter."))
 		}
 
 		lines = append(lines, "")
@@ -409,12 +404,12 @@ func (m PluginBrowser) View() string {
 			}
 		}
 		if allInstalled && len(m.items) > 0 {
-			lines = append(lines, dimStyle.Render("All plugins are currently installed."))
+			lines = append(lines, stDim.Render("All plugins are currently installed."))
 		}
-		lines = append(lines, dimStyle.Render("Subscribe to more via 'Join a shared config'."))
+		lines = append(lines, stDim.Render("Subscribe to more via 'Join a shared config'."))
 
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("space toggle  enter confirm  / filter  esc back"))
+		lines = append(lines, stDim.Render("space toggle  enter confirm  / filter  esc back"))
 	}
 
 	content := strings.Join(lines, "\n")

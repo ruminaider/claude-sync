@@ -379,7 +379,6 @@ func (m AppModel) viewMain() string {
 }
 
 func (m AppModel) viewMainHelp() string {
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 
@@ -395,17 +394,17 @@ func (m AppModel) viewMainHelp() string {
 	lines = append(lines, titleStyle.Render("Help"))
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("Navigation"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2191/k")+"     Move up"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2193/j")+"     Move down"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("enter")+"   Execute action or open sub-view"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("esc")+"     Quit"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2191/k")+"     Move up"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2193/j")+"     Move down"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("enter")+"   Execute action or open sub-view"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("esc")+"     Quit"))
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("Actions"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("/")+"       Filter actions"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("?")+"       Show this help"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("q")+"       Quit"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("/")+"       Filter actions"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("?")+"       Show this help"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("q")+"       Quit"))
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("press any key to close"))
+	lines = append(lines, stDim.Render("press any key to close"))
 
 	content := strings.Join(lines, "\n")
 

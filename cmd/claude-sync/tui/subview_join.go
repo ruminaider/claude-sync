@@ -144,12 +144,6 @@ func (m *JoinFlow) View() string {
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-	redStyle := lipgloss.NewStyle().Foreground(colorRed)
-	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
-	boldBlue := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 
 	var lines []string
 
@@ -158,34 +152,34 @@ func (m *JoinFlow) View() string {
 
 	if m.resultDone {
 		if m.resultOk {
-			lines = append(lines, greenStyle.Render("\u2713 "+m.resultMsg))
+			lines = append(lines, stGreen.Render("\u2713 "+m.resultMsg))
 		} else {
-			lines = append(lines, redStyle.Render("\u2717 "+m.resultMsg))
+			lines = append(lines, stRed.Render("\u2717 "+m.resultMsg))
 		}
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("Press any key to go back"))
+		lines = append(lines, stDim.Render("Press any key to go back"))
 	} else if m.executing {
-		lines = append(lines, yellowStyle.Render("\u27f3 Joining "+m.repoURL+"..."))
+		lines = append(lines, stYellow.Render("\u27f3 Joining "+m.repoURL+"..."))
 	} else if m.step == 0 {
-		lines = append(lines, textStyle.Render("Enter a config repo URL or GitHub shorthand:"))
+		lines = append(lines, stText.Render("Enter a config repo URL or GitHub shorthand:"))
 		lines = append(lines, "  "+m.urlInput.View())
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("  Examples:"))
-		lines = append(lines, dimStyle.Render("    user/repo"))
-		lines = append(lines, dimStyle.Render("    https://github.com/user/repo.git"))
+		lines = append(lines, stDim.Render("  Examples:"))
+		lines = append(lines, stDim.Render("    user/repo"))
+		lines = append(lines, stDim.Render("    https://github.com/user/repo.git"))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("enter continue  esc back"))
+		lines = append(lines, stDim.Render("enter continue  esc back"))
 	} else if m.step == 1 {
-		lines = append(lines, textStyle.Render("Config: ")+boldBlue.Render(m.repoURL))
+		lines = append(lines, stText.Render("Config: ")+stBlue.Render(m.repoURL))
 		lines = append(lines, "")
-		lines = append(lines, textStyle.Render("Joining will:"))
-		lines = append(lines, dimStyle.Render("  \u2022 Clone the config repo"))
-		lines = append(lines, dimStyle.Render("  \u2022 Apply plugins, settings, and hooks"))
-		lines = append(lines, dimStyle.Render("  \u2022 High-risk changes will need separate approval"))
+		lines = append(lines, stText.Render("Joining will:"))
+		lines = append(lines, stDim.Render("  \u2022 Clone the config repo"))
+		lines = append(lines, stDim.Render("  \u2022 Apply plugins, settings, and hooks"))
+		lines = append(lines, stDim.Render("  \u2022 High-risk changes will need separate approval"))
 		lines = append(lines, "")
-		lines = append(lines, boldBlue.Render("> Join and apply this config"))
+		lines = append(lines, stBlue.Render("> Join and apply this config"))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("enter join  esc back"))
+		lines = append(lines, stDim.Render("enter join  esc back"))
 	}
 
 	content := strings.Join(lines, "\n")

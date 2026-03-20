@@ -162,12 +162,6 @@ func (m ProfilePicker) View() string {
 	}
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
-	redStyle := lipgloss.NewStyle().Foreground(colorRed)
-	boldBlue := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
-	textStyle := lipgloss.NewStyle().Foreground(colorText)
-	yellowStyle := lipgloss.NewStyle().Foreground(colorYellow)
 
 	var lines []string
 
@@ -177,20 +171,20 @@ func (m ProfilePicker) View() string {
 	// Result state
 	if m.resultDone {
 		if m.resultSuccess {
-			lines = append(lines, greenStyle.Render("\u2713 "+m.resultMsg))
+			lines = append(lines, stGreen.Render("\u2713 "+m.resultMsg))
 		} else {
-			lines = append(lines, redStyle.Render("\u2717 "+m.resultMsg))
+			lines = append(lines, stRed.Render("\u2717 "+m.resultMsg))
 		}
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("Press any key to go back"))
+		lines = append(lines, stDim.Render("Press any key to go back"))
 	} else if m.executing {
 		displayName := m.selected
 		if displayName == "" {
 			displayName = "base config"
 		}
-		lines = append(lines, yellowStyle.Render("\u27f3 Switching to "+displayName+"..."))
+		lines = append(lines, stYellow.Render("\u27f3 Switching to "+displayName+"..."))
 	} else {
-		lines = append(lines, dimStyle.Render("Select a profile to activate:"))
+		lines = append(lines, stDim.Render("Select a profile to activate:"))
 		lines = append(lines, "")
 
 		for i, opt := range m.profiles {
@@ -200,16 +194,16 @@ func (m ProfilePicker) View() string {
 			}
 
 			if m.cursor == i {
-				lines = append(lines, boldBlue.Render("\u25cf "+label))
+				lines = append(lines, stBlue.Render("\u25cf "+label))
 			} else {
-				lines = append(lines, textStyle.Render("  "+label))
+				lines = append(lines, stText.Render("  "+label))
 			}
 		}
 
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("Switching profile will auto-pull and apply changes."))
+		lines = append(lines, stDim.Render("Switching profile will auto-pull and apply changes."))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("enter select  esc back"))
+		lines = append(lines, stDim.Render("enter select  esc back"))
 	}
 
 	content := strings.Join(lines, "\n")
