@@ -107,7 +107,7 @@ func TestRenderSummary_ProjectWithProfile(t *testing.T) {
 func TestRenderMainScreen_ShowsVersion(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	intents := buildIntents(state)
-	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, "", nil, false, "")
 	assert.Contains(t, view, "0.7.0")
 }
 
@@ -118,7 +118,7 @@ func TestRenderMainScreen_ShowsSummaryAndActions(t *testing.T) {
 	}
 	recs := buildRecommendations(state)
 	intents := buildIntents(state)
-	view := renderMainScreen(state, recs, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	view := renderMainScreen(state, recs, intents, 0, 70, 30, "0.7.0", false, "", nil, false, "")
 	// Summary
 	assert.Contains(t, view, "User config")
 	assert.Contains(t, view, "user/repo")
@@ -129,14 +129,14 @@ func TestRenderMainScreen_ShowsSummaryAndActions(t *testing.T) {
 func TestRenderMainScreen_NothingToRecommend(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	intents := buildIntents(state)
-	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, "", nil, false, "")
 	assert.Contains(t, view, "Everything looks good")
 }
 
 func TestRenderMainScreen_Footer(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	intents := buildIntents(state)
-	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, "", nil, false, "")
 	assert.Contains(t, view, "filter")
 	assert.Contains(t, view, "help")
 	assert.Contains(t, view, "quit")
@@ -145,13 +145,13 @@ func TestRenderMainScreen_Footer(t *testing.T) {
 func TestRenderMainScreen_FilterBar(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	intents := buildIntents(state)
-	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, true, "plug")
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, "", nil, true, "plug")
 	assert.Contains(t, view, "plug")
 }
 
 func TestRenderMainScreen_NoFilterResults(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	view := renderMainScreen(state, nil, nil, 0, 70, 30, "0.7.0", false, -1, nil, false, "zzz")
+	view := renderMainScreen(state, nil, nil, 0, 70, 30, "0.7.0", false, "", nil, false, "zzz")
 	assert.Contains(t, view, "No matching actions")
 }
 

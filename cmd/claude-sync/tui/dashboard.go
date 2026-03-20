@@ -74,7 +74,7 @@ func renderSummary(state commands.MenuState, version string) string {
 // recommendations, and intents — all in one view.
 func renderMainScreen(state commands.MenuState, recs []recommendation, intents []intent,
 	cursor int, width, height int, version string,
-	executing bool, executingIndex int, results map[int]actionResultMsg,
+	executing bool, executingActionID string, results map[string]actionResultMsg,
 	filterMode bool, filterText string) string {
 
 	maxWidth := width - 2
@@ -118,10 +118,10 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 		sections = append(sections, noMatchStyle.Render("No matching actions"))
 	} else {
 		// --- Needs attention / Status section ---
-		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
+		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingActionID, results))
 
 		// --- I want to... section ---
-		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
+		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingActionID, results))
 	}
 
 	// --- Footer ---

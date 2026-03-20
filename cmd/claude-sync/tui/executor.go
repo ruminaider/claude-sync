@@ -11,11 +11,13 @@ import (
 // actionStartMsg signals an inline action has started executing.
 type actionStartMsg struct {
 	itemIndex int
+	actionID  string
 }
 
 // actionResultMsg signals an inline action has completed.
 type actionResultMsg struct {
 	itemIndex int
+	actionID  string
 	success   bool
 	message   string
 	err       error
@@ -80,6 +82,7 @@ func executeAction(index int, actionID string, args []string,
 
 		return actionResultMsg{
 			itemIndex: index,
+			actionID:  actionID,
 			success:   err == nil,
 			message:   msg,
 			err:       err,

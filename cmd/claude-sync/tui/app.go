@@ -45,9 +45,9 @@ type AppModel struct {
 	showHelp bool
 
 	// Inline action execution state
-	executing        bool                   // true while action is running
-	executingIndex   int                    // which item is executing
-	executionResults map[int]actionResultMsg // results keyed by item index
+	executing          bool                      // true while action is running
+	executingActionID  string                    // action ID of executing item
+	executionResults   map[string]actionResultMsg // results keyed by action ID
 
 	// sub-view state (populated when activeView == viewSubView)
 	subView tea.Model
@@ -61,7 +61,7 @@ func NewAppModel(state commands.MenuState) AppModel {
 	m := AppModel{
 		state:            state,
 		activeView:       viewMain,
-		executionResults: make(map[int]actionResultMsg),
+		executionResults: make(map[string]actionResultMsg),
 	}
 	// Build recommendations and intents immediately so they're available on first render
 	if state.ConfigExists {
@@ -98,14 +98,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case actionStartMsg:
 		m.executing = true
-		m.executingIndex = msg.itemIndex
+		m.executingActionID = msg.actionID
 		return m, nil
 	case actionResultMsg:
 		m.executing = false
-		if m.executionResults == nil {
-			m.executionResults = make(map[int]actionResultMsg)
+		m.executionResults = map[string]actionResultMsg{
+			msg.actionID: msg,
 		}
-		m.executionResults[msg.itemIndex] = msg
 		// Re-detect state and rebuild recommendations
 		m.state = commands.DetectMenuState(m.claudeDir, m.syncDir)
 		m.recommendations = buildRecommendations(m.state)
@@ -252,9 +251,8 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if action.inline {
-			// Execute inline — find the real index in the unfiltered list for result tracking
 			m.executing = true
-			m.executingIndex = m.actionCursor
+			m.executingActionID = action.id
 			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
 		}
 		// Sub-view navigation
@@ -290,7 +288,7 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if action.inline {
 			m.executing = true
-			m.executingIndex = m.actionCursor
+			m.executingActionID = action.id
 			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
 		}
 		return m.openSubView(action.id)
@@ -365,7 +363,7 @@ func (m AppModel) viewMain() string {
 
 	return renderMainScreen(m.state, recs, intents,
 		m.actionCursor, m.width, m.height, m.version,
-		m.executing, m.executingIndex, m.executionResults,
+		m.executing, m.executingActionID, m.executionResults,
 		m.filterMode, m.filterText)
 }
 

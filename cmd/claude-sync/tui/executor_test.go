@@ -23,10 +23,10 @@ func TestAppModel_InlineExecution_SetsExecuting(t *testing.T) {
 	m.intents = buildIntents(m.state)
 
 	// Simulate action start
-	updated, _ := m.Update(actionStartMsg{itemIndex: 0})
+	updated, _ := m.Update(actionStartMsg{itemIndex: 0, actionID: "pull"})
 	app := updated.(AppModel)
 	assert.True(t, app.executing)
-	assert.Equal(t, 0, app.executingIndex)
+	assert.Equal(t, "pull", app.executingActionID)
 }
 
 func TestAppModel_InlineExecution_HandlesResult(t *testing.T) {
@@ -34,16 +34,17 @@ func TestAppModel_InlineExecution_HandlesResult(t *testing.T) {
 	m := NewAppModel(state)
 	m.activeView = viewMain
 	m.executing = true
-	m.executingIndex = 0
+	m.executingActionID = "pull"
 
 	updated, _ := m.Update(actionResultMsg{
 		itemIndex: 0,
+		actionID:  "pull",
 		success:   true,
 		message:   "Pulled 3 commits",
 	})
 	app := updated.(AppModel)
 	assert.False(t, app.executing)
-	result, ok := app.executionResults[0]
+	result, ok := app.executionResults["pull"]
 	assert.True(t, ok)
 	assert.True(t, result.success)
 	assert.Equal(t, "Pulled 3 commits", result.message)
@@ -57,13 +58,14 @@ func TestAppModel_InlineExecution_HandlesError(t *testing.T) {
 
 	updated, _ := m.Update(actionResultMsg{
 		itemIndex: 0,
+		actionID:  "pull",
 		success:   false,
 		message:   "",
 		err:       fmt.Errorf("merge conflict"),
 	})
 	app := updated.(AppModel)
 	assert.False(t, app.executing)
-	result := app.executionResults[0]
+	result := app.executionResults["pull"]
 	assert.False(t, result.success)
 	assert.Error(t, result.err)
 }
@@ -96,7 +98,7 @@ func TestAppModel_EnterOnInlineAction_StartsExecution(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	app := updated.(AppModel)
 	assert.True(t, app.executing)
-	assert.Equal(t, 0, app.executingIndex)
+	assert.Equal(t, "pull", app.executingActionID)
 	assert.NotNil(t, cmd) // executeAction command was returned
 }
 
@@ -128,11 +130,12 @@ func TestAppModel_ResultRebuildsRecommendations(t *testing.T) {
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 	m.executing = true
-	m.executingIndex = 0
+	m.executingActionID = "pull"
 
 	// After result, recommendations should be rebuilt from re-detected state
 	updated, _ := m.Update(actionResultMsg{
 		itemIndex: 0,
+		actionID:  "pull",
 		success:   true,
 		message:   "Config is up to date",
 	})
@@ -237,21 +240,21 @@ func TestRenderActions_ShowsExecutingState(t *testing.T) {
 		Profiles:     []string{"w"},
 		Plugins:      []commands.PluginInfo{{Name: "t", Status: "upstream"}},
 	})
-	results := map[int]actionResultMsg{}
+	results := map[string]actionResultMsg{}
 
 	// Test executing state
-	view := renderActionsWithState(recs, intents, 0, 70, 30, true, 0, results)
+	view := renderActionsWithState(recs, intents, 0, 70, 30, true, "pull", results)
 	assert.Contains(t, view, "Pull now") // action label still visible (in spinner text)
 
 	// Test success result
-	results[0] = actionResultMsg{success: true, message: "Done!"}
-	view = renderActionsWithState(recs, intents, 0, 70, 30, false, -1, results)
+	results["pull"] = actionResultMsg{actionID: "pull", success: true, message: "Done!"}
+	view = renderActionsWithState(recs, intents, 0, 70, 30, false, "", results)
 	assert.Contains(t, view, "Done!")
 
 	// Test error result
-	delete(results, 0)
-	results[0] = actionResultMsg{success: false, err: fmt.Errorf("failed")}
-	view = renderActionsWithState(recs, intents, 0, 70, 30, false, -1, results)
+	delete(results, "pull")
+	results["pull"] = actionResultMsg{actionID: "pull", success: false, err: fmt.Errorf("failed")}
+	view = renderActionsWithState(recs, intents, 0, 70, 30, false, "", results)
 	assert.Contains(t, view, "failed")
 }
 
@@ -268,15 +271,15 @@ func TestRenderActions_ShowsIntentExecutingState(t *testing.T) {
 			},
 		},
 	}
-	results := map[int]actionResultMsg{}
+	results := map[string]actionResultMsg{}
 
-	// Test executing state on an intent (globalIdx = 0 since no recs)
-	view := renderActionsWithState(recs, intents, 0, 70, 30, true, 0, results)
+	// Test executing state on an intent (keyed by action ID)
+	view := renderActionsWithState(recs, intents, 0, 70, 30, true, "push-changes", results)
 	assert.Contains(t, view, "Push my local changes")
 
 	// Test result on an intent
-	results[0] = actionResultMsg{success: true, message: "Changes pushed successfully"}
-	view = renderActionsWithState(recs, intents, 0, 70, 30, false, -1, results)
+	results["push-changes"] = actionResultMsg{actionID: "push-changes", success: true, message: "Changes pushed successfully"}
+	view = renderActionsWithState(recs, intents, 0, 70, 30, false, "", results)
 	assert.Contains(t, view, "Changes pushed successfully")
 }
 

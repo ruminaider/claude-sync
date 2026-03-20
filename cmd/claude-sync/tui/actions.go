@@ -114,7 +114,7 @@ func selectedAction(recs []recommendation, intents []intent, cursor int) *action
 
 // renderRecsSectionWithState renders the "Needs attention" / "Status" section with execution state.
 func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth int,
-	executing bool, executingIndex int, results map[int]actionResultMsg) string {
+	executing bool, executingActionID string, results map[string]actionResultMsg) string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 	redStyle := lipgloss.NewStyle().Foreground(colorRed)
@@ -142,7 +142,7 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 		}
 
 		// Check for execution state on this item
-		if result, hasResult := results[i]; hasResult {
+		if result, hasResult := results[rec.action.id]; hasResult {
 			// Show result
 			if result.success {
 				lines = append(lines, greenStyle.Render("\u2713 "+result.message))
@@ -153,7 +153,7 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 				}
 				lines = append(lines, redStyle.Render("\u2717 "+errMsg))
 			}
-		} else if executing && executingIndex == i {
+		} else if executing && executingActionID == rec.action.id {
 			// Show executing spinner
 			lines = append(lines, yellowStyle.Render("\u27f3 "+rec.action.label+"..."))
 		} else {
@@ -188,7 +188,7 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 
 // renderIntentsSectionWithState renders the "I want to..." section with execution state.
 func renderIntentsSectionWithState(intents []intent, recCount, cursor int, innerWidth int,
-	executing bool, executingIndex int, results map[int]actionResultMsg) string {
+	executing bool, executingActionID string, results map[string]actionResultMsg) string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 	redStyle := lipgloss.NewStyle().Foreground(colorRed)
@@ -204,7 +204,7 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 		isSelected := cursor == globalIdx
 
 		// Check for execution state on this item
-		if result, hasResult := results[globalIdx]; hasResult {
+		if result, hasResult := results[it.action.id]; hasResult {
 			// Show result
 			if result.success {
 				lines = append(lines, greenStyle.Render("\u2713 "+result.message))
@@ -218,7 +218,7 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 			continue
 		}
 
-		if executing && executingIndex == globalIdx {
+		if executing && executingActionID == it.action.id {
 			// Show executing spinner
 			lines = append(lines, yellowStyle.Render("\u27f3 "+it.action.label+"..."))
 			continue
@@ -250,13 +250,13 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 
 // renderActions renders the combined action screen with recommendations and intents.
 func renderActions(recs []recommendation, intents []intent, cursor int, width, height int) string {
-	return renderActionsWithState(recs, intents, cursor, width, height, false, -1, nil)
+	return renderActionsWithState(recs, intents, cursor, width, height, false, "", nil)
 }
 
 // renderActionsWithState renders the combined action screen with execution state.
 // This is kept for backward compatibility with tests.
 func renderActionsWithState(recs []recommendation, intents []intent, cursor int, width, height int,
-	executing bool, executingIndex int, results map[int]actionResultMsg) string {
+	executing bool, executingActionID string, results map[string]actionResultMsg) string {
 	maxWidth := width - 2
 	if maxWidth > 70 {
 		maxWidth = 70
@@ -274,10 +274,10 @@ func renderActionsWithState(recs []recommendation, intents []intent, cursor int,
 	var sections []string
 
 	// --- Needs attention section ---
-	sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
+	sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingActionID, results))
 
 	// --- I want to... section ---
-	sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
+	sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingActionID, results))
 
 	// --- Footer ---
 	sections = append(sections, renderMainFooter())
