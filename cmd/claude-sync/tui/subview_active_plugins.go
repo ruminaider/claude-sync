@@ -152,6 +152,22 @@ func (m ActivePluginsView) Init() tea.Cmd {
 
 func (m ActivePluginsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		allLines := strings.Split(m.content, "\n")
+		innerHeight := m.height - 6
+		if innerHeight < 1 {
+			innerHeight = 1
+		}
+		m.maxScroll = len(allLines) - innerHeight
+		if m.maxScroll < 0 {
+			m.maxScroll = 0
+		}
+		if m.scroll > m.maxScroll {
+			m.scroll = m.maxScroll
+		}
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":

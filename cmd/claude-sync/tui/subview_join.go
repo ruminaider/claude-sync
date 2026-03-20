@@ -60,6 +60,10 @@ func (m *JoinFlow) Init() tea.Cmd {
 
 func (m *JoinFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 	case joinResultMsg:
 		m.executing = false
 		m.resultDone = true

@@ -86,6 +86,10 @@ func (m ProfilePicker) Init() tea.Cmd {
 
 func (m ProfilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 	case profileSwitchResultMsg:
 		m.executing = false
 		m.resultDone = true

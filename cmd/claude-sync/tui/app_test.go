@@ -102,6 +102,25 @@ func TestAppModel_WindowResize(t *testing.T) {
 	assert.Equal(t, 40, app.height)
 }
 
+func TestAppModel_WindowResize_ForwardedToSubView(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.subView = NewConfigDetails(state, 80, 40)
+	m.activeView = viewSubView
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 50})
+	app := updated.(AppModel)
+
+	assert.Equal(t, 120, app.width)
+	assert.Equal(t, 50, app.height)
+	// Sub-view should also have updated dimensions
+	details := app.subView.(ConfigDetails)
+	assert.Equal(t, 120, details.width)
+	assert.Equal(t, 50, details.height)
+}
+
 func TestAppModel_ActionCursor(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)

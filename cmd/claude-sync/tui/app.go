@@ -95,6 +95,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.activeView == viewSubView && m.subView != nil {
+			m.subView, _ = m.subView.Update(msg)
+		}
 		return m, nil
 	case actionStartMsg:
 		m.executing = true

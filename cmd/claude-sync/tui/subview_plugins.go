@@ -127,6 +127,10 @@ func (m PluginBrowser) Init() tea.Cmd {
 
 func (m PluginBrowser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 	case tea.KeyMsg:
 		if m.filterMode {
 			return m.updateFilterMode(msg)
