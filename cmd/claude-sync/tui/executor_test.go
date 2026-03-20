@@ -283,6 +283,15 @@ func TestRenderActions_ShowsIntentExecutingState(t *testing.T) {
 	assert.Contains(t, view, "Changes pushed successfully")
 }
 
+func TestExecuteAction_PanicRecovery(t *testing.T) {
+	cmd := executeAction(0, "__test_panic", nil, "", "")
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.False(t, result.success)
+	assert.Contains(t, result.message, "internal error")
+	assert.Contains(t, result.err.Error(), "panic")
+}
+
 func TestExecuteAction_UnknownAction(t *testing.T) {
 	cmd := executeAction(0, "nonexistent", nil, "/tmp/claude", "/tmp/sync")
 	msg := cmd()

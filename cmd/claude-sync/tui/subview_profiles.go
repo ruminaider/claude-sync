@@ -220,7 +220,15 @@ func (m ProfilePicker) View() string {
 
 // switchProfile returns a tea.Cmd that switches the active profile and auto-pulls.
 func switchProfile(name string, claudeDir, syncDir string) tea.Cmd {
-	return func() tea.Msg {
+	return func() (result tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				result = profileSwitchResultMsg{
+					success: false,
+					err:     fmt.Errorf("panic in switchProfile: %v", r),
+				}
+			}
+		}()
 		// 1. Set the active profile
 		var err error
 		if name == "" {
@@ -233,7 +241,7 @@ func switchProfile(name string, claudeDir, syncDir string) tea.Cmd {
 		}
 
 		// 2. Auto-pull to apply the new profile's settings
-		result, pullErr := commands.Pull(claudeDir, syncDir, true)
+		pullResult, pullErr := commands.Pull(claudeDir, syncDir, true)
 		if pullErr != nil {
 			return profileSwitchResultMsg{
 				success: false,
@@ -246,8 +254,8 @@ func switchProfile(name string, claudeDir, syncDir string) tea.Cmd {
 		if name == "" {
 			msg = "Switched to base config"
 		}
-		if result != nil && len(result.ToInstall) > 0 {
-			msg += fmt.Sprintf(", %d plugin(s) updated", len(result.ToInstall))
+		if pullResult != nil && len(pullResult.ToInstall) > 0 {
+			msg += fmt.Sprintf(", %d plugin(s) updated", len(pullResult.ToInstall))
 		}
 		return profileSwitchResultMsg{success: true, message: msg}
 	}

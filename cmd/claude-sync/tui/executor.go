@@ -27,7 +27,19 @@ type actionResultMsg struct {
 // The result is sent back as an actionResultMsg.
 func executeAction(index int, actionID string, args []string,
 	claudeDir, syncDir string) tea.Cmd {
-	return func() tea.Msg {
+	return func() (result tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				result = actionResultMsg{
+					actionID:  actionID,
+					itemIndex: index,
+					success:   false,
+					message:   fmt.Sprintf("internal error: %v", r),
+					err:       fmt.Errorf("panic in %s: %v", actionID, r),
+				}
+			}
+		}()
+
 		var msg string
 		var err error
 
@@ -76,6 +88,8 @@ func executeAction(index int, actionID string, args []string,
 		case "import-mcp":
 			// TODO: wire to real MCP import in later task
 			msg = "MCP import not yet available in TUI"
+		case "__test_panic":
+			panic("test panic")
 		default:
 			err = fmt.Errorf("unknown action: %s", actionID)
 		}

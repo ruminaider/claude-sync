@@ -197,23 +197,32 @@ func (m *JoinFlow) View() string {
 
 // executeJoin returns a tea.Cmd that runs the join operation.
 func executeJoin(repoURL, claudeDir, syncDir string) tea.Cmd {
-	return func() tea.Msg {
-		result, err := commands.Join(repoURL, claudeDir, syncDir)
+	return func() (result tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				result = joinResultMsg{
+					success: false,
+					err:     fmt.Errorf("panic in join: %v", r),
+				}
+			}
+		}()
+
+		joinResult, err := commands.Join(repoURL, claudeDir, syncDir)
 		if err != nil {
 			return joinResultMsg{success: false, err: err}
 		}
 
 		msg := "Joined successfully"
-		if result != nil {
+		if joinResult != nil {
 			var details []string
-			if result.HasSettings {
+			if joinResult.HasSettings {
 				details = append(details, "settings applied")
 			}
-			if result.HasHooks {
+			if joinResult.HasHooks {
 				details = append(details, "hooks applied")
 			}
-			if result.HasProfiles {
-				details = append(details, fmt.Sprintf("%d profiles available", len(result.ProfileNames)))
+			if joinResult.HasProfiles {
+				details = append(details, fmt.Sprintf("%d profiles available", len(joinResult.ProfileNames)))
 			}
 			if len(details) > 0 {
 				msg += ", " + strings.Join(details, ", ")
