@@ -152,18 +152,7 @@ func (m ActivePluginsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		allLines := strings.Split(m.content, "\n")
-		innerHeight := m.height - 6
-		if innerHeight < 1 {
-			innerHeight = 1
-		}
-		m.maxScroll = len(allLines) - innerHeight
-		if m.maxScroll < 0 {
-			m.maxScroll = 0
-		}
-		if m.scroll > m.maxScroll {
-			m.scroll = m.maxScroll
-		}
+		m.scroll, m.maxScroll = recalcScroll(m.content, m.height, m.scroll)
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -185,36 +174,5 @@ func (m ActivePluginsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ActivePluginsView) View() string {
-	maxWidth, _ := clampWidth(m.width)
-
-	// Split content into lines and apply scroll
-	allLines := strings.Split(m.content, "\n")
-
-	// Available height inside box: height minus border (2) + padding (2) + footer line (2)
-	innerHeight := m.height - 6
-	if innerHeight < 1 {
-		innerHeight = 1
-	}
-
-	start := m.scroll
-	end := start + innerHeight
-	if end > len(allLines) {
-		end = len(allLines)
-	}
-	if start > end {
-		start = end
-	}
-
-	visibleLines := allLines[start:end]
-
-	var output []string
-	output = append(output, strings.Join(visibleLines, "\n"))
-	output = append(output, "")
-	output = append(output, stDim.Render("j/k scroll  esc back"))
-
-	content := strings.Join(output, "\n")
-
-	boxStyle := contentBox(maxWidth, colorSurface1)
-
-	return boxStyle.Render(content)
+	return renderScrollable(m.content, m.width, m.height, m.scroll)
 }
