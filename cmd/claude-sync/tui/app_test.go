@@ -508,6 +508,89 @@ func TestAppModel_FilterMode_NoResults(t *testing.T) {
 	assert.Contains(t, view, "No matching actions")
 }
 
+// --- Filter-mode Enter interaction tests ---
+
+func TestAppModel_FilterMode_EnterOnInlineAction_StartsExecution(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		CommitsBehind: 3,
+	}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+	m.filterMode = true
+	m.filterText = "Pull" // matches "Pull and apply now" (inline action)
+	m.actionCursor = 0
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	assert.False(t, app.filterMode, "filter mode should be exited")
+	assert.True(t, app.executing, "inline action should start executing")
+	assert.Equal(t, "pull", app.executingActionID)
+	assert.NotNil(t, cmd, "executeAction command should be returned")
+}
+
+func TestAppModel_FilterMode_EnterOnNonInlineAction_OpensSubView(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+	m.filterMode = true
+	m.filterText = "View active" // matches "View active plugins" (non-inline, opens sub-view)
+	m.actionCursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	assert.False(t, app.filterMode, "filter mode should be exited")
+	assert.False(t, app.executing, "non-inline action should not execute inline")
+	assert.Equal(t, viewSubView, app.activeView, "should open sub-view")
+	assert.NotNil(t, app.subView)
+}
+
+func TestAppModel_FilterMode_EnterOnNoResults_NoOp(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+	m.filterMode = true
+	m.filterText = "zzzznonexistent"
+	m.actionCursor = 0
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	assert.False(t, app.filterMode, "filter mode should still be exited")
+	assert.False(t, app.executing)
+	assert.Equal(t, viewMain, app.activeView)
+	assert.Nil(t, cmd, "no command when nothing matches")
+}
+
+func TestAppModel_FilterMode_EnterWhileExecuting_NoOp(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		CommitsBehind: 3,
+	}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.recommendations = buildRecommendations(m.state)
+	m.intents = buildIntents(m.state)
+	m.filterMode = true
+	m.filterText = "Pull"
+	m.executing = true // already executing
+	m.actionCursor = 0
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	assert.True(t, app.executing, "should still be executing")
+	assert.Nil(t, cmd, "no new command dispatched while executing")
+}
+
 // --- Fresh install flow tests ---
 
 func TestAppModel_FreshInstall_CursorNavigation(t *testing.T) {
