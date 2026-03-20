@@ -620,6 +620,23 @@ func TestAppModel_ViewPlugins_OpensSubView(t *testing.T) {
 	assert.NotNil(t, app.subView)
 }
 
+// --- Sub-view q key does not quit ---
+
+func TestAppModel_QDoesNotQuitInSubView(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.subView = NewConfigDetails(state, 80, 40)
+	m.activeView = viewSubView
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	app := updated.(AppModel)
+	assert.False(t, app.quitting, "q should not quit when in sub-view")
+	assert.Equal(t, viewSubView, app.activeView)
+	assert.Nil(t, cmd)
+}
+
 // --- Sub-view close returns to main ---
 
 func TestAppModel_SubViewClose_ReturnsToMain(t *testing.T) {

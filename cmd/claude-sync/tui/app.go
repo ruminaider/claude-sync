@@ -142,7 +142,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		}
-		if msg.String() == "q" && !m.filterMode && !m.showHelp {
+		if msg.String() == "q" && m.activeView == viewMain && !m.filterMode && !m.showHelp {
 			m.quitting = true
 			return m, tea.Quit
 		}
