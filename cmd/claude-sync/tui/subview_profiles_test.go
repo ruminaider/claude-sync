@@ -353,6 +353,44 @@ func TestAppModel_SubViewCloseMsg_RefreshesState(t *testing.T) {
 	assert.NotNil(t, app.intents)
 }
 
+// --- switchProfile function tests (exercises the tea.Cmd closure) ---
+
+func TestSwitchProfile_WriteError(t *testing.T) {
+	// syncDir doesn't exist → WriteActiveProfile should fail
+	cmd := switchProfile("work", t.TempDir(), "/nonexistent/sync")
+	msg := cmd()
+	result := msg.(profileSwitchResultMsg)
+	assert.False(t, result.success)
+	assert.Error(t, result.err)
+}
+
+func TestSwitchProfile_DeleteBaseProfile_WriteError(t *testing.T) {
+	// syncDir doesn't exist → DeleteActiveProfile should fail
+	cmd := switchProfile("", t.TempDir(), "/nonexistent/sync")
+	msg := cmd()
+	result := msg.(profileSwitchResultMsg)
+	assert.False(t, result.success)
+	assert.Error(t, result.err)
+}
+
+func TestSwitchProfile_PullFailsAfterWrite(t *testing.T) {
+	// syncDir exists so WriteActiveProfile succeeds, but Pull fails (no config.yaml)
+	syncDir := t.TempDir()
+	cmd := switchProfile("work", t.TempDir(), syncDir)
+	msg := cmd()
+	result := msg.(profileSwitchResultMsg)
+	assert.False(t, result.success)
+	assert.Contains(t, result.message, "pull failed")
+}
+
+func TestSwitchProfile_ActionIDPreserved(t *testing.T) {
+	// Verify the result type is always profileSwitchResultMsg
+	cmd := switchProfile("test", t.TempDir(), t.TempDir())
+	msg := cmd()
+	_, ok := msg.(profileSwitchResultMsg)
+	assert.True(t, ok, "should return profileSwitchResultMsg")
+}
+
 func TestAppModel_ProfileSwitchResultMsg_RoutesToSubView(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,

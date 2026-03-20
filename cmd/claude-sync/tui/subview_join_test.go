@@ -194,6 +194,33 @@ func TestJoinFlow_ViewShowsHeader(t *testing.T) {
 	assert.Contains(t, view, "Join a shared config")
 }
 
+// --- executeJoin function tests (exercises the tea.Cmd closure) ---
+
+func TestExecuteJoin_InvalidURL(t *testing.T) {
+	// Invalid repo URL → Join should fail
+	cmd := executeJoin("not-a-valid-url", t.TempDir(), t.TempDir())
+	msg := cmd()
+	result := msg.(joinResultMsg)
+	assert.False(t, result.success)
+	assert.Error(t, result.err)
+}
+
+func TestExecuteJoin_EmptyURL(t *testing.T) {
+	cmd := executeJoin("", t.TempDir(), t.TempDir())
+	msg := cmd()
+	result := msg.(joinResultMsg)
+	assert.False(t, result.success)
+	assert.Error(t, result.err)
+}
+
+func TestExecuteJoin_ReturnsCorrectMsgType(t *testing.T) {
+	// Regardless of success/failure, the return type must be joinResultMsg
+	cmd := executeJoin("user/repo", t.TempDir(), t.TempDir())
+	msg := cmd()
+	_, ok := msg.(joinResultMsg)
+	assert.True(t, ok, "should return joinResultMsg")
+}
+
 // --- AppModel integration tests ---
 
 func TestAppModel_JoinConfigIntent_OpensJoinFlow(t *testing.T) {
