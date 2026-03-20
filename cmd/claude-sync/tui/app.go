@@ -382,13 +382,7 @@ func (m AppModel) viewMainHelp() string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 
-	maxWidth := m.width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
+	maxWidth, _ := clampWidth(m.width)
 
 	var lines []string
 	lines = append(lines, titleStyle.Render("Help"))
@@ -408,11 +402,7 @@ func (m AppModel) viewMainHelp() string {
 
 	content := strings.Join(lines, "\n")
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorBlue).
-		Padding(1, 2).
-		Width(maxWidth)
+	boxStyle := contentBox(maxWidth, colorBlue)
 
 	return boxStyle.Render(content)
 }

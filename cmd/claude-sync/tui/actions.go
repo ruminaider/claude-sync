@@ -243,19 +243,7 @@ func renderActions(recs []recommendation, intents []intent, cursor int, width, h
 // This is kept for backward compatibility with tests.
 func renderActionsWithState(recs []recommendation, intents []intent, cursor int, width, height int,
 	executing bool, executingActionID string, results map[string]actionResultMsg) string {
-	maxWidth := width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
-
-	// Available width inside the box (subtract border + padding: 2 border + 4 padding)
-	innerWidth := maxWidth - 6
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	maxWidth, innerWidth := clampWidth(width)
 
 	var sections []string
 
@@ -270,11 +258,7 @@ func renderActionsWithState(recs []recommendation, intents []intent, cursor int,
 
 	content := strings.Join(sections, "\n\n")
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
-		Padding(1, 2).
-		Width(maxWidth)
+	boxStyle := contentBox(maxWidth, colorSurface1)
 
 	return boxStyle.Render(content)
 }

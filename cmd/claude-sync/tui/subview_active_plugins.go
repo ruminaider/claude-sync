@@ -185,13 +185,7 @@ func (m ActivePluginsView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ActivePluginsView) View() string {
-	maxWidth := m.width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
+	maxWidth, _ := clampWidth(m.width)
 
 	// Split content into lines and apply scroll
 	allLines := strings.Split(m.content, "\n")
@@ -220,11 +214,7 @@ func (m ActivePluginsView) View() string {
 
 	content := strings.Join(output, "\n")
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
-		Padding(1, 2).
-		Width(maxWidth)
+	boxStyle := contentBox(maxWidth, colorSurface1)
 
 	return boxStyle.Render(content)
 }

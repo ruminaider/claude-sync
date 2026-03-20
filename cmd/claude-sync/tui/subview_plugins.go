@@ -297,18 +297,7 @@ func (m PluginBrowser) visibleItems() map[int]struct{} {
 }
 
 func (m PluginBrowser) View() string {
-	maxWidth := m.width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
-
-	innerWidth := maxWidth - 6
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	maxWidth, innerWidth := clampWidth(m.width)
 
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 
@@ -414,11 +403,7 @@ func (m PluginBrowser) View() string {
 
 	content := strings.Join(lines, "\n")
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
-		Padding(1, 2).
-		Width(maxWidth)
+	boxStyle := contentBox(maxWidth, colorSurface1)
 
 	return boxStyle.Render(content)
 }

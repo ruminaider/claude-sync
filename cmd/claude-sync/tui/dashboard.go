@@ -74,19 +74,7 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 	executing bool, executingActionID string, results map[string]actionResultMsg,
 	filterMode bool, filterText string) string {
 
-	maxWidth := width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
-
-	// Available width inside the box (subtract border + padding: 2 border + 4 padding)
-	innerWidth := maxWidth - 6
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	maxWidth, innerWidth := clampWidth(width)
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
@@ -126,11 +114,7 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 
 	content := strings.Join(sections, "\n\n")
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
-		Padding(1, 2).
-		Width(maxWidth)
+	boxStyle := contentBox(maxWidth, colorSurface1)
 
 	return boxStyle.Render(content)
 }
@@ -143,13 +127,7 @@ func renderMainFooter() string {
 // renderFreshInstall renders the welcome screen for a fresh installation.
 // cursor indicates which option is selected: 0 = Create, 1 = Join.
 func renderFreshInstall(width, height int, version string, cursor int) string {
-	maxWidth := width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
+	maxWidth, _ := clampWidth(width)
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
@@ -182,11 +160,7 @@ func renderFreshInstall(width, height int, version string, cursor int) string {
 
 	content := strings.Join(lines, "\n")
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface0).
-		Padding(1, 2).
-		Width(maxWidth)
+	boxStyle := contentBox(maxWidth, colorSurface0)
 
 	return boxStyle.Render(content)
 }
