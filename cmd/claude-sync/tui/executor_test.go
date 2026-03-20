@@ -120,7 +120,7 @@ func TestAppModel_EnterOnNonInlineAction_NoExecution(t *testing.T) {
 	assert.Nil(t, cmd)             // no command for non-inline
 }
 
-func TestAppModel_ResultRebuildsRecommendations(t *testing.T) {
+func TestAppModel_ResultReturnsRefreshCmd(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
 		CommitsBehind: 3,
@@ -132,8 +132,8 @@ func TestAppModel_ResultRebuildsRecommendations(t *testing.T) {
 	m.executing = true
 	m.executingActionID = "pull"
 
-	// After result, recommendations should be rebuilt from re-detected state
-	updated, _ := m.Update(actionResultMsg{
+	// actionResultMsg should return a refresh cmd (async state detection)
+	updated, cmd := m.Update(actionResultMsg{
 		itemIndex: 0,
 		actionID:  "pull",
 		success:   true,
@@ -141,9 +141,22 @@ func TestAppModel_ResultRebuildsRecommendations(t *testing.T) {
 	})
 	app := updated.(AppModel)
 	assert.False(t, app.executing)
-	// Recommendations and intents should be non-nil (rebuilt)
-	assert.NotNil(t, app.recommendations)
-	assert.NotNil(t, app.intents)
+	assert.NotNil(t, cmd, "should return refreshStateCmd")
+}
+
+func TestAppModel_StateRefreshMsg_RebuildsRecommendations(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+
+	// Simulate a state refresh with new data
+	newState := commands.MenuState{
+		ConfigExists:  true,
+		CommitsBehind: 5,
+	}
+	updated, _ := m.Update(stateRefreshMsg{state: newState})
+	app := updated.(AppModel)
+	assert.Equal(t, 5, app.state.CommitsBehind)
+	assert.NotEmpty(t, app.recommendations, "should rebuild recommendations from new state")
 }
 
 func TestFormatPullResult_NoChanges(t *testing.T) {

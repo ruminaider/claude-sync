@@ -86,6 +86,18 @@ func (m *AppModel) SetSyncDir(dir string) {
 	m.syncDir = dir
 }
 
+// stateRefreshMsg carries a re-detected MenuState from an async refresh.
+type stateRefreshMsg struct {
+	state commands.MenuState
+}
+
+// refreshStateCmd returns a tea.Cmd that re-detects MenuState in a goroutine.
+func refreshStateCmd(claudeDir, syncDir string) tea.Cmd {
+	return func() tea.Msg {
+		return stateRefreshMsg{state: commands.DetectMenuState(claudeDir, syncDir)}
+	}
+}
+
 func (m AppModel) Init() tea.Cmd {
 	return nil
 }
@@ -99,6 +111,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.subView, _ = m.subView.Update(msg)
 		}
 		return m, nil
+	case stateRefreshMsg:
+		m.state = msg.state
+		m.recommendations = buildRecommendations(m.state)
+		m.intents = buildIntents(m.state)
+		return m, nil
 	case actionStartMsg:
 		m.executing = true
 		m.executingActionID = msg.actionID
@@ -108,18 +125,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.executionResults = map[string]actionResultMsg{
 			msg.actionID: msg,
 		}
-		// Re-detect state and rebuild recommendations
-		m.state = commands.DetectMenuState(m.claudeDir, m.syncDir)
-		m.recommendations = buildRecommendations(m.state)
-		m.intents = buildIntents(m.state)
-		return m, nil
+		// Re-detect state asynchronously to avoid blocking the TUI
+		return m, refreshStateCmd(m.claudeDir, m.syncDir)
 	case subViewCloseMsg:
 		m.activeView = viewMain
 		m.subView = nil
 		if msg.refreshState {
-			m.state = commands.DetectMenuState(m.claudeDir, m.syncDir)
-			m.recommendations = buildRecommendations(m.state)
-			m.intents = buildIntents(m.state)
+			return m, refreshStateCmd(m.claudeDir, m.syncDir)
 		}
 		return m, nil
 	case profileSwitchResultMsg:
