@@ -290,7 +290,7 @@ func TestAppModel_SwitchProfileIntent_OpensProfilePicker(t *testing.T) {
 		ActiveProfile: "work",
 	}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 
@@ -327,7 +327,7 @@ func TestAppModel_SubViewCloseMsg_ReturnsToActions(t *testing.T) {
 	updated, _ := m.Update(subViewCloseMsg{refreshState: false})
 	app := updated.(AppModel)
 
-	assert.Equal(t, viewActions, app.activeView)
+	assert.Equal(t, viewMain, app.activeView)
 	assert.Nil(t, app.subView)
 }
 
@@ -346,7 +346,7 @@ func TestAppModel_SubViewCloseMsg_RefreshesState(t *testing.T) {
 	updated, _ := m.Update(subViewCloseMsg{refreshState: true})
 	app := updated.(AppModel)
 
-	assert.Equal(t, viewActions, app.activeView)
+	assert.Equal(t, viewMain, app.activeView)
 	assert.Nil(t, app.subView)
 	// Recommendations and intents should be rebuilt
 	assert.NotNil(t, app.recommendations)

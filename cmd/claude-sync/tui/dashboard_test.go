@@ -7,182 +7,51 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRenderDashboard_ShowsVersion(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "0.7.0")
-}
+// --- renderSummary tests ---
 
-func TestRenderDashboard_ShowsConfigRepo(t *testing.T) {
+func TestRenderSummary_ShowsConfigRepo(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 		ConfigRepo:   "ruminaider/claude-sync-config",
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
+	view := renderSummary(state, "0.7.0")
 	assert.Contains(t, view, "ruminaider/claude-sync-config")
+	assert.Contains(t, view, "connected")
 }
 
-func TestRenderDashboard_SyncUpToDate(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "up to date")
+func TestRenderSummary_NoConfigRepo(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true, ConfigRepo: ""}
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "not configured")
 }
 
-func TestRenderDashboard_SyncBehind(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true, CommitsBehind: 3}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "3 commits behind")
-}
-
-func TestRenderDashboard_PendingChanges(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true, HasPending: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "pending")
-}
-
-func TestRenderDashboard_Conflicts(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true, HasConflicts: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "conflict")
-}
-
-func TestRenderDashboard_ShowsPlugins(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists: true,
-		Plugins: []commands.PluginInfo{
-			{Name: "beads", Status: "upstream", Marketplace: "beads-marketplace"},
-			{Name: "superpowers", Status: "pinned", PinVersion: "1.2.3"},
-			{Name: "my-tool", Status: "forked"},
-		},
-	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "beads")
-	assert.Contains(t, view, "superpowers")
-	assert.Contains(t, view, "pinned")
-	assert.Contains(t, view, "my-tool")
-	assert.Contains(t, view, "forked")
-}
-
-func TestRenderDashboard_NoPlugins(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "No plugins")
-}
-
-func TestRenderDashboard_ShowsActiveProfile(t *testing.T) {
+func TestRenderSummary_ActiveProfile(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
 		Profiles:      []string{"work", "personal"},
 		ActiveProfile: "work",
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	// Active profile shown in User Config section
+	view := renderSummary(state, "0.7.0")
 	assert.Contains(t, view, "work")
 }
 
-func TestRenderDashboard_ShowsProjectInfo(t *testing.T) {
+func TestRenderSummary_BaseProfile_WithOthers(t *testing.T) {
 	state := commands.MenuState{
-		ConfigExists:       true,
-		ProjectDir:         "/Users/test/Repos/claude-sync",
-		ProjectInitialized: true,
-		ProjectProfile:     "work",
-		ClaudeMDCount:      3,
-		MCPCount:           2,
+		ConfigExists: true,
+		Profiles:     []string{"work", "personal", "base"},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "claude-sync")
-	assert.Contains(t, view, "3")
-	assert.Contains(t, view, "2")
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "base (default)")
+	assert.Contains(t, view, "3 others available")
 }
 
-func TestRenderDashboard_NoProject(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Not in a project directory")
-}
-
-func TestRenderDashboard_FreshInstall(t *testing.T) {
-	state := commands.MenuState{ConfigExists: false}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "No config found")
-	assert.Contains(t, view, "Create")
-	assert.Contains(t, view, "Join")
-}
-
-func TestRenderDashboard_Footer(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "enter")
-	assert.Contains(t, view, "see what you can do")
-	assert.Contains(t, view, "q quit")
-}
-
-func TestRenderDashboard_NoConfigRepo(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true, ConfigRepo: ""}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "not configured")
-}
-
-func TestRenderDashboard_WithConfigRepo(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true, ConfigRepo: "user/repo"}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "user/repo")
-	assert.Contains(t, view, "connected")
-}
-
-func TestRenderDashboard_NoProfilesShowsNone(t *testing.T) {
+func TestRenderSummary_BaseProfile_NoOthers(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, Profiles: nil}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	// No separate profiles section, User Config shows "base (default)"
+	view := renderSummary(state, "0.7.0")
 	assert.Contains(t, view, "base (default)")
 }
 
-func TestRenderDashboard_PluginUpstreamShowsMarketplace(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists: true,
-		Plugins: []commands.PluginInfo{
-			{Name: "beads", Status: "upstream", Marketplace: "beads-marketplace"},
-		},
-	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "beads-marketplace")
-}
-
-func TestRenderDashboard_PluginPinnedShowsVersion(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists: true,
-		Plugins: []commands.PluginInfo{
-			{Name: "superpowers", Status: "pinned", PinVersion: "1.2.3"},
-		},
-	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "v1.2.3")
-}
-
-func TestRenderDashboard_PluginPinnedShowsLatestVersion(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists: true,
-		Plugins: []commands.PluginInfo{
-			{Name: "superpowers", Status: "pinned", PinVersion: "1.2.3", LatestVersion: "1.3.0"},
-		},
-	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "v1.2.3")
-	assert.Contains(t, view, "latest: v1.3.0")
-}
-
-func TestRenderDashboard_PluginForkedShowsLocalEdits(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists: true,
-		Plugins: []commands.PluginInfo{
-			{Name: "my-tool", Status: "forked"},
-		},
-	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "local edits")
-}
-
-func TestRenderDashboard_PluginCount(t *testing.T) {
+func TestRenderSummary_PluginCount(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 		Plugins: []commands.PluginInfo{
@@ -191,55 +60,111 @@ func TestRenderDashboard_PluginCount(t *testing.T) {
 			{Name: "c", Status: "upstream"},
 		},
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Active Plugins (3)")
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "3 installed")
 }
 
-func TestRenderDashboard_ProfileCountInUserConfig(t *testing.T) {
+func TestRenderSummary_ProjectDir(t *testing.T) {
 	state := commands.MenuState{
-		ConfigExists: true,
-		Profiles:     []string{"work", "personal", "base"},
+		ConfigExists:       true,
+		ProjectDir:         "/Users/test/Repos/claude-sync",
+		ProjectInitialized: true,
+		ProjectProfile:     "work",
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	// Profile count shown in User Config section
-	assert.Contains(t, view, "3 other profiles available")
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "claude-sync")
 }
 
-func TestRenderDashboard_ActiveProfileInUserConfig(t *testing.T) {
+func TestRenderSummary_NoProject(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "Not in a project directory")
+}
+
+func TestRenderSummary_ProjectNotInitialized(t *testing.T) {
 	state := commands.MenuState{
-		ConfigExists:  true,
-		Profiles:      []string{"work", "personal"},
-		ActiveProfile: "work",
+		ConfigExists:       true,
+		ProjectDir:         "/Users/test/Repos/myproject",
+		ProjectInitialized: false,
 	}
-	view := renderDashboard(state, 70, 30, "0.7.0", 0)
-	// Active profile shown in User Config section with bullet marker
-	assert.Contains(t, view, "●")
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "No settings profile assigned")
+}
+
+func TestRenderSummary_ProjectWithProfile(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:       true,
+		ProjectDir:         "/Users/test/Repos/myproject",
+		ProjectInitialized: true,
+		ProjectProfile:     "work",
+	}
+	view := renderSummary(state, "0.7.0")
 	assert.Contains(t, view, "work")
 }
 
-func TestRenderDashboard_UntrackedPlugins(t *testing.T) {
-	state := commands.MenuState{
-		ConfigExists: true,
-		Plugins: []commands.PluginInfo{
-			{Name: "beads", Status: "upstream", Marketplace: "beads-marketplace"},
-		},
-		UntrackedPlugins: []string{"playwright@some-mkt", "episodic-memory@other-mkt"},
-	}
-	view := renderDashboard(state, 80, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Active Plugins (1)")
-	assert.Contains(t, view, "Not in synced config")
-	assert.Contains(t, view, "playwright")
-	assert.Contains(t, view, "episodic-memory")
-	assert.Contains(t, view, "installed locally")
+// --- renderMainScreen tests ---
+
+func TestRenderMainScreen_ShowsVersion(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	intents := buildIntents(state)
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	assert.Contains(t, view, "0.7.0")
 }
 
-func TestRenderDashboard_UntrackedPluginsOnly(t *testing.T) {
+func TestRenderMainScreen_ShowsSummaryAndActions(t *testing.T) {
 	state := commands.MenuState{
-		ConfigExists:     true,
-		UntrackedPlugins: []string{"playwright@some-mkt"},
+		ConfigExists: true,
+		ConfigRepo:   "user/repo",
 	}
-	view := renderDashboard(state, 80, 30, "0.7.0", 0)
-	assert.Contains(t, view, "Active Plugins (0)")
-	assert.Contains(t, view, "Not in synced config")
-	assert.Contains(t, view, "playwright")
+	recs := buildRecommendations(state)
+	intents := buildIntents(state)
+	view := renderMainScreen(state, recs, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	// Summary
+	assert.Contains(t, view, "User config")
+	assert.Contains(t, view, "user/repo")
+	// Actions
+	assert.Contains(t, view, "I want to")
+}
+
+func TestRenderMainScreen_NothingToRecommend(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	intents := buildIntents(state)
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	assert.Contains(t, view, "Everything looks good")
+}
+
+func TestRenderMainScreen_Footer(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	intents := buildIntents(state)
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, false, "")
+	assert.Contains(t, view, "filter")
+	assert.Contains(t, view, "help")
+	assert.Contains(t, view, "quit")
+}
+
+func TestRenderMainScreen_FilterBar(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	intents := buildIntents(state)
+	view := renderMainScreen(state, nil, intents, 0, 70, 30, "0.7.0", false, -1, nil, true, "plug")
+	assert.Contains(t, view, "plug")
+}
+
+func TestRenderMainScreen_NoFilterResults(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	view := renderMainScreen(state, nil, nil, 0, 70, 30, "0.7.0", false, -1, nil, false, "zzz")
+	assert.Contains(t, view, "No matching actions")
+}
+
+// --- renderFreshInstall tests ---
+
+func TestRenderFreshInstall_ShowsOptions(t *testing.T) {
+	view := renderFreshInstall(70, 30, "0.7.0", 0)
+	assert.Contains(t, view, "No config found")
+	assert.Contains(t, view, "Create")
+	assert.Contains(t, view, "Join")
+}
+
+func TestRenderFreshInstall_ShowsVersion(t *testing.T) {
+	view := renderFreshInstall(70, 30, "0.7.0", 0)
+	assert.Contains(t, view, "0.7.0")
 }

@@ -27,6 +27,14 @@ func buildIntents(state commands.MenuState) []intent {
 
 	return []intent{
 		{
+			label: "View active plugins",
+			hint:  "\u2192",
+			action: actionItem{
+				id:    "view-plugins",
+				label: "View active plugins",
+			},
+		},
+		{
 			label: "Join a shared config",
 			hint:  "\u2192",
 			action: actionItem{
@@ -104,64 +112,9 @@ func selectedAction(recs []recommendation, intents []intent, cursor int) *action
 	return nil
 }
 
-// renderActions renders the combined action screen with recommendations and intents.
-// This is the backward-compatible version without execution state.
-func renderActions(recs []recommendation, intents []intent, cursor int, width, height int) string {
-	return renderActionsWithState(recs, intents, cursor, width, height, false, -1, nil)
-}
-
-// renderActionsWithState renders the combined action screen with execution state.
-func renderActionsWithState(recs []recommendation, intents []intent, cursor int, width, height int,
-	executing bool, executingIndex int, results map[int]actionResultMsg) string {
-	maxWidth := width - 2
-	if maxWidth > 70 {
-		maxWidth = 70
-	}
-	if maxWidth < 30 {
-		maxWidth = 30
-	}
-
-	// Available width inside the box (subtract border + padding: 2 border + 4 padding)
-	innerWidth := maxWidth - 6
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
-
-	var sections []string
-
-	// --- Needs attention section ---
-	sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
-
-	// --- Divider ---
-	divStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-	sections = append(sections, divStyle.Render(strings.Repeat("\u2500", innerWidth)))
-
-	// --- I want to... section ---
-	sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
-
-	// --- Footer ---
-	sections = append(sections, renderActionsFooter())
-
-	content := strings.Join(sections, "\n\n")
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorSurface1).
-		Padding(1, 2).
-		Width(maxWidth)
-
-	return boxStyle.Render(content)
-}
-
-// renderRecsSection renders the "Needs attention" section (backward-compatible).
-func renderRecsSection(recs []recommendation, cursor int, innerWidth int) string {
-	return renderRecsSectionWithState(recs, cursor, innerWidth, false, -1, nil)
-}
-
-// renderRecsSectionWithState renders the "Needs attention" section with execution state.
+// renderRecsSectionWithState renders the "Needs attention" / "Status" section with execution state.
 func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth int,
 	executing bool, executingIndex int, results map[int]actionResultMsg) string {
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 	redStyle := lipgloss.NewStyle().Foreground(colorRed)
@@ -170,13 +123,14 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 
 	var lines []string
-	lines = append(lines, headerStyle.Render("Needs attention"))
-	lines = append(lines, "")
 
 	if len(recs) == 0 {
+		lines = append(lines, sectionHeader("Status"))
 		lines = append(lines, greenStyle.Render("\u2713 Everything looks good"))
 		return strings.Join(lines, "\n")
 	}
+
+	lines = append(lines, sectionHeader("Needs attention"))
 
 	for i, rec := range recs {
 		// Recommendation title with icon
@@ -232,15 +186,9 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 	return strings.Join(lines, "\n")
 }
 
-// renderIntentsSection renders the "I want to..." section (backward-compatible).
-func renderIntentsSection(intents []intent, recCount, cursor int, innerWidth int) string {
-	return renderIntentsSectionWithState(intents, recCount, cursor, innerWidth, false, -1, nil)
-}
-
 // renderIntentsSectionWithState renders the "I want to..." section with execution state.
 func renderIntentsSectionWithState(intents []intent, recCount, cursor int, innerWidth int,
 	executing bool, executingIndex int, results map[int]actionResultMsg) string {
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	greenStyle := lipgloss.NewStyle().Foreground(colorGreen)
 	redStyle := lipgloss.NewStyle().Foreground(colorRed)
@@ -249,8 +197,7 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 	textStyle := lipgloss.NewStyle().Foreground(colorText)
 
 	var lines []string
-	lines = append(lines, headerStyle.Render("I want to..."))
-	lines = append(lines, "")
+	lines = append(lines, sectionHeader("I want to..."))
 
 	for i, it := range intents {
 		globalIdx := recCount + i
@@ -299,11 +246,17 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 	return strings.Join(lines, "\n")
 }
 
-// renderActionsFiltered renders the action screen with optional filter bar.
-func renderActionsFiltered(recs []recommendation, intents []intent, cursor int, width, height int,
-	executing bool, executingIndex int, results map[int]actionResultMsg,
-	filterMode bool, filterText string) string {
+// Backward-compatible rendering functions used by tests.
 
+// renderActions renders the combined action screen with recommendations and intents.
+func renderActions(recs []recommendation, intents []intent, cursor int, width, height int) string {
+	return renderActionsWithState(recs, intents, cursor, width, height, false, -1, nil)
+}
+
+// renderActionsWithState renders the combined action screen with execution state.
+// This is kept for backward compatibility with tests.
+func renderActionsWithState(recs []recommendation, intents []intent, cursor int, width, height int,
+	executing bool, executingIndex int, results map[int]actionResultMsg) string {
 	maxWidth := width - 2
 	if maxWidth > 70 {
 		maxWidth = 70
@@ -320,34 +273,14 @@ func renderActionsFiltered(recs []recommendation, intents []intent, cursor int, 
 
 	var sections []string
 
-	// --- Filter bar (when active) ---
-	if filterMode || filterText != "" {
-		filterStyle := lipgloss.NewStyle().Foreground(colorBlue)
-		cursorChar := ""
-		if filterMode {
-			cursorChar = "\u2588" // block cursor
-		}
-		sections = append(sections, filterStyle.Render("/ "+filterText+cursorChar))
-	}
+	// --- Needs attention section ---
+	sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
 
-	// --- No results message ---
-	if len(recs) == 0 && len(intents) == 0 && filterText != "" {
-		dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-		sections = append(sections, dimStyle.Render("No matching actions"))
-	} else {
-		// --- Needs attention section ---
-		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingIndex, results))
-
-		// --- Divider ---
-		divStyle := lipgloss.NewStyle().Foreground(colorSurface1)
-		sections = append(sections, divStyle.Render(strings.Repeat("\u2500", innerWidth)))
-
-		// --- I want to... section ---
-		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
-	}
+	// --- I want to... section ---
+	sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingIndex, results))
 
 	// --- Footer ---
-	sections = append(sections, renderActionsFooter())
+	sections = append(sections, renderMainFooter())
 
 	content := strings.Join(sections, "\n\n")
 
@@ -391,10 +324,4 @@ func filterIntents(intents []intent, query string) []intent {
 		}
 	}
 	return filtered
-}
-
-// renderActionsFooter renders the keyboard shortcut hints for the actions view.
-func renderActionsFooter() string {
-	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
-	return dimStyle.Render("/ filter  ? help  esc dashboard  q quit")
 }

@@ -201,7 +201,7 @@ func TestAppModel_JoinConfigIntent_OpensJoinFlow(t *testing.T) {
 		ConfigExists: true,
 	}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 

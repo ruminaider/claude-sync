@@ -21,45 +21,25 @@ func appSendSpecialKey(m tea.Model, key tea.KeyType) tea.Model {
 	return updated
 }
 
-func TestAppModel_InitialState_IsDashboard(t *testing.T) {
+func TestAppModel_InitialState_IsMain(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
 
-	assert.Equal(t, viewDashboard, m.activeView)
+	assert.Equal(t, viewMain, m.activeView)
 	assert.False(t, m.quitting)
-	assert.Equal(t, 0, m.dashboardScroll)
 	assert.Equal(t, 0, m.actionCursor)
 	assert.Equal(t, "", m.version)
 }
 
-func TestAppModel_EnterFromDashboard_GoesToActions(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
+func TestAppModel_InitialState_BuildsRecsAndIntents(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true, CommitsBehind: 3}
 	m := NewAppModel(state)
 
-	var model tea.Model = m
-	model = appSendSpecialKey(model, tea.KeyEnter)
-	app := model.(AppModel)
-
-	assert.Equal(t, viewActions, app.activeView)
+	assert.NotEmpty(t, m.recommendations, "recommendations should be built at init")
+	assert.NotEmpty(t, m.intents, "intents should be built at init")
 }
 
-func TestAppModel_EscFromActions_GoesToDashboard(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-
-	var model tea.Model = m
-	// Go to actions first
-	model = appSendSpecialKey(model, tea.KeyEnter)
-	app := model.(AppModel)
-	assert.Equal(t, viewActions, app.activeView)
-
-	// Esc back to dashboard
-	model = appSendSpecialKey(model, tea.KeyEscape)
-	app = model.(AppModel)
-	assert.Equal(t, viewDashboard, app.activeView)
-}
-
-func TestAppModel_QuitFromDashboard(t *testing.T) {
+func TestAppModel_QuitFromMain(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
 
@@ -71,20 +51,31 @@ func TestAppModel_QuitFromDashboard(t *testing.T) {
 	require.NotNil(t, cmd)
 }
 
-func TestAppModel_QuitFromActions(t *testing.T) {
+func TestAppModel_EscFromMain_Quits(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
 
 	var model tea.Model = m
-	// Go to actions first
-	model = appSendSpecialKey(model, tea.KeyEnter)
-
-	// Quit with q
-	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	app := model.(AppModel)
 
 	assert.True(t, app.quitting)
 	require.NotNil(t, cmd)
+}
+
+func TestAppModel_EscFromMain_WithFilterText_ClearsFilter(t *testing.T) {
+	// When there's active filter text, esc should clear it instead of quitting.
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.filterText = "plug"
+
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app := model.(AppModel)
+
+	assert.Equal(t, viewMain, app.activeView, "should stay on main view")
+	assert.Equal(t, "", app.filterText, "filter text should be cleared")
+	assert.False(t, app.quitting, "should not quit when clearing filter")
 }
 
 func TestAppModel_CtrlC_Quits(t *testing.T) {
@@ -111,48 +102,15 @@ func TestAppModel_WindowResize(t *testing.T) {
 	assert.Equal(t, 40, app.height)
 }
 
-func TestAppModel_DashboardScroll(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-
-	var model tea.Model = m
-
-	// Scroll down with j
-	model = appSendKey(model, "j")
-	app := model.(AppModel)
-	assert.Equal(t, 1, app.dashboardScroll)
-
-	// Scroll down again
-	model = appSendKey(model, "j")
-	app = model.(AppModel)
-	assert.Equal(t, 2, app.dashboardScroll)
-
-	// Scroll up with k
-	model = appSendKey(model, "k")
-	app = model.(AppModel)
-	assert.Equal(t, 1, app.dashboardScroll)
-
-	// Scroll up past zero should stay at zero
-	model = appSendKey(model, "k")
-	model = appSendKey(model, "k")
-	app = model.(AppModel)
-	assert.Equal(t, 0, app.dashboardScroll)
-}
-
 func TestAppModel_ActionCursor(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
 
 	var model tea.Model = m
 
-	// Go to actions view first
-	model = appSendSpecialKey(model, tea.KeyEnter)
-	app := model.(AppModel)
-	assert.Equal(t, viewActions, app.activeView)
-
 	// Move cursor down with j
 	model = appSendKey(model, "j")
-	app = model.(AppModel)
+	app := model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 
 	// Move cursor down again
@@ -180,27 +138,38 @@ func TestAppModel_SetVersion(t *testing.T) {
 	assert.Equal(t, "1.2.3", m.version)
 }
 
-func TestAppModel_ViewDashboard_ShowsDashboard(t *testing.T) {
+func TestAppModel_ViewMain_ShowsContent(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+	m.SetVersion("0.7.0")
 
 	view := m.View()
 	assert.Contains(t, view, "claude-sync")
-	assert.Contains(t, view, "enter")
+	assert.Contains(t, view, "0.7.0")
+	assert.Contains(t, view, "I want to")
 	assert.Contains(t, view, "quit")
 }
 
-func TestAppModel_ViewActions_ShowsActionScreen(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
+func TestAppModel_ViewMain_ShowsSummaryAndActions(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		ConfigRepo:   "user/repo",
+		CommitsBehind: 3,
+	}
 	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
 
-	// Transition to actions
-	var model tea.Model = m
-	model = appSendSpecialKey(model, tea.KeyEnter)
-	app := model.(AppModel)
-
-	view := app.View()
+	view := m.View()
+	// Summary section
+	assert.Contains(t, view, "User config")
+	assert.Contains(t, view, "user/repo")
+	assert.Contains(t, view, "connected")
+	// Recommendations
 	assert.Contains(t, view, "Needs attention")
+	// Intents
 	assert.Contains(t, view, "I want to")
 }
 
@@ -214,23 +183,20 @@ func TestAppModel_EditConfig_SetsLaunchFlag(t *testing.T) {
 	}
 	m := NewAppModel(state)
 
-	// Transition to actions view
 	var model tea.Model = m
-	model = appSendSpecialKey(model, tea.KeyEnter)
-	app := model.(AppModel)
-	require.Equal(t, viewActions, app.activeView)
 
 	// Find the "edit-config" intent index
 	editIdx := -1
-	for i, it := range app.intents {
+	for i, it := range m.intents {
 		if it.action.id == "edit-config" {
-			editIdx = len(app.recommendations) + i
+			editIdx = len(m.recommendations) + i
 			break
 		}
 	}
 	require.NotEqual(t, -1, editIdx, "edit-config intent not found")
 
 	// Move cursor to the edit-config intent
+	app := model.(AppModel)
 	for app.actionCursor < editIdx {
 		model = appSendKey(model, "j")
 		app = model.(AppModel)
@@ -256,20 +222,19 @@ func TestAppModel_EditConfig_DoesNotSetQuitting(t *testing.T) {
 	m := NewAppModel(state)
 
 	var model tea.Model = m
-	model = appSendSpecialKey(model, tea.KeyEnter)
-	app := model.(AppModel)
 
 	// Find edit-config index
 	editIdx := -1
-	for i, it := range app.intents {
+	for i, it := range m.intents {
 		if it.action.id == "edit-config" {
-			editIdx = len(app.recommendations) + i
+			editIdx = len(m.recommendations) + i
 			break
 		}
 	}
 	require.NotEqual(t, -1, editIdx)
 
 	// Navigate to edit-config
+	app := model.(AppModel)
 	for app.actionCursor < editIdx {
 		model = appSendKey(model, "j")
 		app = model.(AppModel)
@@ -306,9 +271,6 @@ func TestAppModel_NormalQuit_DoesNotSetLaunchFlag(t *testing.T) {
 func TestAppModel_FilterMode_SlashEnters(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true, Profiles: []string{"w"}, Plugins: []commands.PluginInfo{{Name: "t", Status: "upstream"}}}
 	m := NewAppModel(state)
-	m.activeView = viewActions
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	app := updated.(AppModel)
@@ -320,7 +282,6 @@ func TestAppModel_FilterMode_SlashEnters(t *testing.T) {
 func TestAppModel_FilterMode_EscExits(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterMode = true
 	m.filterText = "test"
 
@@ -333,10 +294,7 @@ func TestAppModel_FilterMode_EscExits(t *testing.T) {
 func TestAppModel_FilterMode_TypingAppendsText(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterMode = true
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	app := updated.(AppModel)
@@ -350,11 +308,8 @@ func TestAppModel_FilterMode_TypingAppendsText(t *testing.T) {
 func TestAppModel_FilterMode_BackspaceRemovesChar(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterMode = true
 	m.filterText = "plug"
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	app := updated.(AppModel)
@@ -364,11 +319,8 @@ func TestAppModel_FilterMode_BackspaceRemovesChar(t *testing.T) {
 func TestAppModel_FilterMode_CursorResetsOnKeystroke(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterMode = true
 	m.actionCursor = 3
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	app := updated.(AppModel)
@@ -378,32 +330,13 @@ func TestAppModel_FilterMode_CursorResetsOnKeystroke(t *testing.T) {
 func TestAppModel_FilterMode_QDoesNotQuit(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterMode = true
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	app := updated.(AppModel)
 	assert.False(t, app.quitting, "q should not quit while in filter mode")
 	assert.Nil(t, cmd)
 	assert.Equal(t, "q", app.filterText) // q typed into filter
-}
-
-func TestAppModel_FilterMode_EscWithFilterTextClearsFilter(t *testing.T) {
-	// When there's active filter text and not in filterMode,
-	// esc should clear the filter text instead of going to dashboard.
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-	m.activeView = viewActions
-	m.filterText = "plug"
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	app := updated.(AppModel)
-	assert.Equal(t, viewActions, app.activeView, "should stay on actions view")
-	assert.Equal(t, "", app.filterText, "filter text should be cleared")
 }
 
 // --- Filter function tests ---
@@ -481,9 +414,6 @@ func TestFilterIntents_NoMatch(t *testing.T) {
 func TestAppModel_HelpOverlay_QuestionMarkOpens(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	app := updated.(AppModel)
@@ -493,7 +423,6 @@ func TestAppModel_HelpOverlay_QuestionMarkOpens(t *testing.T) {
 func TestAppModel_HelpOverlay_AnyKeyCloses(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.showHelp = true
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
@@ -504,7 +433,6 @@ func TestAppModel_HelpOverlay_AnyKeyCloses(t *testing.T) {
 func TestAppModel_HelpOverlay_EscCloses(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.showHelp = true
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
@@ -515,7 +443,6 @@ func TestAppModel_HelpOverlay_EscCloses(t *testing.T) {
 func TestAppModel_HelpOverlay_QDoesNotQuit(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.showHelp = true
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
@@ -528,7 +455,6 @@ func TestAppModel_HelpOverlay_QDoesNotQuit(t *testing.T) {
 func TestAppModel_HelpOverlay_ViewContainsHelpText(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.showHelp = true
 	m.width = 80
 	m.height = 40
@@ -543,11 +469,8 @@ func TestAppModel_HelpOverlay_ViewContainsHelpText(t *testing.T) {
 func TestAppModel_FilterMode_ViewShowsFilterBar(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterMode = true
 	m.filterText = "plug"
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 	m.width = 80
 	m.height = 40
 
@@ -558,10 +481,7 @@ func TestAppModel_FilterMode_ViewShowsFilterBar(t *testing.T) {
 func TestAppModel_FilterMode_NoResults(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
 	m.filterText = "zzzznonexistent"
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 	m.width = 80
 	m.height = 40
 
@@ -626,16 +546,16 @@ func TestRenderFreshInstall_ShowsCursor(t *testing.T) {
 	assert.Contains(t, view, ">") // cursor on first item
 }
 
-func TestAppModel_FreshInstall_EnterDoesNotGoToActions(t *testing.T) {
-	// In fresh install mode, Enter should NOT go to the action screen
+func TestAppModel_FreshInstall_EnterDoesNotQuit(t *testing.T) {
+	// In fresh install mode, Enter should NOT quit normally
 	state := commands.MenuState{ConfigExists: false}
 	m := NewAppModel(state)
 	m.freshInstallCursor = 0
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	app := updated.(AppModel)
-	// Should either launch editor or join flow, NOT go to viewActions
-	assert.NotEqual(t, viewActions, app.activeView)
+	// Should either launch editor or join flow, NOT stay on main
+	assert.True(t, app.LaunchConfigEditor || app.activeView == viewSubView)
 }
 
 func TestAppModel_FreshInstall_ArrowKeysWork(t *testing.T) {
@@ -658,4 +578,59 @@ func TestRenderFreshInstall_CursorOnJoin(t *testing.T) {
 	assert.Contains(t, view, "Create")
 	assert.Contains(t, view, "Join")
 	assert.Contains(t, view, ">")
+}
+
+// --- View plugins sub-view test ---
+
+func TestAppModel_ViewPlugins_OpensSubView(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Profiles:     []string{"work"},
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Status: "upstream", Marketplace: "beads-mkt"},
+		},
+	}
+	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
+
+	// Find the "view-plugins" intent index
+	viewIdx := -1
+	for i, it := range m.intents {
+		if it.action.id == "view-plugins" {
+			viewIdx = len(m.recommendations) + i
+			break
+		}
+	}
+	require.NotEqual(t, -1, viewIdx, "view-plugins intent not found")
+
+	var model tea.Model = m
+	// Navigate to it
+	app := model.(AppModel)
+	for app.actionCursor < viewIdx {
+		model = appSendKey(model, "j")
+		app = model.(AppModel)
+	}
+
+	// Press enter to select
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app = model.(AppModel)
+
+	assert.Equal(t, viewSubView, app.activeView)
+	assert.NotNil(t, app.subView)
+}
+
+// --- Sub-view close returns to main ---
+
+func TestAppModel_SubViewClose_ReturnsToMain(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewAppModel(state)
+	m.activeView = viewSubView
+	m.subView = NewConfigDetails(state, 80, 40)
+
+	updated, _ := m.Update(subViewCloseMsg{refreshState: false})
+	app := updated.(AppModel)
+
+	assert.Equal(t, viewMain, app.activeView)
+	assert.Nil(t, app.subView)
 }

@@ -18,7 +18,7 @@ func TestAppModel_InlineExecution_SetsExecuting(t *testing.T) {
 		Plugins:       []commands.PluginInfo{{Name: "test", Status: "upstream"}},
 	}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 
@@ -32,7 +32,7 @@ func TestAppModel_InlineExecution_SetsExecuting(t *testing.T) {
 func TestAppModel_InlineExecution_HandlesResult(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.executing = true
 	m.executingIndex = 0
 
@@ -52,7 +52,7 @@ func TestAppModel_InlineExecution_HandlesResult(t *testing.T) {
 func TestAppModel_InlineExecution_HandlesError(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.executing = true
 
 	updated, _ := m.Update(actionResultMsg{
@@ -71,7 +71,7 @@ func TestAppModel_InlineExecution_HandlesError(t *testing.T) {
 func TestAppModel_IgnoresEnterWhileExecuting(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.executing = true
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
@@ -88,7 +88,7 @@ func TestAppModel_EnterOnInlineAction_StartsExecution(t *testing.T) {
 		CommitsBehind: 3,
 	}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 	m.actionCursor = 0 // "Pull and apply now" (inline action)
@@ -106,7 +106,7 @@ func TestAppModel_EnterOnNonInlineAction_NoExecution(t *testing.T) {
 		HasPending:   true,
 	}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 	// "Review and decide" is not inline (no inline flag)
@@ -124,7 +124,7 @@ func TestAppModel_ResultRebuildsRecommendations(t *testing.T) {
 		CommitsBehind: 3,
 	}
 	m := NewAppModel(state)
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 	m.executing = true

@@ -15,6 +15,7 @@ func TestBuildIntents_AllPresent(t *testing.T) {
 	for _, i := range intents {
 		ids = append(ids, i.action.id)
 	}
+	assert.Contains(t, ids, "view-plugins")
 	assert.Contains(t, ids, "join-config")
 	assert.Contains(t, ids, "browse-plugins")
 	assert.Contains(t, ids, "switch-profile")
@@ -22,7 +23,13 @@ func TestBuildIntents_AllPresent(t *testing.T) {
 	assert.Contains(t, ids, "edit-config")
 	assert.Contains(t, ids, "import-mcp")
 	assert.Contains(t, ids, "view-config")
-	assert.Len(t, intents, 7)
+	assert.Len(t, intents, 8)
+}
+
+func TestBuildIntents_ViewPluginsIsFirst(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	intents := buildIntents(state)
+	assert.Equal(t, "view-plugins", intents[0].action.id)
 }
 
 func TestBuildIntents_ProfileLabel_Active(t *testing.T) {
@@ -57,7 +64,7 @@ func TestBuildIntents_ProfileLabel_NoActive(t *testing.T) {
 
 func TestRenderActions_ShowsBothSections(t *testing.T) {
 	recs := []recommendation{
-		{icon: "⚠", title: "Config behind", action: actionItem{id: "pull", label: "Pull now", inline: true}},
+		{icon: "\u26a0", title: "Config behind", action: actionItem{id: "pull", label: "Pull now", inline: true}},
 	}
 	state := commands.MenuState{ConfigExists: true}
 	intents := buildIntents(state)
@@ -78,7 +85,7 @@ func TestRenderActions_NothingToRecommend(t *testing.T) {
 
 func TestRenderActions_CursorHighlightsItem(t *testing.T) {
 	recs := []recommendation{
-		{icon: "⚠", title: "Test rec", action: actionItem{id: "test", label: "Do test", inline: true}},
+		{icon: "\u26a0", title: "Test rec", action: actionItem{id: "test", label: "Do test", inline: true}},
 	}
 	intents := buildIntents(commands.MenuState{ConfigExists: true})
 	view := renderActions(recs, intents, 0, 70, 30)
@@ -88,7 +95,6 @@ func TestRenderActions_CursorHighlightsItem(t *testing.T) {
 func TestRenderActions_Footer(t *testing.T) {
 	intents := buildIntents(commands.MenuState{ConfigExists: true})
 	view := renderActions(nil, intents, 0, 70, 30)
-	assert.Contains(t, view, "esc")
 	assert.Contains(t, view, "quit")
 }
 

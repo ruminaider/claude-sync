@@ -277,7 +277,7 @@ func TestAppModel_BrowsePluginsIntent_OpensPluginBrowser(t *testing.T) {
 	m := NewAppModel(state)
 	m.width = 80
 	m.height = 40
-	m.activeView = viewActions
+	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 

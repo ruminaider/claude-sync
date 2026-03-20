@@ -11,13 +11,12 @@ import (
 type appView int
 
 const (
-	viewDashboard appView = iota
-	viewActions
+	viewMain appView = iota
 	viewSubView
 )
 
 // AppModel is the top-level Bubble Tea model that routes between
-// dashboard, actions, and sub-view screens via a simple state machine.
+// the main screen and sub-view screens via a simple state machine.
 type AppModel struct {
 	state      commands.MenuState
 	activeView appView
@@ -31,7 +30,6 @@ type AppModel struct {
 	syncDir   string
 
 	// cursor positions preserved per view
-	dashboardScroll    int
 	actionCursor       int
 	freshInstallCursor int // 0 = Create, 1 = Join (only used when !ConfigExists)
 
@@ -58,13 +56,19 @@ type AppModel struct {
 	LaunchConfigEditor bool // true = caller should run config editor, then re-launch AppModel
 }
 
-// NewAppModel creates an AppModel from detected state, starting on the dashboard.
+// NewAppModel creates an AppModel from detected state, starting on the main screen.
 func NewAppModel(state commands.MenuState) AppModel {
-	return AppModel{
+	m := AppModel{
 		state:            state,
-		activeView:       viewDashboard,
+		activeView:       viewMain,
 		executionResults: make(map[int]actionResultMsg),
 	}
+	// Build recommendations and intents immediately so they're available on first render
+	if state.ConfigExists {
+		m.recommendations = buildRecommendations(state)
+		m.intents = buildIntents(state)
+	}
+	return m
 }
 
 // SetVersion sets the version string displayed in the header.
@@ -108,7 +112,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.intents = buildIntents(m.state)
 		return m, nil
 	case subViewCloseMsg:
-		m.activeView = viewActions
+		m.activeView = viewMain
 		m.subView = nil
 		if msg.refreshState {
 			m.state = commands.DetectMenuState(m.claudeDir, m.syncDir)
@@ -144,10 +148,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Route to active view
 		switch m.activeView {
-		case viewDashboard:
-			return m.updateDashboard(msg)
-		case viewActions:
-			return m.updateActions(msg)
+		case viewMain:
+			return m.updateMain(msg)
 		case viewSubView:
 			return m.updateSubView(msg)
 		}
@@ -160,19 +162,17 @@ func (m AppModel) View() string {
 		return ""
 	}
 	switch m.activeView {
-	case viewDashboard:
-		return m.viewDashboard()
-	case viewActions:
-		return m.viewActions()
+	case viewMain:
+		return m.viewMain()
 	case viewSubView:
 		return m.viewSubView()
 	}
 	return ""
 }
 
-// --- Dashboard view ---
+// --- Main view ---
 
-func (m AppModel) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.state.ConfigExists {
 		// Fresh install mode: navigate between Create and Join
 		switch msg.String() {
@@ -201,30 +201,6 @@ func (m AppModel) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Normal configured mode
-	switch msg.String() {
-	case "enter":
-		m.recommendations = buildRecommendations(m.state)
-		m.intents = buildIntents(m.state)
-		m.actionCursor = 0
-		m.activeView = viewActions
-	case "j", "down":
-		m.dashboardScroll++
-	case "k", "up":
-		if m.dashboardScroll > 0 {
-			m.dashboardScroll--
-		}
-	}
-	return m, nil
-}
-
-func (m AppModel) viewDashboard() string {
-	return renderDashboard(m.state, m.width, m.height, m.version, m.freshInstallCursor)
-}
-
-// --- Actions view ---
-
-func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Help overlay takes priority — any key dismisses it
 	if m.showHelp {
 		m.showHelp = false
@@ -256,7 +232,9 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.actionCursor = 0
 			return m, nil
 		}
-		m.activeView = viewDashboard
+		// Esc from main screen quits (no dashboard to go back to)
+		m.quitting = true
+		return m, tea.Quit
 	case "j", "down":
 		if m.actionCursor < total-1 {
 			m.actionCursor++
@@ -280,29 +258,7 @@ func (m AppModel) updateActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
 		}
 		// Sub-view navigation
-		switch action.id {
-		case "switch-profile":
-			picker := NewProfilePicker(m.state, m.width, m.height)
-			picker.SetPaths(m.claudeDir, m.syncDir)
-			m.subView = picker
-			m.activeView = viewSubView
-		case "browse-plugins":
-			browser := NewPluginBrowser(m.state, m.width, m.height)
-			m.subView = browser
-			m.activeView = viewSubView
-		case "join-config":
-			jf := NewJoinFlow(m.width, m.height)
-			jf.claudeDir = m.claudeDir
-			jf.syncDir = m.syncDir
-			m.subView = jf
-			m.activeView = viewSubView
-		case "view-config":
-			m.subView = NewConfigDetails(m.state, m.width, m.height)
-			m.activeView = viewSubView
-		case "edit-config":
-			m.LaunchConfigEditor = true
-			return m, tea.Quit
-		}
+		return m.openSubView(action.id)
 	}
 	return m, nil
 }
@@ -337,30 +293,7 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.executingIndex = m.actionCursor
 			return m, executeAction(m.actionCursor, action.id, action.args, m.claudeDir, m.syncDir)
 		}
-		switch action.id {
-		case "switch-profile":
-			picker := NewProfilePicker(m.state, m.width, m.height)
-			picker.SetPaths(m.claudeDir, m.syncDir)
-			m.subView = picker
-			m.activeView = viewSubView
-		case "browse-plugins":
-			browser := NewPluginBrowser(m.state, m.width, m.height)
-			m.subView = browser
-			m.activeView = viewSubView
-		case "join-config":
-			jf := NewJoinFlow(m.width, m.height)
-			jf.claudeDir = m.claudeDir
-			jf.syncDir = m.syncDir
-			m.subView = jf
-			m.activeView = viewSubView
-		case "view-config":
-			m.subView = NewConfigDetails(m.state, m.width, m.height)
-			m.activeView = viewSubView
-		case "edit-config":
-			m.LaunchConfigEditor = true
-			return m, tea.Quit
-		}
-		return m, nil
+		return m.openSubView(action.id)
 	case tea.KeyRunes:
 		m.filterText += string(msg.Runes)
 		m.actionCursor = 0
@@ -384,20 +317,56 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m AppModel) viewActions() string {
+// openSubView handles navigation to a sub-view based on action ID.
+func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
+	switch actionID {
+	case "switch-profile":
+		picker := NewProfilePicker(m.state, m.width, m.height)
+		picker.SetPaths(m.claudeDir, m.syncDir)
+		m.subView = picker
+		m.activeView = viewSubView
+	case "browse-plugins":
+		browser := NewPluginBrowser(m.state, m.width, m.height)
+		m.subView = browser
+		m.activeView = viewSubView
+	case "join-config":
+		jf := NewJoinFlow(m.width, m.height)
+		jf.claudeDir = m.claudeDir
+		jf.syncDir = m.syncDir
+		m.subView = jf
+		m.activeView = viewSubView
+	case "view-config":
+		m.subView = NewConfigDetails(m.state, m.width, m.height)
+		m.activeView = viewSubView
+	case "view-plugins":
+		m.subView = NewActivePluginsView(m.state, m.width, m.height)
+		m.activeView = viewSubView
+	case "edit-config":
+		m.LaunchConfigEditor = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m AppModel) viewMain() string {
+	if !m.state.ConfigExists {
+		return renderFreshInstall(m.width, m.height, m.version, m.freshInstallCursor)
+	}
+
 	if m.showHelp {
-		return m.viewActionsHelp()
+		return m.viewMainHelp()
 	}
 
 	recs := filterRecommendations(m.recommendations, m.filterText)
 	intents := filterIntents(m.intents, m.filterText)
 
-	return renderActionsFiltered(recs, intents, m.actionCursor, m.width, m.height,
+	return renderMainScreen(m.state, recs, intents,
+		m.actionCursor, m.width, m.height, m.version,
 		m.executing, m.executingIndex, m.executionResults,
 		m.filterMode, m.filterText)
 }
 
-func (m AppModel) viewActionsHelp() string {
+func (m AppModel) viewMainHelp() string {
 	dimStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
@@ -417,7 +386,7 @@ func (m AppModel) viewActionsHelp() string {
 	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2191/k")+"     Move up"))
 	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("\u2193/j")+"     Move down"))
 	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("enter")+"   Execute action or open sub-view"))
-	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("esc")+"     Go back to dashboard"))
+	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("esc")+"     Quit"))
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("Actions"))
 	lines = append(lines, dimStyle.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("/")+"       Filter actions"))
@@ -447,7 +416,7 @@ func (m AppModel) updateSubView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// Fallback: no sub-view loaded, esc goes back
 	if msg.String() == "esc" {
-		m.activeView = viewActions
+		m.activeView = viewMain
 		return m, nil
 	}
 	return m, nil
