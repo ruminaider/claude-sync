@@ -165,12 +165,12 @@ func TestProfilePicker_AnyKeyDismissesResult(t *testing.T) {
 	assert.True(t, closeMsg.refreshState) // successful switch should refresh
 }
 
-func TestProfilePicker_FailedResultDismiss_NoRefresh(t *testing.T) {
+func TestProfilePicker_FailedResultDismiss_StillRefreshes(t *testing.T) {
 	state := commands.MenuState{Profiles: []string{"work"}}
 	m := NewProfilePicker(state, 70, 30)
 
-	// Set failed result state
-	updated, _ := m.Update(profileSwitchResultMsg{success: false, message: "failed"})
+	// Set failed result state (profile was set but pull failed)
+	updated, _ := m.Update(profileSwitchResultMsg{success: false, message: "Profile set but pull failed"})
 	picker := updated.(ProfilePicker)
 
 	// Press any key to dismiss
@@ -180,7 +180,7 @@ func TestProfilePicker_FailedResultDismiss_NoRefresh(t *testing.T) {
 	msg := cmd()
 	closeMsg, ok := msg.(subViewCloseMsg)
 	assert.True(t, ok)
-	assert.False(t, closeMsg.refreshState) // failed switch should NOT refresh
+	assert.True(t, closeMsg.refreshState) // always refresh — profile file was already written
 }
 
 func TestProfilePicker_SelectNonActiveProfile_StartsExecution(t *testing.T) {

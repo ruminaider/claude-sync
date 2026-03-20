@@ -108,10 +108,11 @@ func (m ProfilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// After result is shown, any key dismisses
+		// After result is shown, any key dismisses.
+		// Always refresh state — the profile file was written even if pull failed.
 		if m.resultDone {
 			return m, func() tea.Msg {
-				return subViewCloseMsg{refreshState: m.resultSuccess}
+				return subViewCloseMsg{refreshState: true}
 			}
 		}
 
