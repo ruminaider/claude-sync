@@ -68,17 +68,7 @@ func (m *JoinFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.executing = false
 		m.resultDone = true
 		m.resultOk = msg.success
-		if msg.success {
-			m.resultMsg = msg.message
-		} else {
-			if msg.message != "" {
-				m.resultMsg = msg.message
-			} else if msg.err != nil {
-				m.resultMsg = msg.err.Error()
-			} else {
-				m.resultMsg = "Unknown error"
-			}
-		}
+		m.resultMsg = resolveResultMsg(msg.success, msg.message, msg.err)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -145,13 +135,7 @@ func (m *JoinFlow) View() string {
 	lines = append(lines, "")
 
 	if m.resultDone {
-		if m.resultOk {
-			lines = append(lines, stGreen.Render("\u2713 "+m.resultMsg))
-		} else {
-			lines = append(lines, stRed.Render("\u2717 "+m.resultMsg))
-		}
-		lines = append(lines, "")
-		lines = append(lines, stDim.Render("Press any key to go back"))
+		lines = renderResultLines(lines, m.resultOk, m.resultMsg)
 	} else if m.executing {
 		lines = append(lines, stYellow.Render("\u27f3 Joining "+m.repoURL+"..."))
 	} else if m.step == 0 {

@@ -94,17 +94,7 @@ func (m ProfilePicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.executing = false
 		m.resultDone = true
 		m.resultSuccess = msg.success
-		if msg.success {
-			m.resultMsg = msg.message
-		} else {
-			if msg.message != "" {
-				m.resultMsg = msg.message
-			} else if msg.err != nil {
-				m.resultMsg = msg.err.Error()
-			} else {
-				m.resultMsg = "Unknown error"
-			}
-		}
+		m.resultMsg = resolveResultMsg(msg.success, msg.message, msg.err)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -164,13 +154,7 @@ func (m ProfilePicker) View() string {
 
 	// Result state
 	if m.resultDone {
-		if m.resultSuccess {
-			lines = append(lines, stGreen.Render("\u2713 "+m.resultMsg))
-		} else {
-			lines = append(lines, stRed.Render("\u2717 "+m.resultMsg))
-		}
-		lines = append(lines, "")
-		lines = append(lines, stDim.Render("Press any key to go back"))
+		lines = renderResultLines(lines, m.resultSuccess, m.resultMsg)
 	} else if m.executing {
 		displayName := m.selected
 		if displayName == "" {
