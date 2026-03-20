@@ -405,24 +405,24 @@ func TestFilterRecommendations_CaseInsensitive(t *testing.T) {
 
 func TestFilterIntents(t *testing.T) {
 	intents := []intent{
-		{label: "Add or discover new plugins"},
-		{label: "Switch settings profile"},
-		{label: "Push my local changes"},
+		{action: actionItem{label: "Add or discover new plugins"}},
+		{action: actionItem{label: "Switch settings profile"}},
+		{action: actionItem{label: "Push my local changes"}},
 	}
 	filtered := filterIntents(intents, "plug")
 	assert.Len(t, filtered, 1)
-	assert.Contains(t, filtered[0].label, "plugins")
+	assert.Contains(t, filtered[0].action.label, "plugins")
 }
 
 func TestFilterIntents_EmptyQuery(t *testing.T) {
-	intents := []intent{{label: "test1"}, {label: "test2"}}
+	intents := []intent{{action: actionItem{label: "test1"}}, {action: actionItem{label: "test2"}}}
 	assert.Len(t, filterIntents(intents, ""), 2)
 }
 
 func TestFilterIntents_NoMatch(t *testing.T) {
 	intents := []intent{
-		{label: "Add plugins"},
-		{label: "Push changes"},
+		{action: actionItem{label: "Add plugins"}},
+		{action: actionItem{label: "Push changes"}},
 	}
 	filtered := filterIntents(intents, "zzzzz")
 	assert.Len(t, filtered, 0)

@@ -45,7 +45,7 @@ func TestBuildIntents_ProfileLabel_Active(t *testing.T) {
 		}
 	}
 	require.NotNil(t, profileIntent)
-	assert.Contains(t, profileIntent.label, "Switch settings profile")
+	assert.Contains(t, profileIntent.action.label, "Switch settings profile")
 	assert.Contains(t, profileIntent.hint, "work")
 }
 
@@ -59,7 +59,7 @@ func TestBuildIntents_ProfileLabel_NoActive(t *testing.T) {
 		}
 	}
 	require.NotNil(t, profileIntent)
-	assert.Contains(t, profileIntent.label, "Activate a settings profile")
+	assert.Contains(t, profileIntent.action.label, "Activate a settings profile")
 }
 
 func TestRenderActions_ShowsBothSections(t *testing.T) {

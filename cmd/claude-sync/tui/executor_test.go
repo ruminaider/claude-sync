@@ -256,13 +256,8 @@ func TestRenderActions_ShowsIntentExecutingState(t *testing.T) {
 	recs := []recommendation{}
 	intents := []intent{
 		{
-			label: "Push my local changes",
-			hint:  "enter",
-			action: actionItem{
-				id:     "push-changes",
-				label:  "Push my local changes",
-				inline: true,
-			},
+			hint:   "enter",
+			action: actionItem{id: "push-changes", label: "Push my local changes", inline: true},
 		},
 	}
 	results := map[string]actionResultMsg{}

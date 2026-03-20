@@ -10,7 +10,6 @@ import (
 
 // intent represents a goal-oriented action the user can take.
 type intent struct {
-	label  string // "Add or discover new plugins"
 	hint   string // shown on right: "work →" or "enter"
 	action actionItem
 }
@@ -27,70 +26,36 @@ func buildIntents(state commands.MenuState) []intent {
 
 	return []intent{
 		{
-			label: "View active plugins",
-			hint:  "\u2192",
-			action: actionItem{
-				id:    "view-plugins",
-				label: "View active plugins",
-			},
+			hint:   "\u2192",
+			action: actionItem{id: "view-plugins", label: "View active plugins"},
 		},
 		{
-			label: "Join a shared config",
-			hint:  "\u2192",
-			action: actionItem{
-				id:    "join-config",
-				label: "Join a shared config",
-			},
+			hint:   "\u2192",
+			action: actionItem{id: "join-config", label: "Join a shared config"},
 		},
 		{
-			label: "Add or discover new plugins",
-			hint:  "\u2192",
-			action: actionItem{
-				id:    "browse-plugins",
-				label: "Add or discover new plugins",
-			},
+			hint:   "\u2192",
+			action: actionItem{id: "browse-plugins", label: "Add or discover new plugins"},
 		},
 		{
-			label: profileLabel,
-			hint:  profileHint,
-			action: actionItem{
-				id:    "switch-profile",
-				label: profileLabel,
-			},
+			hint:   profileHint,
+			action: actionItem{id: "switch-profile", label: profileLabel},
 		},
 		{
-			label: "Push my local changes",
-			hint:  "enter",
-			action: actionItem{
-				id:     "push-changes",
-				label:  "Push my local changes",
-				inline: true,
-			},
+			hint:   "enter",
+			action: actionItem{id: "push-changes", label: "Push my local changes", inline: true},
 		},
 		{
-			label: "Edit my full config",
-			hint:  "\u2192",
-			action: actionItem{
-				id:    "edit-config",
-				label: "Edit my full config",
-			},
+			hint:   "\u2192",
+			action: actionItem{id: "edit-config", label: "Edit my full config"},
 		},
 		{
-			label: "Import MCP servers",
-			hint:  "enter",
-			action: actionItem{
-				id:     "import-mcp",
-				label:  "Import MCP servers",
-				inline: true,
-			},
+			hint:   "enter",
+			action: actionItem{id: "import-mcp", label: "Import MCP servers", inline: true},
 		},
 		{
-			label: "View full config details",
-			hint:  "\u2192",
-			action: actionItem{
-				id:    "view-config",
-				label: "View full config details",
-			},
+			hint:   "\u2192",
+			action: actionItem{id: "view-config", label: "View full config details"},
 		},
 	}
 }
@@ -211,7 +176,7 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 		}
 
 		if isSelected {
-			label := stBlue.Render("> " + it.label)
+			label := stBlue.Render("> " + it.action.label)
 			hintText := stDim.Render(it.hint)
 			gap := innerWidth - lipgloss.Width(label) - lipgloss.Width(hintText)
 			if gap < 1 {
@@ -219,7 +184,7 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 			}
 			lines = append(lines, label+strings.Repeat(" ", gap)+hintText)
 		} else {
-			label := stText.Render("  " + it.label)
+			label := stText.Render("  " + it.action.label)
 			hintText := stDim.Render(it.hint)
 			gap := innerWidth - lipgloss.Width(label) - lipgloss.Width(hintText)
 			if gap < 1 {
@@ -289,7 +254,7 @@ func filterIntents(intents []intent, query string) []intent {
 	query = strings.ToLower(query)
 	var filtered []intent
 	for _, i := range intents {
-		if strings.Contains(strings.ToLower(i.label), query) {
+		if strings.Contains(strings.ToLower(i.action.label), query) {
 			filtered = append(filtered, i)
 		}
 	}
