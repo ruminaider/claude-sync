@@ -11,6 +11,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDetectMenuState_CommitsBehind_ErrorReturnsNegativeOne(t *testing.T) {
+	syncDir := t.TempDir()
+	// No git repo → git rev-list will fail
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte("version: \"1.0.0\"\nplugins: []\n"), 0644)
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(t.TempDir(), syncDir)
+	assert.Equal(t, -1, state.CommitsBehind)
+}
+
+func TestDetectMenuState_Warnings_OnConfigParseError(t *testing.T) {
+	syncDir := t.TempDir()
+	os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte("{{invalid yaml"), 0644)
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(t.TempDir(), syncDir)
+	assert.True(t, len(state.Warnings) > 0, "should have at least one warning for invalid config")
+}
+
 func TestDetectMenuState_NotInitialized(t *testing.T) {
 	claudeDir := t.TempDir()
 	syncDir := filepath.Join(t.TempDir(), "sync")
@@ -318,7 +343,7 @@ func TestDetectMenuState_EmptyConfig(t *testing.T) {
 
 	assert.True(t, state.ConfigExists)
 	assert.Empty(t, state.ConfigRepo)
-	assert.Equal(t, 0, state.CommitsBehind)
+	assert.Equal(t, -1, state.CommitsBehind) // -1 = unknown (no git upstream)
 	assert.Empty(t, state.Plugins)
 	assert.Empty(t, state.Projects)
 	assert.NotEmpty(t, state.ProjectDir) // always set to pwd

@@ -113,5 +113,17 @@ func buildRecommendations(state commands.MenuState) []recommendation {
 		})
 	}
 
+	// 7. State detection warnings
+	for _, w := range state.Warnings {
+		recs = append(recs, recommendation{
+			icon:  "⚠",
+			title: w,
+			action: actionItem{
+				id:    "warning",
+				label: "Dismiss",
+			},
+		})
+	}
+
 	return recs
 }

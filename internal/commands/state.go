@@ -69,6 +69,9 @@ type MenuState struct {
 	ClaudeMDCount    int      // number of synced CLAUDE.md sections
 	MCPCount         int      // number of MCP servers configured
 	UntrackedPlugins []string // plugins installed locally but not in config
+
+	// Non-fatal issues encountered during state detection
+	Warnings []string
 }
 
 // DetectMenuState checks the current claude-sync state for menu rendering.
@@ -118,6 +121,8 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 			cfg = &parsed
 			state.Plugins = buildPluginInfos(parsed)
 			state.MCPCount = len(parsed.MCP)
+		} else {
+			state.Warnings = append(state.Warnings, "config.yaml: "+parseErr.Error())
 		}
 	}
 
@@ -231,15 +236,17 @@ func detectConfigRepo(syncDir string) string {
 }
 
 // detectCommitsBehind checks how many commits the local branch is behind its upstream.
+// detectCommitsBehind checks how many commits the local branch is behind its upstream.
+// Returns -1 if the status cannot be determined (no git repo, no upstream, etc.).
 func detectCommitsBehind(syncDir string) int {
 	cmd := exec.Command("git", "-C", syncDir, "rev-list", "HEAD..@{upstream}", "--count")
 	out, err := cmd.Output()
 	if err != nil {
-		return 0
+		return -1
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
-		return 0
+		return -1
 	}
 	return n
 }

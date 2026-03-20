@@ -145,6 +145,34 @@ func TestRecommendations_Multiple_Combined(t *testing.T) {
 	assert.Contains(t, ids, "plugin-update")
 }
 
+func TestRecommendations_CommitsBehindUnknown(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		CommitsBehind: -1,
+		Profiles:      []string{"default"},
+		Plugins:       []commands.PluginInfo{{Name: "test", Status: "upstream"}},
+	}
+	recs := buildRecommendations(state)
+	// Should NOT generate "behind" recommendation when status unknown
+	for _, r := range recs {
+		assert.NotContains(t, r.title, "behind")
+	}
+}
+
+func TestRecommendations_Warnings_Surfaced(t *testing.T) {
+	state := allGoodState()
+	state.Warnings = []string{"config.yaml: parse error"}
+	recs := buildRecommendations(state)
+	found := false
+	for _, r := range recs {
+		if r.action.id == "warning" {
+			found = true
+			assert.Contains(t, r.title, "config.yaml")
+		}
+	}
+	assert.True(t, found, "warnings should be surfaced as recommendations")
+}
+
 func TestRecommendations_NotShown_WhenNoConfig(t *testing.T) {
 	state := commands.MenuState{ConfigExists: false}
 	recs := buildRecommendations(state)
