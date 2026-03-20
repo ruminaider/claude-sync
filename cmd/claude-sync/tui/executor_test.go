@@ -330,6 +330,15 @@ func TestExecuteAction_PluginUpdateAction(t *testing.T) {
 	assert.Contains(t, result.message, "not yet available")
 }
 
+func TestExecuteAction_PluginUpdateAction_EmptyArgs(t *testing.T) {
+	cmd := executeAction(0, "plugin-update", nil, "/tmp/claude", "/tmp/sync")
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.True(t, result.success)
+	assert.NotEmpty(t, result.message, "should always show a message even with no args")
+	assert.Contains(t, result.message, "not yet available")
+}
+
 func TestExecuteAction_ImportMCPAction(t *testing.T) {
 	cmd := executeAction(0, "import-mcp", nil, "/tmp/claude", "/tmp/sync")
 	msg := cmd()

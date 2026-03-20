@@ -92,7 +92,8 @@ func executeAction(index int, actionID string, args []string,
 			msg = "Conflict resolution not yet available in TUI"
 		case "plugin-update":
 			if len(args) > 0 {
-				// TODO: wire to real update command in later task
+				msg = fmt.Sprintf("Plugin update for %s not yet available in TUI", args[0])
+			} else {
 				msg = "Plugin update not yet available in TUI"
 			}
 		case "import-mcp":
