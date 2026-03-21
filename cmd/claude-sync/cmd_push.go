@@ -54,39 +54,18 @@ var pushCmd = &cobra.Command{
 				forkSrc, mktSrc, isFork := isForkDuplicate(d)
 				if isFork {
 					if pushAutoFlag {
-						// Auto mode: resolve silently.
-						resolution := plugins.Resolution{
-							PluginName:   d.Name,
-							KeepSource:   forkSrc,
-							RemoveSource: mktSrc,
-							Relationship: "preference",
-						}
+						resolution := forkPreferenceResolution(d.Name, forkSrc, mktSrc)
 						if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
 							return fmt.Errorf("resolving fork duplicate %s: %w", d.Name, err)
 						}
 						fmt.Fprintf(os.Stderr, "Auto-resolved: disabled %s (fork is active)\n", mktSrc)
 					} else {
-						// Interactive: simplified yes/no prompt.
-						var disable bool
-						promptErr := huh.NewForm(
-							huh.NewGroup(
-								huh.NewConfirm().
-									Title(fmt.Sprintf("Disable original %s? (fork is active at %s)", mktSrc, forkSrc)).
-									Affirmative("Yes").
-									Negative("No").
-									Value(&disable),
-							),
-						).Run()
+						disable, promptErr := promptDisableForkOriginal(forkSrc, mktSrc)
 						if promptErr != nil {
-							return fmt.Errorf("aborted")
+							return promptErr
 						}
 						if disable {
-							resolution := plugins.Resolution{
-								PluginName:   d.Name,
-								KeepSource:   forkSrc,
-								RemoveSource: mktSrc,
-								Relationship: "preference",
-							}
+							resolution := forkPreferenceResolution(d.Name, forkSrc, mktSrc)
 							if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
 								return fmt.Errorf("resolving fork duplicate %s: %w", d.Name, err)
 							}

@@ -125,3 +125,31 @@ func isForkDuplicate(d plugins.Duplicate) (forkSource, marketplaceSource string,
 	}
 	return "", "", false
 }
+
+// forkPreferenceResolution builds a Resolution that keeps the fork and disables the marketplace source.
+func forkPreferenceResolution(name, forkSrc, mktSrc string) plugins.Resolution {
+	return plugins.Resolution{
+		PluginName:   name,
+		KeepSource:   forkSrc,
+		RemoveSource: mktSrc,
+		Relationship: "preference",
+	}
+}
+
+// promptDisableForkOriginal asks the user whether to disable the original marketplace source.
+func promptDisableForkOriginal(forkSrc, mktSrc string) (bool, error) {
+	var disable bool
+	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Disable original %s? (fork is active at %s)", mktSrc, forkSrc)).
+				Affirmative("Yes").
+				Negative("No").
+				Value(&disable),
+		),
+	).Run()
+	if err != nil {
+		return false, fmt.Errorf("aborted")
+	}
+	return disable, nil
+}
