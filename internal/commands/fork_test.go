@@ -55,6 +55,9 @@ func setupForkTestEnv(t *testing.T) (claudeDir, syncDir string) {
 	// Create known_marketplaces.json.
 	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "known_marketplaces.json"), []byte("{}"), 0644))
 
+	// Create a minimal settings.json so ToggleEnabledPlugin can read it.
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644))
+
 	// Create syncDir with v2 config listing the plugin as upstream.
 	require.NoError(t, os.MkdirAll(syncDir, 0755))
 	cfg := config.Config{
@@ -81,8 +84,9 @@ func setupForkTestEnv(t *testing.T) (claudeDir, syncDir string) {
 func TestFork(t *testing.T) {
 	claudeDir, syncDir := setupForkTestEnv(t)
 
-	err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
+	result, err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
 	require.NoError(t, err)
+	assert.Equal(t, "test-plugin", result.PluginName)
 
 	// Verify plugin files were copied.
 	manifest, err := os.ReadFile(filepath.Join(syncDir, "plugins", "test-plugin", "manifest.json"))
@@ -110,7 +114,7 @@ func TestFork(t *testing.T) {
 }
 
 func TestFork_InvalidKey(t *testing.T) {
-	err := commands.Fork("/tmp", "/tmp", "no-at-sign")
+	_, err := commands.Fork("/tmp", "/tmp", "no-at-sign")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid plugin key")
 }
@@ -118,7 +122,7 @@ func TestFork_InvalidKey(t *testing.T) {
 func TestFork_PluginNotInstalled(t *testing.T) {
 	claudeDir, syncDir := setupForkTestEnv(t)
 
-	err := commands.Fork(claudeDir, syncDir, "nonexistent@test-marketplace")
+	_, err := commands.Fork(claudeDir, syncDir, "nonexistent@test-marketplace")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -127,7 +131,7 @@ func TestUnfork(t *testing.T) {
 	claudeDir, syncDir := setupForkTestEnv(t)
 
 	// First fork the plugin.
-	err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
+	_, err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
 	require.NoError(t, err)
 
 	// Verify it was forked.
@@ -162,7 +166,7 @@ func TestUnfork_CleansUpMarketplaceWhenLastFork(t *testing.T) {
 	claudeDir, syncDir := setupForkTestEnv(t)
 
 	// Fork the plugin.
-	err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
+	_, err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
 	require.NoError(t, err)
 
 	// Register the local marketplace (simulating what pull/init would do).
@@ -209,6 +213,9 @@ func TestCopyDir_SkipsPycache(t *testing.T) {
 	os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"), []byte(installedPlugins), 0644)
 	os.WriteFile(filepath.Join(pluginDir, "known_marketplaces.json"), []byte("{}"), 0644)
 
+	// Create a minimal settings.json so ToggleEnabledPlugin can read it.
+	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("{}"), 0644)
+
 	os.MkdirAll(syncDir, 0755)
 	cfg := config.Config{Version: "1.0.0", Upstream: []string{"test-plugin@test-mkt"}, Pinned: map[string]string{}}
 	cfgData, _ := config.MarshalV2(cfg)
@@ -219,7 +226,7 @@ func TestCopyDir_SkipsPycache(t *testing.T) {
 	require.NoError(t, git.Add(syncDir, "."))
 	require.NoError(t, git.Commit(syncDir, "init"))
 
-	err := commands.Fork(claudeDir, syncDir, "test-plugin@test-mkt")
+	_, err := commands.Fork(claudeDir, syncDir, "test-plugin@test-mkt")
 	require.NoError(t, err)
 
 	// __pycache__ should NOT exist in the destination.
@@ -231,4 +238,42 @@ func TestCopyDir_SkipsPycache(t *testing.T) {
 	assert.NoError(t, err, "main.py should be copied")
 	_, err = os.Stat(filepath.Join(syncDir, "plugins", "test-plugin", "hooks", "hook.py"))
 	assert.NoError(t, err, "hooks/hook.py should be copied")
+}
+
+func writeTestSettings(t *testing.T, claudeDir string, enabledPlugins map[string]bool) {
+	t.Helper()
+	ep, _ := json.Marshal(enabledPlugins)
+	settings := map[string]json.RawMessage{
+		"enabledPlugins": ep,
+	}
+	data, _ := json.MarshalIndent(settings, "", "  ")
+	err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0644)
+	require.NoError(t, err)
+}
+
+func TestFork_DisablesOriginalSource(t *testing.T) {
+	claudeDir, syncDir := setupForkTestEnv(t)
+
+	// Seed settings.json with the plugin enabled.
+	writeTestSettings(t, claudeDir, map[string]bool{
+		"test-plugin@test-marketplace": true,
+	})
+
+	result, err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-plugin", result.PluginName)
+	assert.Equal(t, "test-plugin@test-marketplace", result.DisabledSource)
+
+	// Verify settings.json has the original source disabled.
+	data, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	require.NoError(t, err)
+
+	var settings map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	var enabled map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &enabled))
+
+	assert.False(t, enabled["test-plugin@test-marketplace"], "original source should be disabled")
 }
