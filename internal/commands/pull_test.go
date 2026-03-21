@@ -26,9 +26,13 @@ func TestPull_DryRun_NothingToInstall(t *testing.T) {
 	result, err := commands.PullDryRun(claudeDir, syncDir)
 	require.NoError(t, err)
 	// Only the bundled claude-sync plugin may need installing in test environments
+	var unexpected []string
 	for _, p := range result.ToInstall {
-		assert.Equal(t, "claude-sync@claude-sync-forks", p)
+		if p != "claude-sync@claude-sync-forks" {
+			unexpected = append(unexpected, p)
+		}
 	}
+	assert.Empty(t, unexpected, "unexpected plugins need installing")
 }
 
 func TestPull_NoSyncDir(t *testing.T) {
@@ -47,9 +51,13 @@ func TestPull_GitPull(t *testing.T) {
 	result, err := commands.PullDryRun(claudeDir, syncDir)
 	require.NoError(t, err)
 	// Only the bundled claude-sync plugin may need installing in test environments
+	var unexpected2 []string
 	for _, p := range result.ToInstall {
-		assert.Equal(t, "claude-sync@claude-sync-forks", p)
+		if p != "claude-sync@claude-sync-forks" {
+			unexpected2 = append(unexpected2, p)
+		}
 	}
+	assert.Empty(t, unexpected2, "unexpected plugins need installing")
 }
 
 func TestPull_RespectsUserPreferences(t *testing.T) {

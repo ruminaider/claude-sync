@@ -31,9 +31,14 @@ func TestStatus(t *testing.T) {
 	assert.Contains(t, result.Synced, "beads@beads-marketplace")
 	// The bundled claude-sync plugin may appear as not-installed in test
 	// environments where `claude plugin install` is not available.
+	var unexpectedNotInstalled []string
 	for _, p := range result.NotInstalled {
-		assert.Equal(t, "claude-sync@claude-sync-forks", p)
+		if p != "claude-sync@claude-sync-forks" {
+			unexpectedNotInstalled = append(unexpectedNotInstalled, p)
+		}
 	}
+	assert.Empty(t, unexpectedNotInstalled, "unexpected plugins not installed")
+	assert.Empty(t, result.Untracked)
 }
 
 func TestStatus_NotInstalled(t *testing.T) {
