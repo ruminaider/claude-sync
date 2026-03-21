@@ -12,10 +12,10 @@ copy-plugin:
 build: copy-plugin
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/claude-sync
 
-test:
+test: copy-plugin
 	go test ./... -v
 
-test-integration:
+test-integration: copy-plugin
 	go test ./tests/ -tags=integration -v
 
 install: build
