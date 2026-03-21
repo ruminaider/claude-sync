@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/plugins"
@@ -104,4 +105,23 @@ func promptReEvaluation(sig plugins.ReEvalSignal) (string, error) {
 	}
 
 	return choice, nil
+}
+
+// isForkDuplicate checks if a duplicate is a fork-vs-marketplace pair.
+// Returns the fork source, marketplace source, and whether it matched.
+func isForkDuplicate(d plugins.Duplicate) (forkSource, marketplaceSource string, ok bool) {
+	if len(d.Sources) != 2 {
+		return "", "", false
+	}
+	for _, src := range d.Sources {
+		if strings.HasSuffix(src, "@"+plugins.MarketplaceName) {
+			forkSource = src
+		} else {
+			marketplaceSource = src
+		}
+	}
+	if forkSource != "" && marketplaceSource != "" {
+		return forkSource, marketplaceSource, true
+	}
+	return "", "", false
 }
