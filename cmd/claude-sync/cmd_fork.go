@@ -19,8 +19,9 @@ var forkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Forked %s for customization\n", result.PluginName)
-		fmt.Println("Edit files in ~/.claude-sync/plugins/ and push when ready.")
+		fmt.Printf("Forked %s → plugins/%s\n", result.DisabledSource, result.PluginName)
+		fmt.Printf("Disabled original source: %s\n", result.DisabledSource)
+		fmt.Println("Edit files in ~/.claude-sync/plugins/ and run 'claude-sync push' when ready.")
 		return nil
 	},
 }
