@@ -129,10 +129,13 @@ func Unfork(claudeDir, syncDir, pluginName, marketplace string) error {
 		_ = forkedplugins.UnregisterLocalMarketplace(claudeDir)
 	}
 
-	// Add <name>@<marketplace> back to upstream.
+	// Add <name>@<marketplace> back to upstream and re-enable in settings.json.
 	upstreamKey := pluginName + "@" + marketplace
 	if !containsString(cfg.Upstream, upstreamKey) {
 		cfg.Upstream = append(cfg.Upstream, upstreamKey)
+	}
+	if err := forkedplugins.ToggleEnabledPlugin(claudeDir, upstreamKey, true); err != nil {
+		return fmt.Errorf("re-enabling original plugin source: %w", err)
 	}
 
 	// Write updated config.

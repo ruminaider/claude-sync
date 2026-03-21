@@ -277,3 +277,32 @@ func TestFork_DisablesOriginalSource(t *testing.T) {
 
 	assert.False(t, enabled["test-plugin@test-marketplace"], "original source should be disabled")
 }
+
+func TestUnfork_ReEnablesOriginalSource(t *testing.T) {
+	claudeDir, syncDir := setupForkTestEnv(t)
+
+	// Seed settings.json with the plugin enabled.
+	writeTestSettings(t, claudeDir, map[string]bool{
+		"test-plugin@test-marketplace": true,
+	})
+
+	// Fork disables the original source.
+	_, err := commands.Fork(claudeDir, syncDir, "test-plugin@test-marketplace")
+	require.NoError(t, err)
+
+	// Unfork should re-enable the original source.
+	err = commands.Unfork(claudeDir, syncDir, "test-plugin", "test-marketplace")
+	require.NoError(t, err)
+
+	// Verify settings.json has the original source re-enabled.
+	data, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	require.NoError(t, err)
+
+	var settings map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &settings))
+
+	var enabled map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &enabled))
+
+	assert.True(t, enabled["test-plugin@test-marketplace"], "original source should be re-enabled after unfork")
+}
