@@ -15,11 +15,13 @@ var forkCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pluginKey := args[0]
-		if err := commands.Fork(paths.ClaudeDir(), paths.SyncDir(), pluginKey); err != nil {
+		result, err := commands.Fork(paths.ClaudeDir(), paths.SyncDir(), pluginKey)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("Forked %s for customization\n", pluginKey)
-		fmt.Println("Edit files in ~/.claude-sync/plugins/ and push when ready.")
+		fmt.Printf("Forked %s → plugins/%s\n", result.DisabledSource, result.PluginName)
+		fmt.Printf("Disabled original source: %s\n", result.DisabledSource)
+		fmt.Println("Edit files in ~/.claude-sync/plugins/ and run 'claude-sync push' when ready.")
 		return nil
 	},
 }
