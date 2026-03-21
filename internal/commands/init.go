@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -432,14 +433,7 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 	}
 
 	// Always include the bundled claude-sync plugin as forked.
-	hasBundled := false
-	for _, name := range forkedNames {
-		if name == bundled.PluginName {
-			hasBundled = true
-			break
-		}
-	}
-	if !hasBundled {
+	if !slices.Contains(forkedNames, bundled.PluginName) {
 		forkedNames = append(forkedNames, bundled.PluginName)
 	}
 
