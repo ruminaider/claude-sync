@@ -2,15 +2,20 @@ VERSION ?= 0.3.1
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 BINARY := claude-sync
 
-.PHONY: build test test-integration clean install cross-compile
+.PHONY: build test test-integration clean install cross-compile copy-plugin
 
-build:
+copy-plugin:
+	rm -rf internal/bundled/plugin
+	cp -r plugin internal/bundled/plugin
+	rm -rf internal/bundled/plugin/bin
+
+build: copy-plugin
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/claude-sync
 
-test:
+test: copy-plugin
 	go test ./... -v
 
-test-integration:
+test-integration: copy-plugin
 	go test ./tests/ -tags=integration -v
 
 install: build
@@ -34,7 +39,7 @@ install: build
 		echo "  export PATH=\"$$INSTALL_DIR:\$$PATH\""; \
 	fi
 
-cross-compile:
+cross-compile: copy-plugin
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-darwin-arm64 ./cmd/claude-sync
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-darwin-amd64 ./cmd/claude-sync
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-linux-arm64 ./cmd/claude-sync

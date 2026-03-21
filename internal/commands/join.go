@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/ruminaider/claude-sync/internal/bundled"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
@@ -61,6 +63,7 @@ type JoinResult struct {
 	HookNames    []string // e.g. ["PreCompact", "SessionStart"]
 	HasProfiles  bool
 	ProfileNames []string
+	Warnings     []string
 }
 
 func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
@@ -96,7 +99,8 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	// Detect local-only plugins: installed locally but not in the remote config.
 	result := &JoinResult{}
 
-	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	cfgPath := filepath.Join(syncDir, "config.yaml")
+	cfgData, err := os.ReadFile(cfgPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, &MissingConfigError{}
@@ -107,6 +111,25 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	cfg, err := config.Parse(cfgData)
 	if err != nil {
 		return nil, fmt.Errorf("parsing config.yaml: %w", err)
+	}
+
+	// Ensure the bundled claude-sync plugin exists in the config repo.
+	// This covers configs created before auto-install was added.
+	bundledPluginDir := filepath.Join(syncDir, "plugins", bundled.PluginName)
+	if err := bundled.ExtractPlugin(bundledPluginDir); err != nil {
+		return nil, fmt.Errorf("extracting bundled plugin: %w", err)
+	}
+
+	// Register the bundled plugin in the Forked list so pull can find it.
+	if !slices.Contains(cfg.Forked, bundled.PluginName) {
+		cfg.Forked = append(cfg.Forked, bundled.PluginName)
+		updatedData, err := config.Marshal(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling config after forked update: %w", err)
+		}
+		if err := os.WriteFile(cfgPath, updatedData, 0644); err != nil {
+			return nil, fmt.Errorf("writing config after forked update: %w", err)
+		}
 	}
 
 	// Expose config categories so the CLI can prompt about them.

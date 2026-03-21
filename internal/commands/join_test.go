@@ -469,6 +469,27 @@ func TestJoin_LocalPath_NoUpstream_KeepsOriginal(t *testing.T) {
 	assert.Equal(t, local, strings.TrimSpace(string(gotURL)))
 }
 
+func TestJoin_ExtractsBundledPlugin(t *testing.T) {
+	remote := setupRemoteRepo(t, []string{"context7@claude-plugins-official"})
+	claudeDir := setupLocalClaude(t, []string{})
+	syncDir := filepath.Join(t.TempDir(), ".claude-sync")
+
+	_, err := commands.Join(remote, claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Verify bundled plugin files were extracted.
+	pluginDir := filepath.Join(syncDir, "plugins", "claude-sync")
+	_, err = os.Stat(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
+	assert.NoError(t, err, "plugin.json should exist after join")
+
+	// Verify bundled plugin is registered in config.yaml Forked list.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Forked, "claude-sync")
+}
+
 func TestNormalizeURL(t *testing.T) {
 	tests := []struct {
 		a, b string
