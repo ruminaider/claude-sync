@@ -49,15 +49,46 @@ var pullCmd = &cobra.Command{
 				Force:     forceFlag,
 				DuplicateResolver: func(dupes []plugins.Duplicate) error {
 					for _, d := range dupes {
-						resolution, promptErr := promptDuplicateResolution(d, syncDir)
-						if promptErr != nil {
-							return promptErr
-						}
-						if applyErr := plugins.ApplyResolution(claudeDir, syncDir, resolution); applyErr != nil {
-							return fmt.Errorf("resolving duplicate %s: %w", d.Name, applyErr)
-						}
-						if !quietFlag {
-							fmt.Printf("Resolved: keeping %s\n", resolution.KeepSource)
+						forkSrc, mktSrc, isFork := isForkDuplicate(d)
+						if isFork {
+							var disable bool
+							promptErr := huh.NewForm(
+								huh.NewGroup(
+									huh.NewConfirm().
+										Title(fmt.Sprintf("Disable original %s? (fork is active at %s)", mktSrc, forkSrc)).
+										Affirmative("Yes").
+										Negative("No").
+										Value(&disable),
+								),
+							).Run()
+							if promptErr != nil {
+								return fmt.Errorf("aborted")
+							}
+							if disable {
+								resolution := plugins.Resolution{
+									PluginName:   d.Name,
+									KeepSource:   forkSrc,
+									RemoveSource: mktSrc,
+									Relationship: "preference",
+								}
+								if applyErr := plugins.ApplyResolution(claudeDir, syncDir, resolution); applyErr != nil {
+									return fmt.Errorf("resolving fork duplicate %s: %w", d.Name, applyErr)
+								}
+								if !quietFlag {
+									fmt.Printf("Resolved: disabled %s\n", mktSrc)
+								}
+							}
+						} else {
+							resolution, promptErr := promptDuplicateResolution(d, syncDir)
+							if promptErr != nil {
+								return promptErr
+							}
+							if applyErr := plugins.ApplyResolution(claudeDir, syncDir, resolution); applyErr != nil {
+								return fmt.Errorf("resolving duplicate %s: %w", d.Name, applyErr)
+							}
+							if !quietFlag {
+								fmt.Printf("Resolved: keeping %s\n", resolution.KeepSource)
+							}
 						}
 					}
 					return nil
@@ -100,12 +131,26 @@ var pullCmd = &cobra.Command{
 		if quietFlag || autoFlag {
 			// In auto mode, surface duplicate plugins so the agent can help resolve.
 			if autoFlag && len(result.DuplicatePlugins) > 0 {
-				fmt.Fprintf(os.Stderr, "WARNING: %d duplicate plugin(s) detected — same plugin installed from multiple sources.\n", len(result.DuplicatePlugins))
-				fmt.Fprintf(os.Stderr, "This causes redundant hook execution and slow exit times.\n")
 				for _, d := range result.DuplicatePlugins {
-					fmt.Fprintf(os.Stderr, "  %s: %s\n", d.Name, strings.Join(d.Sources, ", "))
+					forkSrc, mktSrc, isFork := isForkDuplicate(d)
+					if isFork {
+						resolution := plugins.Resolution{
+							PluginName:   d.Name,
+							KeepSource:   forkSrc,
+							RemoveSource: mktSrc,
+							Relationship: "preference",
+						}
+						if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: could not auto-resolve fork duplicate %s: %v\n", d.Name, err)
+						} else {
+							fmt.Fprintf(os.Stderr, "Auto-resolved: disabled %s (fork is active)\n", mktSrc)
+						}
+					} else {
+						fmt.Fprintf(os.Stderr, "WARNING: duplicate plugin %s from multiple sources.\n", d.Name)
+						fmt.Fprintf(os.Stderr, "  %s\n", strings.Join(d.Sources, ", "))
+						fmt.Fprintf(os.Stderr, "To fix: set the unwanted source to false in enabledPlugins in ~/.claude/settings.json, then run 'claude-sync push'.\n")
+					}
 				}
-				fmt.Fprintf(os.Stderr, "To fix: set the unwanted source to false in enabledPlugins in ~/.claude/settings.json, then run 'claude-sync push'.\n")
 			}
 			// In auto mode, still show pending high-risk warnings.
 			if autoFlag && len(result.PendingHighRisk) > 0 {
