@@ -115,6 +115,11 @@ var configJoinCmd = &cobra.Command{
 
 		fmt.Printf("✓ Cloned config repo to %s\n", syncDir)
 
+		// Display any warnings from the join operation.
+		for _, w := range result.Warnings {
+			fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+		}
+
 		// Show what the config contains.
 		if result.HasSettings {
 			fmt.Printf("  Config includes settings: %s\n", strings.Join(result.SettingsKeys, ", "))
