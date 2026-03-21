@@ -50,23 +50,44 @@ var pushCmd = &cobra.Command{
 		if dupErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not check for duplicate plugins: %v\n", dupErr)
 		} else if len(dupes) > 0 {
-			if pushAutoFlag {
-				fmt.Fprintf(os.Stderr, "WARNING: %d duplicate plugin(s) detected — same plugin installed from multiple sources.\n", len(dupes))
-				fmt.Fprintf(os.Stderr, "This causes redundant hook execution and slow exit times.\n")
-				for _, d := range dupes {
-					fmt.Fprintf(os.Stderr, "  %s: %s\n", d.Name, strings.Join(d.Sources, ", "))
-				}
-				fmt.Fprintf(os.Stderr, "To fix: set the unwanted source to false in enabledPlugins in ~/.claude/settings.json, then run 'claude-sync push'.\n")
-			} else {
-				for _, d := range dupes {
-					resolution, promptErr := promptDuplicateResolution(d, syncDir)
-					if promptErr != nil {
-						return promptErr
+			for _, d := range dupes {
+				forkSrc, mktSrc, isFork := isForkDuplicate(d)
+				if isFork {
+					if pushAutoFlag {
+						resolution := forkPreferenceResolution(d.Name, forkSrc, mktSrc)
+						if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
+							return fmt.Errorf("resolving fork duplicate %s: %w", d.Name, err)
+						}
+						fmt.Fprintf(os.Stderr, "Auto-resolved: disabled %s (fork is active)\n", mktSrc)
+					} else {
+						disable, promptErr := promptDisableForkOriginal(forkSrc, mktSrc)
+						if promptErr != nil {
+							return promptErr
+						}
+						if disable {
+							resolution := forkPreferenceResolution(d.Name, forkSrc, mktSrc)
+							if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
+								return fmt.Errorf("resolving fork duplicate %s: %w", d.Name, err)
+							}
+							fmt.Printf("Resolved: disabled %s\n", mktSrc)
+						}
 					}
-					if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
-						return fmt.Errorf("resolving duplicate %s: %w", d.Name, err)
+				} else {
+					// Non-fork duplicate: use existing generic flow.
+					if pushAutoFlag {
+						fmt.Fprintf(os.Stderr, "WARNING: duplicate plugin %s from multiple sources.\n", d.Name)
+						fmt.Fprintf(os.Stderr, "  %s\n", strings.Join(d.Sources, ", "))
+						fmt.Fprintf(os.Stderr, "To fix: set the unwanted source to false in enabledPlugins in ~/.claude/settings.json, then run 'claude-sync push'.\n")
+					} else {
+						resolution, promptErr := promptDuplicateResolution(d, syncDir)
+						if promptErr != nil {
+							return promptErr
+						}
+						if err := plugins.ApplyResolution(claudeDir, syncDir, resolution); err != nil {
+							return fmt.Errorf("resolving duplicate %s: %w", d.Name, err)
+						}
+						fmt.Printf("Resolved: keeping %s\n", resolution.KeepSource)
 					}
-					fmt.Printf("Resolved: keeping %s\n", resolution.KeepSource)
 				}
 			}
 		}

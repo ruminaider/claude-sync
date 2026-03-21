@@ -13,47 +13,53 @@ import (
 	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
 )
 
+// ForkResult contains information about a completed fork operation.
+type ForkResult struct {
+	PluginName     string // bare plugin name (e.g. "bash-validator")
+	DisabledSource string // full key that was disabled (e.g. "bash-validator@marketplace")
+}
+
 // Fork copies a plugin from the Claude Code cache into the sync repo's plugins/
 // directory, then updates config to move it from upstream/pinned to forked.
-func Fork(claudeDir, syncDir, pluginKey string) error {
+func Fork(claudeDir, syncDir, pluginKey string) (*ForkResult, error) {
 	// Split pluginKey on "@" to get name and marketplace.
 	parts := strings.SplitN(pluginKey, "@", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return fmt.Errorf("invalid plugin key %q: expected format name@marketplace", pluginKey)
+		return nil, fmt.Errorf("invalid plugin key %q: expected format name@marketplace", pluginKey)
 	}
 	name := parts[0]
 
 	// Read installed_plugins.json to find the plugin's installPath.
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
-		return fmt.Errorf("reading installed plugins: %w", err)
+		return nil, fmt.Errorf("reading installed plugins: %w", err)
 	}
 
 	installations, ok := installed.Plugins[pluginKey]
 	if !ok || len(installations) == 0 {
-		return fmt.Errorf("plugin %q not found in installed_plugins.json", pluginKey)
+		return nil, fmt.Errorf("plugin %q not found in installed_plugins.json", pluginKey)
 	}
 
 	srcDir := installations[0].InstallPath
 	if srcDir == "" {
-		return fmt.Errorf("plugin %q has no installPath", pluginKey)
+		return nil, fmt.Errorf("plugin %q has no installPath", pluginKey)
 	}
 
 	// Copy the entire plugin directory to <syncDir>/plugins/<pluginName>/.
 	dstDir := filepath.Join(syncDir, "plugins", name)
 	if err := copyDir(srcDir, dstDir); err != nil {
-		return fmt.Errorf("copying plugin directory: %w", err)
+		return nil, fmt.Errorf("copying plugin directory: %w", err)
 	}
 
 	// Read and update config.
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	if err != nil {
-		return fmt.Errorf("reading config: %w", err)
+		return nil, fmt.Errorf("reading config: %w", err)
 	}
 
 	cfg, err := config.Parse(cfgData)
 	if err != nil {
-		return fmt.Errorf("parsing config: %w", err)
+		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
 	// Remove from upstream.
@@ -70,21 +76,29 @@ func Fork(claudeDir, syncDir, pluginKey string) error {
 	// Write updated config.
 	newCfgData, err := config.MarshalV2(cfg)
 	if err != nil {
-		return fmt.Errorf("marshaling config: %w", err)
+		return nil, fmt.Errorf("marshaling config: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), newCfgData, 0644); err != nil {
-		return fmt.Errorf("writing config: %w", err)
+		return nil, fmt.Errorf("writing config: %w", err)
+	}
+
+	// Disable the original marketplace source so both aren't active simultaneously.
+	if err := forkedplugins.ToggleEnabledPlugin(claudeDir, pluginKey, false); err != nil {
+		return nil, fmt.Errorf("disabling original plugin source: %w", err)
 	}
 
 	// Stage all changes and commit.
 	if err := git.Add(syncDir, "."); err != nil {
-		return fmt.Errorf("staging changes: %w", err)
+		return nil, fmt.Errorf("staging changes: %w", err)
 	}
 	if err := git.Commit(syncDir, fmt.Sprintf("Fork %s for customization", name)); err != nil {
-		return fmt.Errorf("committing: %w", err)
+		return nil, fmt.Errorf("committing: %w", err)
 	}
 
-	return nil
+	return &ForkResult{
+		PluginName:     name,
+		DisabledSource: pluginKey,
+	}, nil
 }
 
 // Unfork removes a forked plugin directory and moves it back to upstream.
@@ -115,10 +129,13 @@ func Unfork(claudeDir, syncDir, pluginName, marketplace string) error {
 		_ = forkedplugins.UnregisterLocalMarketplace(claudeDir)
 	}
 
-	// Add <name>@<marketplace> back to upstream.
+	// Add <name>@<marketplace> back to upstream and re-enable in settings.json.
 	upstreamKey := pluginName + "@" + marketplace
 	if !containsString(cfg.Upstream, upstreamKey) {
 		cfg.Upstream = append(cfg.Upstream, upstreamKey)
+	}
+	if err := forkedplugins.ToggleEnabledPlugin(claudeDir, upstreamKey, true); err != nil {
+		return fmt.Errorf("re-enabling original plugin source: %w", err)
 	}
 
 	// Write updated config.

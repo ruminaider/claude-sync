@@ -13,14 +13,14 @@ func ToggleEnabledPlugin(claudeDir, pluginKey string, enabled bool) error {
 		return err
 	}
 
+	var ep map[string]bool
 	raw, ok := settings["enabledPlugins"]
 	if !ok {
-		return nil
-	}
-
-	var ep map[string]bool
-	if err := json.Unmarshal(raw, &ep); err != nil {
-		return err
+		ep = make(map[string]bool)
+	} else {
+		if err := json.Unmarshal(raw, &ep); err != nil {
+			return err
+		}
 	}
 
 	ep[pluginKey] = enabled
