@@ -38,8 +38,9 @@ func TestReadInstalledPlugins(t *testing.T) {
 
 func TestReadInstalledPlugins_FileNotFound(t *testing.T) {
 	dir := t.TempDir()
-	_, err := claudecode.ReadInstalledPlugins(dir)
-	assert.Error(t, err)
+	plugins, err := claudecode.ReadInstalledPlugins(dir)
+	require.NoError(t, err)
+	assert.Empty(t, plugins.Plugins)
 }
 
 func TestPluginKeys(t *testing.T) {
