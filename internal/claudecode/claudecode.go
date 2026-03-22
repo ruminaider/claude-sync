@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,10 +47,14 @@ func DirExists(claudeDir string) bool {
 }
 
 // ReadInstalledPlugins reads installed_plugins.json.
+// Returns an empty struct when the file does not exist.
 func ReadInstalledPlugins(claudeDir string) (*InstalledPlugins, error) {
 	path := filepath.Join(claudeDir, "plugins", "installed_plugins.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return &InstalledPlugins{}, nil
+		}
 		return nil, fmt.Errorf("reading installed plugins: %w", err)
 	}
 	var plugins InstalledPlugins

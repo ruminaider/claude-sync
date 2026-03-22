@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -136,9 +135,6 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 
 	installed, err := claudecode.ReadInstalledPlugins(claudeDir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return result, nil // No plugins file yet (fresh install) — skip detection
-		}
 		return nil, fmt.Errorf("detecting local plugins: %w", err)
 	}
 
