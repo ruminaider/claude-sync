@@ -154,8 +154,9 @@ func (m *Model) rebuildAllProfilePickers(profileName string) {
 // that were never visited after base changes generate spurious 'remove:' entries
 // for items added to base (issue #31).
 func (m *Model) syncProfilesBeforeSave() {
-	// Save the active tab's unsaved picker changes. This is safe because the
-	// active profile's picker was rebuilt when we switched to it.
+	// Save the active tab's unsaved picker changes. The active profile's picker
+	// is guaranteed up-to-date because tab switching always rebuilds it (see
+	// root.go tab/shift+tab handlers), so the saved diffs are accurate.
 	if m.activeTab != "Base" {
 		m.saveAllProfileDiffs(m.activeTab)
 	}
