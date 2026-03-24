@@ -12,6 +12,8 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/memory"
+	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
 )
@@ -85,6 +87,42 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 					configChanged = true
 				}
 			}
+		}
+	}
+
+	// Check memory changes.
+	memoryMode := prefs.Sync.AutoCommit.Mode("memory")
+	if memoryMode != "manual" {
+		syncMemDir := filepath.Join(syncDir, "memory")
+		memSources := []string{filepath.Join(claudeDir, "memory")}
+		if instances, ok := paths.CCSInstances(); ok {
+			for _, inst := range instances {
+				memSources = append(memSources, paths.CCSInstanceMemoryDir(inst))
+			}
+		}
+		for _, src := range memSources {
+			reconcileResult, err := memory.Reconcile(src, syncMemDir)
+			if err != nil {
+				continue
+			}
+			if len(reconcileResult.Updated) > 0 {
+				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
+				stagedFiles = append(stagedFiles, "memory")
+			}
+			if len(reconcileResult.New) > 0 && memoryMode == "all" {
+				names := make([]string, len(reconcileResult.New))
+				for i, f := range reconcileResult.New {
+					names[i] = f.SlugName
+					memory.WriteFragment(syncMemDir, f.SlugName, f.Content)
+				}
+				changes = append(changes, "add memory "+strings.Join(names, ", "))
+				stagedFiles = append(stagedFiles, "memory")
+				for _, name := range names {
+					cfg.Memory.Include = append(cfg.Memory.Include, name)
+				}
+				configChanged = true
+			}
+			break
 		}
 	}
 
@@ -255,6 +293,42 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 					configChanged = true
 				}
 			}
+		}
+	}
+
+	// Check memory changes.
+	memoryModeCtx := prefs.Sync.AutoCommit.Mode("memory")
+	if memoryModeCtx != "manual" {
+		syncMemDir := filepath.Join(opts.SyncDir, "memory")
+		memSources := []string{filepath.Join(opts.ClaudeDir, "memory")}
+		if instances, ok := paths.CCSInstances(); ok {
+			for _, inst := range instances {
+				memSources = append(memSources, paths.CCSInstanceMemoryDir(inst))
+			}
+		}
+		for _, src := range memSources {
+			reconcileResult, err := memory.Reconcile(src, syncMemDir)
+			if err != nil {
+				continue
+			}
+			if len(reconcileResult.Updated) > 0 {
+				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
+				stagedFiles = append(stagedFiles, "memory")
+			}
+			if len(reconcileResult.New) > 0 && memoryModeCtx == "all" {
+				names := make([]string, len(reconcileResult.New))
+				for i, f := range reconcileResult.New {
+					names[i] = f.SlugName
+					memory.WriteFragment(syncMemDir, f.SlugName, f.Content)
+				}
+				changes = append(changes, "add memory "+strings.Join(names, ", "))
+				stagedFiles = append(stagedFiles, "memory")
+				for _, name := range names {
+					cfg.Memory.Include = append(cfg.Memory.Include, name)
+				}
+				configChanged = true
+			}
+			break
 		}
 	}
 
