@@ -3,6 +3,7 @@ package memory_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ruminaider/claude-sync/internal/memory"
@@ -92,6 +93,42 @@ func TestParseFrontmatter(t *testing.T) {
 		_, err := memory.ParseFrontmatter("---\nname: Incomplete\nno closing")
 		assert.Error(t, err)
 	})
+}
+
+func TestRegenerateIndex(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a synced fragment (has frontmatter)
+	syncedContent := "---\nname: Coding Style\ndescription: My preferred coding style\ntype: user\n---\n\nI prefer short functions."
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "coding-style.md"), []byte(syncedContent), 0o644))
+
+	// Write a local-only fragment (has frontmatter with different type)
+	localContent := "---\nname: Project Architecture\ndescription: How the project is structured\ntype: project\n---\n\nThe project uses hexagonal architecture."
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "project-architecture.md"), []byte(localContent), 0o644))
+
+	err := memory.RegenerateIndex(dir)
+	require.NoError(t, err)
+
+	// Read the generated MEMORY.md
+	data, err := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	require.NoError(t, err)
+	content := string(data)
+
+	// Verify header
+	assert.Contains(t, content, "# Memory\n")
+
+	// Verify both fragments appear
+	assert.Contains(t, content, "[Coding Style](coding-style.md): My preferred coding style")
+	assert.Contains(t, content, "[Project Architecture](project-architecture.md): How the project is structured")
+
+	// Verify type sections exist
+	assert.Contains(t, content, "## User\n")
+	assert.Contains(t, content, "## Project\n")
+
+	// Verify User section comes before Project section
+	userIdx := strings.Index(content, "## User")
+	projectIdx := strings.Index(content, "## Project")
+	assert.Greater(t, projectIdx, userIdx, "User section should come before Project section")
 }
 
 func TestSlugifyName(t *testing.T) {

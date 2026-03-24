@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -194,6 +195,109 @@ func ImportFromDir(sourceDir, syncMemDir string) (*ImportResult, error) {
 	}
 
 	return &ImportResult{Imported: imported}, nil
+}
+
+// typeOrder defines the display order of type sections in MEMORY.md.
+var typeOrder = []string{"user", "feedback", "project", "reference", "other"}
+
+// RegenerateIndex scans dir for all .md files (skipping MEMORY.md), parses
+// frontmatter from each, groups them by type, and writes a MEMORY.md index.
+func RegenerateIndex(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", dir, err)
+	}
+
+	type indexEntry struct {
+		name        string
+		filename    string
+		description string
+	}
+
+	grouped := make(map[string][]indexEntry)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if strings.EqualFold(name, "MEMORY.md") {
+			continue
+		}
+
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read file %s: %w", name, err)
+		}
+
+		fm, err := ParseFrontmatter(string(content))
+		if err != nil {
+			fm.Name = strings.TrimSuffix(name, ".md")
+			fm.Type = "other"
+		}
+
+		typ := fm.Type
+		if typ == "" {
+			typ = "other"
+		}
+
+		grouped[typ] = append(grouped[typ], indexEntry{
+			name:        fm.Name,
+			filename:    name,
+			description: fm.Description,
+		})
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Memory\n")
+
+	for _, typ := range typeOrder {
+		entries, ok := grouped[typ]
+		if !ok {
+			continue
+		}
+		// Sort entries by name for deterministic output
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].name < entries[j].name
+		})
+		header := strings.ToUpper(typ[:1]) + typ[1:]
+		sb.WriteString(fmt.Sprintf("\n## %s\n\n", header))
+		for _, e := range entries {
+			if e.description != "" {
+				sb.WriteString(fmt.Sprintf("- [%s](%s): %s\n", e.name, e.filename, e.description))
+			} else {
+				sb.WriteString(fmt.Sprintf("- [%s](%s)\n", e.name, e.filename))
+			}
+		}
+		delete(grouped, typ)
+	}
+
+	// Handle any types not in typeOrder
+	var extraTypes []string
+	for typ := range grouped {
+		extraTypes = append(extraTypes, typ)
+	}
+	sort.Strings(extraTypes)
+	for _, typ := range extraTypes {
+		entries := grouped[typ]
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].name < entries[j].name
+		})
+		header := strings.ToUpper(typ[:1]) + typ[1:]
+		sb.WriteString(fmt.Sprintf("\n## %s\n\n", header))
+		for _, e := range entries {
+			if e.description != "" {
+				sb.WriteString(fmt.Sprintf("- [%s](%s): %s\n", e.name, e.filename, e.description))
+			} else {
+				sb.WriteString(fmt.Sprintf("- [%s](%s)\n", e.name, e.filename))
+			}
+		}
+	}
+
+	return os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(sb.String()), 0o644)
 }
 
 var nonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9-]`)
