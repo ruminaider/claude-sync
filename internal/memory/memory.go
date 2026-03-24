@@ -117,6 +117,85 @@ func ParseFrontmatter(content string) (Frontmatter, error) {
 	return fm, nil
 }
 
+// ImportResult holds the outcome of an ImportFromDir operation.
+type ImportResult struct {
+	Imported []string // slugified fragment names that were imported
+}
+
+// ImportFromDir scans sourceDir for .md files, parses their frontmatter,
+// and writes them as fragments into syncMemDir. It skips MEMORY.md and directories.
+// Collisions are disambiguated with -2, -3, etc.
+func ImportFromDir(sourceDir, syncMemDir string) (*ImportResult, error) {
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return nil, fmt.Errorf("read source dir %s: %w", sourceDir, err)
+	}
+
+	manifest, err := ReadManifest(syncMemDir)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+
+	var imported []string
+	usedSlugs := make(map[string]bool)
+	for slug := range manifest.Fragments {
+		usedSlugs[slug] = true
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if strings.EqualFold(name, "MEMORY.md") {
+			continue
+		}
+
+		content, err := os.ReadFile(filepath.Join(sourceDir, name))
+		if err != nil {
+			return nil, fmt.Errorf("read file %s: %w", name, err)
+		}
+
+		fm, err := ParseFrontmatter(string(content))
+		if err != nil {
+			// Use filename without extension as name if no frontmatter
+			fm.Name = strings.TrimSuffix(name, ".md")
+		}
+
+		slug := SlugifyName(fm.Name)
+		finalSlug := slug
+		counter := 2
+		for usedSlugs[finalSlug] {
+			finalSlug = fmt.Sprintf("%s-%d", slug, counter)
+			counter++
+		}
+		usedSlugs[finalSlug] = true
+
+		if err := WriteFragment(syncMemDir, finalSlug, string(content)); err != nil {
+			return nil, fmt.Errorf("write fragment %s: %w", finalSlug, err)
+		}
+
+		manifest.Fragments[finalSlug] = FragmentMeta{
+			Name:        fm.Name,
+			Description: fm.Description,
+			Type:        fm.Type,
+			Level:       "profile",
+			ContentHash: ContentHash(string(content)),
+		}
+		manifest.Order = append(manifest.Order, finalSlug)
+		imported = append(imported, finalSlug)
+	}
+
+	if err := WriteManifest(syncMemDir, manifest); err != nil {
+		return nil, fmt.Errorf("write manifest: %w", err)
+	}
+
+	return &ImportResult{Imported: imported}, nil
+}
+
 var nonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9-]`)
 
 // SlugifyName lowercases the input, replaces spaces with hyphens,
