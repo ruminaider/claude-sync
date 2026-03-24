@@ -515,6 +515,30 @@ plugins:
 	})
 }
 
+func TestParseMemory(t *testing.T) {
+	yaml := `
+version: "1.0.0"
+memory:
+  include:
+    - user-prefers-terse
+    - feedback-no-mocks
+`
+	cfg, err := config.Parse([]byte(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user-prefers-terse", "feedback-no-mocks"}, cfg.Memory.Include)
+}
+
+func TestMarshalMemory(t *testing.T) {
+	cfg := config.Config{
+		Version: "1.0.0",
+		Memory:  config.MemoryConfig{Include: []string{"user-prefers-terse"}},
+	}
+	data, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "memory:")
+	assert.Contains(t, string(data), "user-prefers-terse")
+}
+
 func TestParseUserPreferences_WithSync(t *testing.T) {
 	input := []byte(`sync_mode: union
 sync:

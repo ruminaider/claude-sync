@@ -20,6 +20,11 @@ type ClaudeMDConfig struct {
 	Include []string `yaml:"include,omitempty"`
 }
 
+// MemoryConfig holds memory fragment include paths.
+type MemoryConfig struct {
+	Include []string `yaml:"include,omitempty"`
+}
+
 // MCPServerMeta stores metadata about an imported MCP server.
 type MCPServerMeta struct {
 	SourceProject string `yaml:"source_project,omitempty"`
@@ -55,6 +60,7 @@ type ConfigV2 struct {
 	Hooks         map[string]json.RawMessage    `yaml:"-"`
 	Permissions   Permissions                   `yaml:"-"`
 	ClaudeMD      ClaudeMDConfig                `yaml:"-"`
+	Memory        MemoryConfig                  `yaml:"-"`
 	MCP           map[string]json.RawMessage    `yaml:"-"`
 	MCPMeta       map[string]MCPServerMeta      `yaml:"-"`
 	Keybindings   map[string]any                `yaml:"-"`
@@ -165,6 +171,12 @@ func Parse(data []byte) (Config, error) {
 				return Config{}, fmt.Errorf("parsing config claude_md: %w", err)
 			}
 			cfg.ClaudeMD = cmd
+		case "memory":
+			var mem MemoryConfig
+			if err := valNode.Decode(&mem); err != nil {
+				return Config{}, fmt.Errorf("parsing config memory: %w", err)
+			}
+			cfg.Memory = mem
 		case "mcp":
 			var mcpRaw map[string]any
 			if err := valNode.Decode(&mcpRaw); err != nil {
@@ -434,6 +446,18 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		)
 	}
 
+	// memory
+	if len(cfg.Memory.Include) > 0 {
+		var memNode yaml.Node
+		if err := memNode.Encode(cfg.Memory); err != nil {
+			return nil, fmt.Errorf("encoding memory: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "memory", Tag: "!!str"},
+			&memNode,
+		)
+	}
+
 	// mcp
 	if len(cfg.MCP) > 0 {
 		mcpMap := make(map[string]any, len(cfg.MCP))
@@ -561,6 +585,7 @@ const (
 	CategoryHooks       SyncCategory = "hooks"
 	CategoryPermissions SyncCategory = "permissions"
 	CategoryMCP         SyncCategory = "mcp"
+	CategoryMemory      SyncCategory = "memory"
 )
 
 // SyncPrefs holds per-machine sync opt-out preferences.
