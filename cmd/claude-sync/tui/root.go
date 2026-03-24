@@ -500,6 +500,7 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 
 	case overlaySaveSummary:
 		if msg.Confirmed {
+			m.syncProfilesBeforeSave()
 			opts := m.buildInitOptions()
 			m.Result = opts
 			m.quitting = true

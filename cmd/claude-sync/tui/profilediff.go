@@ -149,6 +149,24 @@ func (m *Model) rebuildAllProfilePickers(profileName string) {
 	}
 }
 
+// syncProfilesBeforeSave ensures all profile pickers reflect the current base
+// selections before the final profile diffs are computed. Without this, profiles
+// that were never visited after base changes generate spurious 'remove:' entries
+// for items added to base (issue #31).
+func (m *Model) syncProfilesBeforeSave() {
+	// Save the active tab's unsaved picker changes. This is safe because the
+	// active profile's picker was rebuilt when we switched to it.
+	if m.activeTab != "Base" {
+		m.saveAllProfileDiffs(m.activeTab)
+	}
+	// Rebuild ALL profile pickers from current base + stored diffs. For profiles
+	// not visited since the base changed, the stored diffs correctly represent
+	// user intent (no opinion on new items = inherit from base).
+	for name := range m.profilePickers {
+		m.rebuildAllProfilePickers(name)
+	}
+}
+
 // rebuildProfilePluginSection rebuilds the Plugins section using the scan-aware
 // PluginPickerItemsForProfile builder.
 func (m *Model) rebuildProfilePluginSection(profileName string, diff *sectionDiff) {

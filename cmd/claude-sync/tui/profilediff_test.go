@@ -384,6 +384,106 @@ func TestRebuildAfterBaseChange_AllSectionsUpdate(t *testing.T) {
 	assert.Equal(t, 1, devPlugins.SelectedCount(), "should only have 1 plugin after base change")
 }
 
+func TestDiffsToProfile_NewBaseItemNotSpuriouslyRemoved(t *testing.T) {
+	// Reproduces issue #31: adding a new item to the base picker without visiting
+	// the profile tab causes diffsToProfile() to generate a spurious remove: entry.
+	scan := fullScan()
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Step 1: Create a "work" profile (inherits current base).
+	m.createProfile("work")
+
+	// Step 2: Save diffs and switch to Base tab.
+	m.saveAllProfileDiffs("work")
+	m.activeTab = "Base"
+
+	// Step 3: Deselect "b@m" from base plugins, then rebuild the work profile.
+	// This simulates the state where the profile was created without "b@m" in base.
+	basePicker := m.pickers[SectionPlugins]
+	for i := range basePicker.items {
+		if basePicker.items[i].Key == "b@m" {
+			basePicker.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionPlugins] = basePicker
+	m.rebuildAllProfilePickers("work")
+	m.saveAllProfileDiffs("work")
+
+	// Step 4: Re-select "b@m" in base (simulates adding a new item to base).
+	basePicker = m.pickers[SectionPlugins]
+	for i := range basePicker.items {
+		if basePicker.items[i].Key == "b@m" {
+			basePicker.items[i].Selected = true
+		}
+	}
+	m.pickers[SectionPlugins] = basePicker
+
+	// Step 5: DO NOT visit the work profile tab (no rebuildAllProfilePickers call).
+	// The work profile picker is now stale — it doesn't know about the re-added "b@m".
+
+	// Step 6: syncProfilesBeforeSave fixes stale pickers, then diffsToProfile runs clean.
+	m.syncProfilesBeforeSave()
+	prof := m.diffsToProfile("work")
+
+	// Without syncProfilesBeforeSave, the stale profile picker would cause a spurious remove.
+	assert.NotContains(t, prof.Plugins.Remove, "b@m",
+		"b@m was added to base; it should NOT appear as a profile removal")
+	assert.Empty(t, prof.Plugins.Add, "no plugins were explicitly added to the profile")
+}
+
+func TestDiffsToProfile_NewSkillNotSpuriouslyRemoved(t *testing.T) {
+	// Reproduces the exact scenario from issue #31: user creates a new skill,
+	// it appears in base, but profiles generate remove: entries for it.
+	scan := fullScan()
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Step 1: Create two profiles.
+	m.createProfile("work")
+	m.createProfile("personal")
+
+	// Step 2: Save diffs for both profiles and switch to Base tab.
+	m.saveAllProfileDiffs("work")
+	m.saveAllProfileDiffs("personal")
+	m.activeTab = "Base"
+
+	// Step 3: Add a brand-new skill to the base CommandsSkills picker.
+	// This simulates the user creating a new skill file that gets discovered.
+	csPicker := m.pickers[SectionCommandsSkills]
+	csPicker.items = append(csPicker.items, PickerItem{
+		Key:      "skill:global:my-new-skill",
+		Display:  "my-new-skill",
+		Selected: true,
+	})
+	m.pickers[SectionCommandsSkills] = csPicker
+
+	// Step 4: DO NOT visit either profile tab — the profile pickers are stale.
+
+	// Step 5: syncProfilesBeforeSave fixes stale pickers, then diffsToProfile runs clean.
+	m.syncProfilesBeforeSave()
+	workProf := m.diffsToProfile("work")
+	personalProf := m.diffsToProfile("personal")
+
+	// Without syncProfilesBeforeSave, the stale profile pickers would cause spurious removes.
+	assert.NotContains(t, workProf.Skills.Remove, "skill:global:my-new-skill",
+		"work profile should NOT remove a newly-added base skill")
+	assert.NotContains(t, personalProf.Skills.Remove, "skill:global:my-new-skill",
+		"personal profile should NOT remove a newly-added base skill")
+
+	// The new skill should also NOT appear as a profile add (it's inherited from base).
+	assert.NotContains(t, workProf.Skills.Add, "skill:global:my-new-skill",
+		"work profile should not explicitly add a base skill")
+	assert.NotContains(t, personalProf.Skills.Add, "skill:global:my-new-skill",
+		"personal profile should not explicitly add a base skill")
+}
+
 func TestDiffsToProfile_MCPSecretsStripped(t *testing.T) {
 	// Create scan with MCP containing a secret.
 	scan := &commands.InitScanResult{
@@ -419,4 +519,73 @@ func TestDiffsToProfile_MCPSecretsStripped(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(prof.MCP.Add["render"], &cfg))
 	assert.Equal(t, "${RENDER_API_KEY}", cfg.Env["RENDER_API_KEY"], "secret should be replaced with env var ref")
+}
+
+func TestSyncProfilesBeforeSave_PreservesIntentionalRemoves(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Create work profile (inherits base).
+	m.createProfile("work")
+
+	// User visits work profile and deselects "a@m" (intentional remove).
+	pm := m.profilePickers["work"]
+	pluginPicker := pm[SectionPlugins]
+	for i := range pluginPicker.items {
+		if pluginPicker.items[i].Key == "a@m" {
+			pluginPicker.items[i].Selected = false
+		}
+	}
+	pm[SectionPlugins] = pluginPicker
+	m.profilePickers["work"] = pm
+
+	// Save diffs and switch to Base tab.
+	m.saveAllProfileDiffs("work")
+	m.activeTab = "Base"
+
+	// Call syncProfilesBeforeSave.
+	m.syncProfilesBeforeSave()
+
+	// Verify intentional remove is preserved.
+	prof := m.diffsToProfile("work")
+	assert.Contains(t, prof.Plugins.Remove, "a@m",
+		"intentional remove of a@m should be preserved after syncProfilesBeforeSave")
+}
+
+func TestSyncProfilesBeforeSave_SavesActiveProfileChanges(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Create work profile.
+	m.createProfile("work")
+
+	// Set activeTab to work (user is currently on work profile).
+	m.activeTab = "work"
+
+	// Deselect "b@m" in the work profile picker (unsaved change — not yet saved via saveAllProfileDiffs).
+	pm := m.profilePickers["work"]
+	pluginPicker := pm[SectionPlugins]
+	for i := range pluginPicker.items {
+		if pluginPicker.items[i].Key == "b@m" {
+			pluginPicker.items[i].Selected = false
+		}
+	}
+	pm[SectionPlugins] = pluginPicker
+	m.profilePickers["work"] = pm
+
+	// Call syncProfilesBeforeSave — should capture the unsaved change.
+	m.syncProfilesBeforeSave()
+
+	// Verify the unsaved change was captured.
+	prof := m.diffsToProfile("work")
+	assert.Contains(t, prof.Plugins.Remove, "b@m",
+		"unsaved deselection of b@m should be captured by syncProfilesBeforeSave")
 }
