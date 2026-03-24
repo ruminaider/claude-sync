@@ -40,7 +40,12 @@ func Reconcile(syncDir, currentContent string) (*ReconcileResult, error) {
 
 	// Pass 1: exact header match.
 	for i, sec := range sections {
-		name := HeaderToFragmentName(sec.Header)
+		var name string
+		if sec.Group != "" {
+			name = ChildFragmentName(sec.Group, sec.Header)
+		} else {
+			name = HeaderToFragmentName(sec.Header)
+		}
 		meta, exists := manifest.Fragments[name]
 		if !exists {
 			continue
@@ -59,6 +64,7 @@ func Reconcile(syncDir, currentContent string) (*ReconcileResult, error) {
 			manifest.Fragments[name] = FragmentMeta{
 				Header:      sec.Header,
 				ContentHash: newHash,
+				Group:       sec.Group,
 			}
 		}
 	}
@@ -117,6 +123,7 @@ func Reconcile(syncDir, currentContent string) (*ReconcileResult, error) {
 			manifest.Fragments[bestFrag] = FragmentMeta{
 				Header:      sec.Header,
 				ContentHash: ContentHash(sec.Content),
+				Group:       sec.Group,
 			}
 		}
 	}
