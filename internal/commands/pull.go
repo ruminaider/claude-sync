@@ -15,7 +15,9 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
+	"github.com/ruminaider/claude-sync/internal/memory"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
@@ -59,6 +61,9 @@ type PullResult struct {
 	SettingsSkipped            bool     // settings.json had local modifications
 	ClaudeMDSkipped            bool     // CLAUDE.md had local modifications
 	KeybindingsSkipped         bool     // keybindings.json had local modifications
+	MemoryWritten              int
+	MemorySkipped              int
+	MemoryTotal                int
 }
 
 // PullOptions configures pull behavior.
@@ -394,6 +399,22 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 								appliedHashes.Set(HashKeyClaudeMD, string(data))
 							}
 						}
+					}
+				}
+			}
+
+			// Apply Memory.md fragments.
+			memIncludes := cfg.Memory.Include
+			if activeProfile != nil {
+				memIncludes = profiles.MergeMemory(memIncludes, *activeProfile)
+			}
+			result.MemoryTotal = len(memIncludes)
+			if len(memIncludes) > 0 {
+				syncMemDir := filepath.Join(syncDir, "memory")
+				applyMemoryFragments(paths.ClaudeMemoryDir(), syncMemDir, memIncludes, appliedHashes, opts.Force, result)
+				if instances, ok := paths.CCSInstances(); ok {
+					for _, inst := range instances {
+						applyMemoryFragments(paths.CCSInstanceMemoryDir(inst), syncMemDir, memIncludes, appliedHashes, opts.Force, result)
 					}
 				}
 			}
@@ -1259,5 +1280,26 @@ func findProjectRoot(dir string) string {
 		}
 		dir = parent
 	}
+}
+
+func applyMemoryFragments(targetDir, syncMemDir string, includes []string, hashes *AppliedHashes, force bool, result *PullResult) {
+	os.MkdirAll(targetDir, 0755)
+	for _, name := range includes {
+		content, err := memory.ReadFragment(syncMemDir, name)
+		if err != nil {
+			continue
+		}
+		targetPath := filepath.Join(targetDir, name+".md")
+		hashKey := HashKeyMemoryPrefix + name
+		if !force && hashes.IsLocallyModified(hashKey, targetPath) {
+			result.MemorySkipped++
+			continue
+		}
+		if os.WriteFile(targetPath, []byte(content), 0644) == nil {
+			hashes.Set(hashKey, content)
+			result.MemoryWritten++
+		}
+	}
+	memory.RegenerateIndex(targetDir)
 }
 

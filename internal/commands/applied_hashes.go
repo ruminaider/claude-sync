@@ -17,6 +17,9 @@ const (
 	HashKeyKeybindings = "keybindings"
 )
 
+// HashKeyMemoryPrefix is the prefix for per-memory-file hash keys.
+const HashKeyMemoryPrefix = "memory:"
+
 // AppliedHashes tracks content hashes of files last written by pull.
 // Used to detect local modifications before overwriting.
 type AppliedHashes struct {
