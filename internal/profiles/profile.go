@@ -19,6 +19,7 @@ type Profile struct {
 	Hooks       ProfileHooks       `yaml:"hooks,omitempty"`
 	Permissions ProfilePermissions `yaml:"permissions,omitempty"`
 	ClaudeMD    ProfileClaudeMD    `yaml:"claude_md,omitempty"`
+	Memory      ProfileMemory      `yaml:"memory,omitempty"`
 	MCP         ProfileMCP         `yaml:"mcp,omitempty"`
 	Keybindings ProfileKeybindings `yaml:"keybindings,omitempty"`
 	Commands    ProfileCommands    `yaml:"commands,omitempty"`
@@ -45,6 +46,12 @@ type ProfilePermissions struct {
 
 // ProfileClaudeMD holds CLAUDE.md fragment add/remove directives for a profile.
 type ProfileClaudeMD struct {
+	Add    []string `yaml:"add,omitempty"`
+	Remove []string `yaml:"remove,omitempty"`
+}
+
+// ProfileMemory holds Memory.md fragment add/remove directives for a profile.
+type ProfileMemory struct {
 	Add    []string `yaml:"add,omitempty"`
 	Remove []string `yaml:"remove,omitempty"`
 }
@@ -132,6 +139,13 @@ func ParseProfile(data []byte) (Profile, error) {
 				return Profile{}, fmt.Errorf("parsing profile claude_md: %w", err)
 			}
 			p.ClaudeMD = cmd
+
+		case "memory":
+			var mem ProfileMemory
+			if err := valNode.Decode(&mem); err != nil {
+				return Profile{}, fmt.Errorf("parsing profile memory: %w", err)
+			}
+			p.Memory = mem
 
 		case "mcp":
 			if err := parseProfileMCP(valNode, &p); err != nil {
@@ -326,6 +340,18 @@ func MarshalProfile(p Profile) ([]byte, error) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: "claude_md", Tag: "!!str"},
 			&claudeMDNode,
+		)
+	}
+
+	// memory
+	if len(p.Memory.Add) > 0 || len(p.Memory.Remove) > 0 {
+		var memNode yaml.Node
+		if err := memNode.Encode(p.Memory); err != nil {
+			return nil, fmt.Errorf("encoding profile memory: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "memory", Tag: "!!str"},
+			&memNode,
 		)
 	}
 
@@ -622,6 +648,43 @@ func MergeClaudeMD(base []string, profile Profile) []string {
 	return result
 }
 
+// MergeMemory starts with base, adds profile.Memory.Add (no duplicates),
+// then removes profile.Memory.Remove. Same pattern as MergePlugins.
+func MergeMemory(base []string, profile Profile) []string {
+	seen := make(map[string]bool, len(base))
+	result := make([]string, 0, len(base)+len(profile.Memory.Add))
+
+	for _, s := range base {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	for _, s := range profile.Memory.Add {
+		if !seen[s] {
+			seen[s] = true
+			result = append(result, s)
+		}
+	}
+
+	if len(profile.Memory.Remove) > 0 {
+		removeSet := make(map[string]bool, len(profile.Memory.Remove))
+		for _, s := range profile.Memory.Remove {
+			removeSet[s] = true
+		}
+		filtered := result[:0]
+		for _, s := range result {
+			if !removeSet[s] {
+				filtered = append(filtered, s)
+			}
+		}
+		result = filtered
+	}
+
+	return result
+}
+
 // MergeMCP copies base, adds profile.MCP.Add entries, then removes
 // profile.MCP.Remove entries. Same pattern as MergeHooks.
 func MergeMCP(base map[string]json.RawMessage, profile Profile) map[string]json.RawMessage {
@@ -774,6 +837,13 @@ func ProfileSummary(p Profile) string {
 	}
 	if n := len(p.ClaudeMD.Remove); n > 0 {
 		parts = append(parts, fmt.Sprintf("-%d %s", n, pluralize("claude_md include", n)))
+	}
+
+	if n := len(p.Memory.Add); n > 0 {
+		parts = append(parts, fmt.Sprintf("+%d %s", n, pluralize("memory", n)))
+	}
+	if n := len(p.Memory.Remove); n > 0 {
+		parts = append(parts, fmt.Sprintf("-%d %s", n, pluralize("memory", n)))
 	}
 
 	if n := len(p.MCP.Add); n > 0 {
