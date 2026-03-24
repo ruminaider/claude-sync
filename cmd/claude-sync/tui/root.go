@@ -24,6 +24,7 @@ type SkipFlags struct {
 	Hooks          bool
 	Permissions    bool
 	ClaudeMD       bool
+	Memory         bool
 	MCP            bool
 	Keybindings    bool
 	CommandsSkills bool
@@ -135,6 +136,7 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	m.pickers[SectionMCP] = mcpPicker
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(scan.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(scan.Keybindings))
+	m.pickers[SectionMemory] = NewPicker(MemoryPickerItems(scan.MemoryFiles))
 
 	// Build Commands & Skills picker.
 	csPicker := NewPicker(CommandsSkillsPickerItems(scan.CommandsSkills))
@@ -192,6 +194,9 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		for i := range previewSections {
 			m.preview.selected[i] = false
 		}
+	}
+	if skip.Memory {
+		m.deselectPicker(SectionMemory)
 	}
 
 	// Initialize sidebar and tab bar.
@@ -711,6 +716,8 @@ func helperText(section Section, isProfile bool, mcpSecretsCount int) (string, s
 			line1 = "● = from base. Override settings for this profile."
 		case SectionClaudeMD:
 			line1 = "● = from base. Add or exclude sections for this profile."
+		case SectionMemory:
+			line1 = "● = from base. Add or remove memory fragments for this profile."
 		case SectionPermissions:
 			line1 = "● = from base. Adjust rules for this profile."
 		case SectionMCP:
@@ -732,6 +739,8 @@ func helperText(section Section, isProfile bool, mcpSecretsCount int) (string, s
 			line1 = "Select Claude settings to include."
 		case SectionClaudeMD:
 			line1 = "Pick which CLAUDE.md sections to sync."
+		case SectionMemory:
+			line1 = "Select memory fragments to sync."
 		case SectionPermissions:
 			line1 = "Select allow/deny permission rules."
 		case SectionMCP:
@@ -969,6 +978,8 @@ func (m *Model) resetToDefaults() {
 	m.pickers[SectionHooks] = NewPicker(HookPickerItems(m.scanResult.Hooks))
 	m.pickers[SectionKeybindings] = NewPicker(KeybindingsPickerItems(m.scanResult.Keybindings))
 
+	m.pickers[SectionMemory] = NewPicker(MemoryPickerItems(m.scanResult.MemoryFiles))
+
 	// Reset Commands & Skills picker.
 	csPicker := NewPicker(CommandsSkillsPickerItems(m.scanResult.CommandsSkills))
 	csPicker.SetSearchAction(true)
@@ -1020,6 +1031,9 @@ func (m *Model) resetToDefaults() {
 			m.preview.selected[i] = false
 		}
 	}
+	if m.skipFlags.Memory {
+		m.deselectPicker(SectionMemory)
+	}
 
 	m.syncSidebarCounts()
 	m.syncStatusBar()
@@ -1042,6 +1056,7 @@ func (m Model) triggerSave() (tea.Model, tea.Cmd) {
 	stats["keybindings"] = m.pickers[SectionKeybindings].SelectedCount()
 	stats["hooks"] = m.pickers[SectionHooks].SelectedCount()
 	stats["commands_skills"] = m.pickers[SectionCommandsSkills].SelectedCount()
+	stats["memory"] = m.pickers[SectionMemory].SelectedCount()
 
 	// Check that at least something is selected.
 	total := 0
@@ -1184,6 +1199,9 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 			opts.Skills = append(opts.Skills, k)
 		}
 	}
+
+	// Memory fragments.
+	opts.MemoryIncludes = m.pickers[SectionMemory].SelectedKeys()
 
 	// Profiles.
 	if m.useProfiles && len(m.profilePickers) > 0 {
@@ -1651,6 +1669,10 @@ func (m *Model) applyExistingConfig(cfg *config.Config, existingProfiles map[str
 		csSet[k] = true
 	}
 	applyPickerSelection(pickerPtr(m.pickers, SectionCommandsSkills), csSet)
+
+	// Memory: select only fragments in the existing config.
+	memSet := toSet(cfg.Memory.Include)
+	applyPickerSelection(pickerPtr(m.pickers, SectionMemory), memSet)
 }
 
 // restoreProfiles creates profile tabs and applies profile-specific selections.
@@ -1709,7 +1731,8 @@ func hasScanData(scan *commands.InitScanResult) bool {
 		scan.ClaudeMDContent != "" ||
 		len(scan.MCP) > 0 ||
 		len(scan.Keybindings) > 0 ||
-		(scan.CommandsSkills != nil && len(scan.CommandsSkills.Items) > 0)
+		(scan.CommandsSkills != nil && len(scan.CommandsSkills.Items) > 0) ||
+		len(scan.MemoryFiles) > 0
 }
 
 // splitCmdSkillKeys splits a list of keys into command keys and skill keys

@@ -341,6 +341,35 @@ func KeybindingsPickerItems(kb map[string]any) []PickerItem {
 	}
 }
 
+// MemoryPickerItems builds picker items from scanned memory fragment names.
+// All items are pre-selected.
+func MemoryPickerItems(names []string) []PickerItem {
+	if len(names) == 0 {
+		return nil
+	}
+
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.Strings(sorted)
+
+	items := make([]PickerItem, 0, len(sorted)+2)
+	items = append(items, PickerItem{
+		Display:  fmt.Sprintf("Memory fragments (%d)", len(sorted)),
+		IsHeader: true,
+	})
+	items = append(items, PickerItem{
+		Description: "Memory files from ~/.claude/memory/",
+	})
+	for _, name := range sorted {
+		items = append(items, PickerItem{
+			Key:      name,
+			Display:  name,
+			Selected: true,
+		})
+	}
+	return items
+}
+
 // CommandsSkillsPickerItems builds picker items from a cmdskill.ScanResult,
 // grouping by source with plugin items marked read-only.
 func CommandsSkillsPickerItems(scan *cmdskill.ScanResult) []PickerItem {
