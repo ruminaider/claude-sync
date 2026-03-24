@@ -417,3 +417,154 @@ func TestAutoCommitWithContext_BackwardCompatible(t *testing.T) {
 	assert.True(t, result.Changed)
 	assert.Contains(t, result.CommitMessage, "auto: update setting theme")
 }
+
+func TestAutoCommit_TrackedModeSkipsNewFragments(t *testing.T) {
+	claudeDir, syncDir := setupAutoCommitEnv(t)
+
+	// 1. Create an existing CLAUDE.md fragment + manifest via ImportClaudeMD.
+	existingContent := "## Coding Standards\nUse gofmt for all Go code.\n"
+	_, err := claudemd.ImportClaudeMD(syncDir, existingContent)
+	require.NoError(t, err)
+
+	// Update config.yaml to include the fragment.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	cfg.ClaudeMD.Include = []string{"coding-standards"}
+	newCfgData, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), newCfgData, 0644))
+
+	// Commit the fragment files so the repo is clean.
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add claude-md fragment").Run()
+
+	// 2. Write user-preferences.yaml with tracked mode (the default, but explicit).
+	prefsYAML := "sync:\n  auto_commit:\n    claude_md: tracked\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(syncDir, "user-preferences.yaml"),
+		[]byte(prefsYAML), 0644,
+	))
+
+	// 3. Write a CLAUDE.md that has the existing section (modified) + a new section.
+	updatedClaudeMD := "## Coding Standards\nUse gofmt and golint for all Go code.\n\n## Testing Rules\nAlways write table-driven tests.\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(claudeDir, "CLAUDE.md"),
+		[]byte(updatedClaudeMD), 0644,
+	))
+
+	// 4. Run AutoCommit.
+	result, err := commands.AutoCommit(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// 5. Assert: update IS committed, new section is NOT committed.
+	assert.True(t, result.Changed)
+	assert.Contains(t, result.CommitMessage, "update coding-standards")
+	assert.NotContains(t, result.CommitMessage, "add testing-rules")
+
+	// Verify the new fragment file was NOT written.
+	_, err = os.Stat(filepath.Join(syncDir, "claude-md", "testing-rules.md"))
+	assert.True(t, os.IsNotExist(err), "new fragment file should not exist in tracked mode")
+
+	// Verify config.yaml does NOT include the new fragment.
+	cfgData, err = os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err = config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.NotContains(t, cfg.ClaudeMD.Include, "testing-rules")
+}
+
+func TestAutoCommit_AllModeCommitsNewFragments(t *testing.T) {
+	claudeDir, syncDir := setupAutoCommitEnv(t)
+
+	// Create an existing fragment.
+	existingContent := "## Coding Standards\nUse gofmt for all Go code.\n"
+	_, err := claudemd.ImportClaudeMD(syncDir, existingContent)
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	cfg.ClaudeMD.Include = []string{"coding-standards"}
+	newCfgData, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), newCfgData, 0644))
+
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add claude-md fragment").Run()
+
+	// Set mode to "all".
+	prefsYAML := "sync:\n  auto_commit:\n    claude_md: all\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(syncDir, "user-preferences.yaml"),
+		[]byte(prefsYAML), 0644,
+	))
+
+	// Write CLAUDE.md with existing (modified) + new section.
+	updatedClaudeMD := "## Coding Standards\nUse gofmt and golint for all Go code.\n\n## Testing Rules\nAlways write table-driven tests.\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(claudeDir, "CLAUDE.md"),
+		[]byte(updatedClaudeMD), 0644,
+	))
+
+	result, err := commands.AutoCommit(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.True(t, result.Changed)
+	assert.Contains(t, result.CommitMessage, "update coding-standards")
+	assert.Contains(t, result.CommitMessage, "add testing-rules")
+
+	// Verify the new fragment WAS written.
+	_, err = os.Stat(filepath.Join(syncDir, "claude-md", "testing-rules.md"))
+	assert.NoError(t, err, "new fragment file should exist in all mode")
+
+	// Verify config.yaml includes the new fragment.
+	cfgData, err = os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err = config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.ClaudeMD.Include, "testing-rules")
+}
+
+func TestAutoCommit_ManualModeSkipsAllClaudeMD(t *testing.T) {
+	claudeDir, syncDir := setupAutoCommitEnv(t)
+
+	// Create an existing fragment.
+	existingContent := "## Coding Standards\nUse gofmt for all Go code.\n"
+	_, err := claudemd.ImportClaudeMD(syncDir, existingContent)
+	require.NoError(t, err)
+
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	cfg.ClaudeMD.Include = []string{"coding-standards"}
+	newCfgData, err := config.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), newCfgData, 0644))
+
+	exec.Command("git", "-C", syncDir, "add", ".").Run()
+	exec.Command("git", "-C", syncDir, "commit", "-m", "Add claude-md fragment").Run()
+
+	// Set mode to "manual".
+	prefsYAML := "sync:\n  auto_commit:\n    claude_md: manual\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(syncDir, "user-preferences.yaml"),
+		[]byte(prefsYAML), 0644,
+	))
+
+	// Write CLAUDE.md with modified existing + new section.
+	updatedClaudeMD := "## Coding Standards\nUse gofmt and golint for all Go code.\n\n## Testing Rules\nAlways write table-driven tests.\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(claudeDir, "CLAUDE.md"),
+		[]byte(updatedClaudeMD), 0644,
+	))
+
+	result, err := commands.AutoCommit(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	// Manual mode: NO claude-md changes committed at all.
+	assert.False(t, result.Changed, "manual mode should not auto-commit any CLAUDE.md changes")
+}

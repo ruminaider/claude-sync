@@ -48,35 +48,42 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	// Read user preferences for auto-commit mode.
+	prefsData, _ := os.ReadFile(filepath.Join(syncDir, "user-preferences.yaml"))
+	prefs, _ := config.ParseUserPreferences(prefsData)
+	claudeMDMode := prefs.Sync.AutoCommit.Mode("claude_md")
+
 	var changes []string
 	var stagedFiles []string
 	configChanged := false
 
-	// Check CLAUDE.md changes.
-	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
-	if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
-		reconcileResult, err := claudemd.Reconcile(syncDir, string(claudeMDData))
-		if err == nil {
-			if len(reconcileResult.Updated) > 0 {
-				changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-			}
-			if len(reconcileResult.New) > 0 {
-				names := make([]string, len(reconcileResult.New))
-				for i, s := range reconcileResult.New {
-					names[i] = claudemd.HeaderToFragmentName(s.Header)
-					// Write new fragment files.
-					claudeMdDir := filepath.Join(syncDir, "claude-md")
-					os.MkdirAll(claudeMdDir, 0755)
-					claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+	// Check CLAUDE.md changes (skipped entirely in manual mode).
+	if claudeMDMode != "manual" {
+		claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+		if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
+			reconcileResult, err := claudemd.Reconcile(syncDir, string(claudeMDData))
+			if err == nil {
+				if len(reconcileResult.Updated) > 0 {
+					changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
 				}
-				changes = append(changes, "add "+strings.Join(names, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-				// Update config.yaml to include new fragments.
-				for _, name := range names {
-					cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+				if len(reconcileResult.New) > 0 && claudeMDMode == "all" {
+					names := make([]string, len(reconcileResult.New))
+					for i, s := range reconcileResult.New {
+						names[i] = claudemd.HeaderToFragmentName(s.Header)
+						// Write new fragment files.
+						claudeMdDir := filepath.Join(syncDir, "claude-md")
+						os.MkdirAll(claudeMdDir, 0755)
+						claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+					}
+					changes = append(changes, "add "+strings.Join(names, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
+					// Update config.yaml to include new fragments.
+					for _, name := range names {
+						cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+					}
+					configChanged = true
 				}
-				configChanged = true
 			}
 		}
 	}
@@ -211,34 +218,42 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 	effectiveSettings := profiles.MergeSettings(cfg.Settings, profile)
 	effectiveMCP := profiles.MergeMCP(cfg.MCP, profile)
 
+	// Read user preferences for auto-commit mode.
+	prefsData, _ := os.ReadFile(filepath.Join(opts.SyncDir, "user-preferences.yaml"))
+	prefs, _ := config.ParseUserPreferences(prefsData)
+	claudeMDMode := prefs.Sync.AutoCommit.Mode("claude_md")
+
 	var changes []string
 	var stagedFiles []string
 	profileChanged := false
 	configChanged := false
 
 	// Check CLAUDE.md changes — these still go to base config (fragments are shared).
-	claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
-	if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
-		reconcileResult, err := claudemd.Reconcile(opts.SyncDir, string(claudeMDData))
-		if err == nil {
-			if len(reconcileResult.Updated) > 0 {
-				changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-			}
-			if len(reconcileResult.New) > 0 {
-				names := make([]string, len(reconcileResult.New))
-				for i, s := range reconcileResult.New {
-					names[i] = claudemd.HeaderToFragmentName(s.Header)
-					claudeMdDir := filepath.Join(opts.SyncDir, "claude-md")
-					os.MkdirAll(claudeMdDir, 0755)
-					claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+	// Skipped entirely in manual mode.
+	if claudeMDMode != "manual" {
+		claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
+		if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
+			reconcileResult, err := claudemd.Reconcile(opts.SyncDir, string(claudeMDData))
+			if err == nil {
+				if len(reconcileResult.Updated) > 0 {
+					changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
 				}
-				changes = append(changes, "add "+strings.Join(names, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-				for _, name := range names {
-					cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+				if len(reconcileResult.New) > 0 && claudeMDMode == "all" {
+					names := make([]string, len(reconcileResult.New))
+					for i, s := range reconcileResult.New {
+						names[i] = claudemd.HeaderToFragmentName(s.Header)
+						claudeMdDir := filepath.Join(opts.SyncDir, "claude-md")
+						os.MkdirAll(claudeMdDir, 0755)
+						claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+					}
+					changes = append(changes, "add "+strings.Join(names, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
+					for _, name := range names {
+						cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+					}
+					configChanged = true
 				}
-				configChanged = true
 			}
 		}
 	}
