@@ -500,6 +500,10 @@ func (m Model) handleOverlayClose(msg OverlayCloseMsg) (tea.Model, tea.Cmd) {
 
 	case overlaySaveSummary:
 		if msg.Confirmed {
+			// syncProfilesBeforeSave is a pointer receiver that mutates map
+			// entries in profilePickers/profileDiffs. This works on a value
+			// receiver copy because Go maps are reference types.
+			m.syncProfilesBeforeSave()
 			opts := m.buildInitOptions()
 			m.Result = opts
 			m.quitting = true
