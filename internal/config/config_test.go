@@ -531,12 +531,15 @@ memory:
 func TestMarshalMemory(t *testing.T) {
 	cfg := config.Config{
 		Version: "1.0.0",
+		Pinned:  map[string]string{},
 		Memory:  config.MemoryConfig{Include: []string{"user-prefers-terse"}},
 	}
 	data, err := config.Marshal(cfg)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), "memory:")
-	assert.Contains(t, string(data), "user-prefers-terse")
+
+	parsed, err := config.Parse(data)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Memory.Include, parsed.Memory.Include)
 }
 
 func TestParseUserPreferencesAutoCommit(t *testing.T) {
