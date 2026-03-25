@@ -68,7 +68,7 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 	configChanged := false
 
 	// Check CLAUDE.md changes (skipped entirely in manual mode).
-	if claudeMDMode != "manual" {
+	if claudeMDMode != config.AutoCommitManual {
 		claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
 		if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
 			reconcileResult, err := claudemd.Reconcile(syncDir, string(claudeMDData))
@@ -77,7 +77,7 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 					changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
 					stagedFiles = append(stagedFiles, "claude-md")
 				}
-				if len(reconcileResult.New) > 0 && claudeMDMode == "all" {
+				if len(reconcileResult.New) > 0 && claudeMDMode == config.AutoCommitAll {
 					names := make([]string, len(reconcileResult.New))
 					for i, s := range reconcileResult.New {
 						names[i] = claudemd.HeaderToFragmentName(s.Header)
@@ -100,7 +100,7 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 
 	// Check memory changes.
 	memoryMode := prefs.Sync.AutoCommit.Mode("memory")
-	if memoryMode != "manual" {
+	if memoryMode != config.AutoCommitManual {
 		syncMemDir := filepath.Join(syncDir, "memory")
 		memSources := []string{filepath.Join(claudeDir, "memory")}
 		if instances, ok := paths.CCSInstances(); ok {
@@ -120,7 +120,7 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
 				stagedFiles = append(stagedFiles, "memory")
 			}
-			if len(reconcileResult.New) > 0 && memoryMode == "all" {
+			if len(reconcileResult.New) > 0 && memoryMode == config.AutoCommitAll {
 				names := make([]string, len(reconcileResult.New))
 				for i, f := range reconcileResult.New {
 					names[i] = f.SlugName
@@ -135,7 +135,7 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 				}
 				configChanged = true
 			}
-			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryMode == "all") {
+			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryMode == config.AutoCommitAll) {
 				break // Only break when we found actionable changes
 			}
 		}
@@ -291,7 +291,7 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 
 	// Check CLAUDE.md changes — these still go to base config (fragments are shared).
 	// Skipped entirely in manual mode.
-	if claudeMDMode != "manual" {
+	if claudeMDMode != config.AutoCommitManual {
 		claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
 		if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
 			reconcileResult, err := claudemd.Reconcile(opts.SyncDir, string(claudeMDData))
@@ -300,7 +300,7 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 					changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
 					stagedFiles = append(stagedFiles, "claude-md")
 				}
-				if len(reconcileResult.New) > 0 && claudeMDMode == "all" {
+				if len(reconcileResult.New) > 0 && claudeMDMode == config.AutoCommitAll {
 					names := make([]string, len(reconcileResult.New))
 					for i, s := range reconcileResult.New {
 						names[i] = claudemd.HeaderToFragmentName(s.Header)
@@ -321,7 +321,7 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 
 	// Check memory changes.
 	memoryModeCtx := prefs.Sync.AutoCommit.Mode("memory")
-	if memoryModeCtx != "manual" {
+	if memoryModeCtx != config.AutoCommitManual {
 		syncMemDir := filepath.Join(opts.SyncDir, "memory")
 		memSources := []string{filepath.Join(opts.ClaudeDir, "memory")}
 		if instances, ok := paths.CCSInstances(); ok {
@@ -341,7 +341,7 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
 				stagedFiles = append(stagedFiles, "memory")
 			}
-			if len(reconcileResult.New) > 0 && memoryModeCtx == "all" {
+			if len(reconcileResult.New) > 0 && memoryModeCtx == config.AutoCommitAll {
 				names := make([]string, len(reconcileResult.New))
 				for i, f := range reconcileResult.New {
 					names[i] = f.SlugName
@@ -356,7 +356,7 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 				}
 				configChanged = true
 			}
-			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryModeCtx == "all") {
+			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryModeCtx == config.AutoCommitAll) {
 				break // Only break when we found actionable changes
 			}
 		}

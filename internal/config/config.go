@@ -588,27 +588,39 @@ const (
 	CategoryMemory      SyncCategory = "memory"
 )
 
+// AutoCommitMode controls per-category auto-commit behavior.
+type AutoCommitMode string
+
+const (
+	AutoCommitAll     AutoCommitMode = "all"
+	AutoCommitTracked AutoCommitMode = "tracked"
+	AutoCommitManual  AutoCommitMode = "manual"
+)
+
 // AutoCommitPrefs controls per-category auto-commit behavior.
 // Modes: "all" (auto-commit everything), "tracked" (only edits to synced content),
 // "manual" (never auto-commit).
 type AutoCommitPrefs struct {
-	ClaudeMD string `yaml:"claude_md,omitempty"`
-	Memory   string `yaml:"memory,omitempty"`
+	ClaudeMD AutoCommitMode `yaml:"claude_md,omitempty"`
+	Memory   AutoCommitMode `yaml:"memory,omitempty"`
 }
 
-// Mode returns the auto-commit mode for a category, defaulting to "tracked".
-func (p *AutoCommitPrefs) Mode(category string) string {
+// Mode returns the auto-commit mode for a category, defaulting to AutoCommitTracked.
+// Invalid values are clamped to AutoCommitTracked.
+func (p *AutoCommitPrefs) Mode(category string) AutoCommitMode {
+	var mode AutoCommitMode
 	switch category {
 	case "claude_md":
-		if p.ClaudeMD != "" {
-			return p.ClaudeMD
-		}
+		mode = p.ClaudeMD
 	case "memory":
-		if p.Memory != "" {
-			return p.Memory
-		}
+		mode = p.Memory
 	}
-	return "tracked"
+	switch mode {
+	case AutoCommitAll, AutoCommitManual:
+		return mode
+	default:
+		return AutoCommitTracked
+	}
 }
 
 // SyncPrefs holds per-machine sync opt-out preferences.
@@ -661,8 +673,8 @@ func DefaultUserPreferences() UserPreferences {
 		Pins:     map[string]string{},
 		Sync: SyncPrefs{
 			AutoCommit: AutoCommitPrefs{
-				ClaudeMD: "tracked",
-				Memory:   "tracked",
+				ClaudeMD: AutoCommitTracked,
+				Memory:   AutoCommitTracked,
 			},
 		},
 	}

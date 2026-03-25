@@ -552,21 +552,26 @@ sync:
 `
 	prefs, err := config.ParseUserPreferences([]byte(yaml))
 	require.NoError(t, err)
-	assert.Equal(t, "tracked", prefs.Sync.AutoCommit.ClaudeMD)
-	assert.Equal(t, "manual", prefs.Sync.AutoCommit.Memory)
+	assert.Equal(t, config.AutoCommitTracked, prefs.Sync.AutoCommit.ClaudeMD)
+	assert.Equal(t, config.AutoCommitManual, prefs.Sync.AutoCommit.Memory)
 }
 
 func TestAutoCommitModeDefaults(t *testing.T) {
 	prefs := config.DefaultUserPreferences()
-	assert.Equal(t, "tracked", prefs.Sync.AutoCommit.ClaudeMD)
-	assert.Equal(t, "tracked", prefs.Sync.AutoCommit.Memory)
+	assert.Equal(t, config.AutoCommitTracked, prefs.Sync.AutoCommit.ClaudeMD)
+	assert.Equal(t, config.AutoCommitTracked, prefs.Sync.AutoCommit.Memory)
 }
 
 func TestAutoCommitModeHelper(t *testing.T) {
-	p := config.AutoCommitPrefs{ClaudeMD: "all", Memory: ""}
-	assert.Equal(t, "all", p.Mode("claude_md"))
-	assert.Equal(t, "tracked", p.Mode("memory")) // defaults to tracked
-	assert.Equal(t, "tracked", p.Mode("unknown"))
+	p := config.AutoCommitPrefs{ClaudeMD: config.AutoCommitAll, Memory: ""}
+	assert.Equal(t, config.AutoCommitAll, p.Mode("claude_md"))
+	assert.Equal(t, config.AutoCommitTracked, p.Mode("memory")) // defaults to tracked
+	assert.Equal(t, config.AutoCommitTracked, p.Mode("unknown"))
+}
+
+func TestAutoCommitModeInvalidClampedToTracked(t *testing.T) {
+	p := config.AutoCommitPrefs{ClaudeMD: "typo"}
+	assert.Equal(t, config.AutoCommitTracked, p.Mode("claude_md"))
 }
 
 func TestParseUserPreferences_WithSync(t *testing.T) {
