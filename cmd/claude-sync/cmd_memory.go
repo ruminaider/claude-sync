@@ -89,23 +89,33 @@ var memoryAddCmd = &cobra.Command{
 		}
 
 		fm, err := memory.ParseFrontmatter(string(content))
-		if err != nil || fm.Name == "" {
-			return fmt.Errorf("file has no valid frontmatter with name field")
+		if err != nil {
+			return fmt.Errorf("parsing frontmatter: %w", err)
+		}
+		if fm.Name == "" {
+			return fmt.Errorf("frontmatter is missing required 'name' field")
 		}
 
 		syncMemDir := paths.SyncMemoryDir()
-		os.MkdirAll(syncMemDir, 0755)
+		if err := os.MkdirAll(syncMemDir, 0755); err != nil {
+			return fmt.Errorf("creating sync memory dir: %w", err)
+		}
 
 		slug := memory.SlugifyName(fm.Name)
+
+		// Read manifest to check for existing fragment.
+		m, err := memory.ReadManifest(syncMemDir)
+		if err != nil {
+			return err
+		}
+		if _, exists := m.Fragments[slug]; exists {
+			return fmt.Errorf("fragment %q already exists in sync repo; use a different name or remove it first", slug)
+		}
 		if err := memory.WriteFragment(syncMemDir, slug, string(content)); err != nil {
 			return err
 		}
 
 		// Update manifest.
-		m, err := memory.ReadManifest(syncMemDir)
-		if err != nil {
-			return err
-		}
 		m.Fragments[slug] = memory.FragmentMeta{
 			Name:        fm.Name,
 			Description: fm.Description,
@@ -176,19 +186,24 @@ var memoryRemoveCmd = &cobra.Command{
 
 		if memoryRemovePurge {
 			syncMemDir := paths.SyncMemoryDir()
-			os.Remove(filepath.Join(syncMemDir, name+".md"))
-
+			fragPath := filepath.Join(syncMemDir, name+".md")
+			if err := os.Remove(fragPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("deleting fragment file: %w", err)
+			}
 			m, err := memory.ReadManifest(syncMemDir)
-			if err == nil {
-				delete(m.Fragments, name)
-				var newOrder []string
-				for _, n := range m.Order {
-					if n != name {
-						newOrder = append(newOrder, n)
-					}
+			if err != nil {
+				return fmt.Errorf("reading manifest for purge: %w", err)
+			}
+			delete(m.Fragments, name)
+			var newOrder []string
+			for _, n := range m.Order {
+				if n != name {
+					newOrder = append(newOrder, n)
 				}
-				m.Order = newOrder
-				memory.WriteManifest(syncMemDir, m)
+			}
+			m.Order = newOrder
+			if err := memory.WriteManifest(syncMemDir, m); err != nil {
+				return fmt.Errorf("writing manifest after purge: %w", err)
 			}
 		}
 
