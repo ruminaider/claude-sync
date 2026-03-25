@@ -29,7 +29,7 @@ func TestMergeExistingConfig_UpstreamPlugins(t *testing.T) {
 
 		assert.Contains(t, scan.PluginKeys, "new-one@mkt")
 		assert.Contains(t, scan.Upstream, "new-one@mkt")
-		assert.True(t, scan.ConfigOnly["new-one@mkt"])
+		assert.True(t, scan.ConfigOnly["plugin:new-one@mkt"])
 	})
 
 	t.Run("does not duplicate existing upstream plugins", func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestMergeExistingConfig_ForkedPlugins(t *testing.T) {
 		expectedKey := "my-fork@" + plugins.MarketplaceName
 		assert.Contains(t, scan.PluginKeys, expectedKey)
 		assert.Contains(t, scan.AutoForked, expectedKey)
-		assert.True(t, scan.ConfigOnly[expectedKey])
+		assert.True(t, scan.ConfigOnly["plugin:"+expectedKey])
 	})
 
 	t.Run("does not duplicate existing forked plugins", func(t *testing.T) {
@@ -94,8 +94,8 @@ func TestMergeExistingConfig_Settings(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		assert.Equal(t, "val2", scan.Settings["newKey"])
-		assert.True(t, scan.ConfigOnly["newKey"])
-		assert.False(t, scan.ConfigOnly["existing"])
+		assert.True(t, scan.ConfigOnly["setting:newKey"])
+		assert.False(t, scan.ConfigOnly["setting:existing"])
 	})
 
 	t.Run("initializes nil settings map", func(t *testing.T) {
@@ -108,7 +108,7 @@ func TestMergeExistingConfig_Settings(t *testing.T) {
 
 		require.NotNil(t, scan.Settings)
 		assert.Equal(t, "dark", scan.Settings["theme"])
-		assert.True(t, scan.ConfigOnly["theme"])
+		assert.True(t, scan.ConfigOnly["setting:theme"])
 	})
 
 	t.Run("no-op when config settings is empty", func(t *testing.T) {
@@ -135,8 +135,8 @@ func TestMergeExistingConfig_Hooks(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		assert.Equal(t, newHook, scan.Hooks["PostToolUse"])
-		assert.True(t, scan.ConfigOnly["PostToolUse"])
-		assert.False(t, scan.ConfigOnly["PreToolUse"])
+		assert.True(t, scan.ConfigOnly["hook:PostToolUse"])
+		assert.False(t, scan.ConfigOnly["hook:PreToolUse"])
 	})
 
 	t.Run("initializes nil hooks map", func(t *testing.T) {
@@ -150,7 +150,7 @@ func TestMergeExistingConfig_Hooks(t *testing.T) {
 
 		require.NotNil(t, scan.Hooks)
 		assert.Equal(t, hook, scan.Hooks["SessionEnd"])
-		assert.True(t, scan.ConfigOnly["SessionEnd"])
+		assert.True(t, scan.ConfigOnly["hook:SessionEnd"])
 	})
 
 	t.Run("no-op when config hooks is empty", func(t *testing.T) {
@@ -250,8 +250,8 @@ func TestMergeExistingConfig_MCP(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		assert.Equal(t, newServer, scan.MCP["server-b"])
-		assert.True(t, scan.ConfigOnly["server-b"])
-		assert.False(t, scan.ConfigOnly["server-a"])
+		assert.True(t, scan.ConfigOnly["mcp:server-b"])
+		assert.False(t, scan.ConfigOnly["mcp:server-a"])
 	})
 
 	t.Run("initializes nil MCP map", func(t *testing.T) {
@@ -265,7 +265,7 @@ func TestMergeExistingConfig_MCP(t *testing.T) {
 
 		require.NotNil(t, scan.MCP)
 		assert.Equal(t, srv, scan.MCP["my-mcp"])
-		assert.True(t, scan.ConfigOnly["my-mcp"])
+		assert.True(t, scan.ConfigOnly["mcp:my-mcp"])
 	})
 
 	t.Run("no-op when config MCP is empty", func(t *testing.T) {
@@ -290,8 +290,8 @@ func TestMergeExistingConfig_Keybindings(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		assert.Equal(t, "quit", scan.Keybindings["ctrl+q"])
-		assert.True(t, scan.ConfigOnly["ctrl+q"])
-		assert.False(t, scan.ConfigOnly["ctrl+s"])
+		assert.True(t, scan.ConfigOnly["keybinding:ctrl+q"])
+		assert.False(t, scan.ConfigOnly["keybinding:ctrl+s"])
 	})
 
 	t.Run("initializes nil keybindings map", func(t *testing.T) {
@@ -304,7 +304,7 @@ func TestMergeExistingConfig_Keybindings(t *testing.T) {
 
 		require.NotNil(t, scan.Keybindings)
 		assert.Equal(t, "undo", scan.Keybindings["ctrl+z"])
-		assert.True(t, scan.ConfigOnly["ctrl+z"])
+		assert.True(t, scan.ConfigOnly["keybinding:ctrl+z"])
 	})
 
 	t.Run("no-op when config keybindings is empty", func(t *testing.T) {
@@ -327,7 +327,7 @@ func TestMergeExistingConfig_ConfigOnlyTracking(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		require.NotNil(t, scan.ConfigOnly)
-		assert.True(t, scan.ConfigOnly["plugin@mkt"])
+		assert.True(t, scan.ConfigOnly["plugin:plugin@mkt"])
 	})
 
 	t.Run("preserves existing ConfigOnly entries", func(t *testing.T) {
@@ -341,7 +341,7 @@ func TestMergeExistingConfig_ConfigOnlyTracking(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		assert.True(t, scan.ConfigOnly["previous"])
-		assert.True(t, scan.ConfigOnly["newSetting"])
+		assert.True(t, scan.ConfigOnly["setting:newSetting"])
 	})
 
 	t.Run("only marks injected items, not pre-existing ones", func(t *testing.T) {
@@ -368,20 +368,20 @@ func TestMergeExistingConfig_ConfigOnlyTracking(t *testing.T) {
 		commands.MergeExistingConfig(scan, cfg, "")
 
 		// Injected items should be in ConfigOnly.
-		assert.True(t, scan.ConfigOnly["remote@mkt"])
-		assert.True(t, scan.ConfigOnly["remoteSetting"])
-		assert.True(t, scan.ConfigOnly["SessionEnd"])
+		assert.True(t, scan.ConfigOnly["plugin:remote@mkt"])
+		assert.True(t, scan.ConfigOnly["setting:remoteSetting"])
+		assert.True(t, scan.ConfigOnly["hook:SessionEnd"])
 		assert.True(t, scan.ConfigOnly["allow:Bash(npm *)"])
-		assert.True(t, scan.ConfigOnly["remote-mcp"])
-		assert.True(t, scan.ConfigOnly["ctrl+q"])
+		assert.True(t, scan.ConfigOnly["mcp:remote-mcp"])
+		assert.True(t, scan.ConfigOnly["keybinding:ctrl+q"])
 
 		// Pre-existing items should NOT be in ConfigOnly.
-		assert.False(t, scan.ConfigOnly["local@mkt"])
-		assert.False(t, scan.ConfigOnly["localSetting"])
-		assert.False(t, scan.ConfigOnly["PreToolUse"])
+		assert.False(t, scan.ConfigOnly["plugin:local@mkt"])
+		assert.False(t, scan.ConfigOnly["setting:localSetting"])
+		assert.False(t, scan.ConfigOnly["hook:PreToolUse"])
 		assert.False(t, scan.ConfigOnly["allow:Bash(git *)"])
-		assert.False(t, scan.ConfigOnly["local-mcp"])
-		assert.False(t, scan.ConfigOnly["ctrl+s"])
+		assert.False(t, scan.ConfigOnly["mcp:local-mcp"])
+		assert.False(t, scan.ConfigOnly["keybinding:ctrl+s"])
 	})
 }
 
@@ -413,14 +413,14 @@ func TestMergeExistingConfig_EmptyScan(t *testing.T) {
 		assert.Equal(t, "bind", scan.Keybindings["B"])
 
 		// All items should be marked as config-only.
-		assert.True(t, scan.ConfigOnly["p1@mkt"])
-		assert.True(t, scan.ConfigOnly[forkedKey])
-		assert.True(t, scan.ConfigOnly["k"])
-		assert.True(t, scan.ConfigOnly["H"])
+		assert.True(t, scan.ConfigOnly["plugin:p1@mkt"])
+		assert.True(t, scan.ConfigOnly["plugin:"+forkedKey])
+		assert.True(t, scan.ConfigOnly["setting:k"])
+		assert.True(t, scan.ConfigOnly["hook:H"])
 		assert.True(t, scan.ConfigOnly["allow:A"])
 		assert.True(t, scan.ConfigOnly["deny:D"])
-		assert.True(t, scan.ConfigOnly["M"])
-		assert.True(t, scan.ConfigOnly["B"])
+		assert.True(t, scan.ConfigOnly["mcp:M"])
+		assert.True(t, scan.ConfigOnly["keybinding:B"])
 	})
 }
 

@@ -14,12 +14,38 @@ import (
 	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
 )
 
+// ConfigOnly key prefixes. Each section namespaces its keys to prevent
+// collisions (e.g., a setting and MCP server sharing the same name).
+// Permissions use "allow:"/"deny:" prefixes. Commands/skills use their
+// existing "cmd:"/"skill:" key format. CLAUDE.md uses "fragment:".
+const (
+	configOnlyPluginPrefix     = "plugin:"
+	configOnlySettingPrefix    = "setting:"
+	configOnlyHookPrefix       = "hook:"
+	configOnlyMCPPrefix        = "mcp:"
+	configOnlyKeybindingPrefix = "keybinding:"
+)
+
+// ConfigOnlySectionPrefix maps TUI section identifiers to their ConfigOnly
+// key prefix. Sections whose keys are already namespaced (permissions,
+// commands/skills, CLAUDE.md) use an empty prefix.
+var ConfigOnlySectionPrefix = map[string]string{
+	"plugins":         configOnlyPluginPrefix,
+	"settings":        configOnlySettingPrefix,
+	"hooks":           configOnlyHookPrefix,
+	"permissions":     "",
+	"mcp":             configOnlyMCPPrefix,
+	"keybindings":     configOnlyKeybindingPrefix,
+	"commands_skills": "",
+}
+
 // MergeExistingConfig injects items from an existing config into the scan
 // result when those items were not detected locally. This prevents
 // "config update" from silently dropping items that exist in the config but
 // are absent from the current machine (e.g., plugins not installed locally).
 //
 // Each injected item is tracked in scan.ConfigOnly so the TUI can label it.
+// Keys are prefixed by section to prevent cross-section collisions.
 func MergeExistingConfig(scan *InitScanResult, cfg *config.Config, syncDir string) {
 	if scan.ConfigOnly == nil {
 		scan.ConfigOnly = make(map[string]bool)
@@ -36,8 +62,6 @@ func MergeExistingConfig(scan *InitScanResult, cfg *config.Config, syncDir strin
 	mergeCommandsSkills(scan, cfg, syncDir)
 }
 
-// mergeUpstreamPlugins injects upstream plugin keys from cfg that are missing
-// from the scan.
 func mergeUpstreamPlugins(scan *InitScanResult, cfg *config.Config) {
 	for _, key := range cfg.Upstream {
 		if slices.Contains(scan.PluginKeys, key) {
@@ -45,12 +69,10 @@ func mergeUpstreamPlugins(scan *InitScanResult, cfg *config.Config) {
 		}
 		scan.Upstream = append(scan.Upstream, key)
 		scan.PluginKeys = append(scan.PluginKeys, key)
-		scan.ConfigOnly[key] = true
+		scan.ConfigOnly[configOnlyPluginPrefix+key] = true
 	}
 }
 
-// mergeForkedPlugins injects forked plugin names from cfg (bare names) that
-// are missing from the scan, converting them to qualified keys.
 func mergeForkedPlugins(scan *InitScanResult, cfg *config.Config) {
 	for _, name := range cfg.Forked {
 		key := name + "@" + forkedplugins.MarketplaceName
@@ -59,11 +81,10 @@ func mergeForkedPlugins(scan *InitScanResult, cfg *config.Config) {
 		}
 		scan.AutoForked = append(scan.AutoForked, key)
 		scan.PluginKeys = append(scan.PluginKeys, key)
-		scan.ConfigOnly[key] = true
+		scan.ConfigOnly[configOnlyPluginPrefix+key] = true
 	}
 }
 
-// mergeSettings injects setting keys from cfg that are missing from the scan.
 func mergeSettings(scan *InitScanResult, cfg *config.Config) {
 	if len(cfg.Settings) == 0 {
 		return
@@ -76,11 +97,10 @@ func mergeSettings(scan *InitScanResult, cfg *config.Config) {
 			continue
 		}
 		scan.Settings[k] = v
-		scan.ConfigOnly[k] = true
+		scan.ConfigOnly[configOnlySettingPrefix+k] = true
 	}
 }
 
-// mergeHooks injects hooks from cfg that are missing from the scan.
 func mergeHooks(scan *InitScanResult, cfg *config.Config) {
 	if len(cfg.Hooks) == 0 {
 		return
@@ -93,7 +113,7 @@ func mergeHooks(scan *InitScanResult, cfg *config.Config) {
 			continue
 		}
 		scan.Hooks[k] = v
-		scan.ConfigOnly[k] = true
+		scan.ConfigOnly[configOnlyHookPrefix+k] = true
 	}
 }
 
@@ -117,7 +137,6 @@ func mergePermissions(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-// mergeMCP injects MCP server configs from cfg that are missing from the scan.
 func mergeMCP(scan *InitScanResult, cfg *config.Config) {
 	if len(cfg.MCP) == 0 {
 		return
@@ -130,11 +149,10 @@ func mergeMCP(scan *InitScanResult, cfg *config.Config) {
 			continue
 		}
 		scan.MCP[k] = v
-		scan.ConfigOnly[k] = true
+		scan.ConfigOnly[configOnlyMCPPrefix+k] = true
 	}
 }
 
-// mergeKeybindings injects keybindings from cfg that are missing from the scan.
 func mergeKeybindings(scan *InitScanResult, cfg *config.Config) {
 	if len(cfg.Keybindings) == 0 {
 		return
@@ -147,7 +165,7 @@ func mergeKeybindings(scan *InitScanResult, cfg *config.Config) {
 			continue
 		}
 		scan.Keybindings[k] = v
-		scan.ConfigOnly[k] = true
+		scan.ConfigOnly[configOnlyKeybindingPrefix+k] = true
 	}
 }
 

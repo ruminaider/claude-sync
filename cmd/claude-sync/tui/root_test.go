@@ -2568,7 +2568,7 @@ func TestNewModel_ConfigOnlyItemsGetTag(t *testing.T) {
 	scan := &commands.InitScanResult{
 		Upstream:   []string{"a@m", "b@m"},
 		Settings:   map[string]any{"model": "opus", "theme": "dark"},
-		ConfigOnly: map[string]bool{"b@m": true, "theme": true},
+		ConfigOnly: map[string]bool{"plugin:b@m": true, "setting:theme": true},
 	}
 
 	m := testModel(scan)
@@ -2597,7 +2597,7 @@ func TestNewModel_ConfigOnlyItemsGetTag(t *testing.T) {
 func TestBuildInitOptions_PopulatesExtraUpstream(t *testing.T) {
 	scan := &commands.InitScanResult{
 		Upstream:   []string{"a@m", "b@m"},
-		ConfigOnly: map[string]bool{"b@m": true},
+		ConfigOnly: map[string]bool{"plugin:b@m": true},
 	}
 
 	m := testModel(scan)
@@ -2611,7 +2611,7 @@ func TestBuildInitOptions_PopulatesExtraForked(t *testing.T) {
 	forkedKey := "my-fork@" + plugins.MarketplaceName
 	scan := &commands.InitScanResult{
 		AutoForked: []string{forkedKey},
-		ConfigOnly: map[string]bool{forkedKey: true},
+		ConfigOnly: map[string]bool{"plugin:" + forkedKey: true},
 	}
 
 	m := testModel(scan)
@@ -2624,7 +2624,7 @@ func TestBuildInitOptions_PopulatesExtraForked(t *testing.T) {
 func TestBuildInitOptions_PopulatesExtraSettings(t *testing.T) {
 	scan := &commands.InitScanResult{
 		Settings:   map[string]any{"model": "opus", "theme": "dark"},
-		ConfigOnly: map[string]bool{"theme": true},
+		ConfigOnly: map[string]bool{"setting:theme": true},
 	}
 
 	m := testModel(scan)

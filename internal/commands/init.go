@@ -21,6 +21,9 @@ import (
 )
 
 // InitScanResult holds what was found during scanning without writing anything.
+// After construction, MergeExistingConfig may inject additional items from the
+// existing config that were not detected locally. Those items are tracked in
+// ConfigOnly so the TUI can distinguish them.
 type InitScanResult struct {
 	PluginKeys      []string                   // all plugin keys
 	Upstream        []string                   // portable marketplace plugins
@@ -74,6 +77,10 @@ type InitOptions struct {
 	Keybindings       map[string]any              // keybindings to include
 	Commands          []string                    // selected command keys to include
 	Skills            []string                    // selected skill keys to include
+	// Extra* fields carry config-only values through sections where
+	// buildAndWriteConfig re-reads from local files. Other sections (hooks,
+	// MCP, permissions, keybindings, CLAUDE.md, commands/skills) pass values
+	// directly through opts and do not need Extra* fields.
 	ExtraUpstream     []string                    // config-only upstream plugin keys to preserve
 	ExtraForked       []string                    // config-only forked plugin names to preserve
 	ExtraSettings     map[string]any              // config-only setting values to preserve

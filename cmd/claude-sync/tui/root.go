@@ -153,11 +153,22 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	m.pickers[SectionCommandsSkills] = csPicker
 
 	// Tag config-only items so they render with [config] indicator.
+	// Prefixes match the namespaced keys written by MergeExistingConfig.
 	if scan.ConfigOnly != nil {
+		sectionPrefix := map[Section]string{
+			SectionPlugins:        commands.ConfigOnlySectionPrefix["plugins"],
+			SectionSettings:       commands.ConfigOnlySectionPrefix["settings"],
+			SectionHooks:          commands.ConfigOnlySectionPrefix["hooks"],
+			SectionPermissions:    commands.ConfigOnlySectionPrefix["permissions"],
+			SectionMCP:            commands.ConfigOnlySectionPrefix["mcp"],
+			SectionKeybindings:    commands.ConfigOnlySectionPrefix["keybindings"],
+			SectionCommandsSkills: commands.ConfigOnlySectionPrefix["commands_skills"],
+		}
 		for sec := range m.pickers {
+			prefix := sectionPrefix[sec]
 			p := m.pickers[sec]
 			for i, it := range p.items {
-				if scan.ConfigOnly[it.Key] {
+				if scan.ConfigOnly[prefix+it.Key] {
 					p.items[i].Tag = "[config]"
 				}
 			}
@@ -1116,8 +1127,9 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 
 	// Populate ExtraUpstream and ExtraForked for config-only plugins.
 	if m.scanResult.ConfigOnly != nil {
+		pluginPrefix := commands.ConfigOnlySectionPrefix["plugins"]
 		for _, key := range pluginKeys {
-			if m.scanResult.ConfigOnly[key] {
+			if m.scanResult.ConfigOnly[pluginPrefix+key] {
 				if strings.HasSuffix(key, "@"+plugins.MarketplaceName) {
 					name := strings.TrimSuffix(key, "@"+plugins.MarketplaceName)
 					opts.ExtraForked = append(opts.ExtraForked, name)
@@ -1142,8 +1154,9 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 
 	// Populate ExtraSettings for config-only settings.
 	if m.scanResult.ConfigOnly != nil {
+		settingPrefix := commands.ConfigOnlySectionPrefix["settings"]
 		for _, key := range settingsKeys {
-			if m.scanResult.ConfigOnly[key] {
+			if m.scanResult.ConfigOnly[settingPrefix+key] {
 				if opts.ExtraSettings == nil {
 					opts.ExtraSettings = make(map[string]any)
 				}
