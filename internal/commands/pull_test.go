@@ -1667,3 +1667,144 @@ func TestPull_ForceOverwritesLocallyModified(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "my-custom-model")
 }
+
+// --- ReconcileEnabledPlugins tests ---
+
+func makeInstalled(keys ...string) *claudecode.InstalledPlugins {
+	ip := &claudecode.InstalledPlugins{
+		Version: 2,
+		Plugins: make(map[string][]claudecode.PluginInstallation),
+	}
+	for _, k := range keys {
+		ip.Plugins[k] = []claudecode.PluginInstallation{{
+			Scope: "user", Version: "1.0", InstallPath: "/p",
+		}}
+	}
+	return ip
+}
+
+func TestReconcileEnabledPlugins_AddsAbsentEntries(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+
+	// settings.json has enabledPlugins with only pluginA.
+	existing := map[string]json.RawMessage{
+		"enabledPlugins": json.RawMessage(`{"a@m": true}`),
+	}
+	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+
+	installed := makeInstalled("a@m", "b@m")
+	desired := []string{"a@m", "b@m"}
+
+	reconciled, _, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"b@m"}, reconciled)
+
+	settings := readSettingsJSON(t, claudeDir)
+	var ep map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &ep))
+	assert.True(t, ep["a@m"], "existing entry preserved")
+	assert.True(t, ep["b@m"], "missing entry added")
+}
+
+func TestReconcileEnabledPlugins_SkipsExplicitlyDisabled(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+
+	// pluginA is explicitly disabled (false).
+	existing := map[string]json.RawMessage{
+		"enabledPlugins": json.RawMessage(`{"a@m": false}`),
+	}
+	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+
+	installed := makeInstalled("a@m")
+	desired := []string{"a@m"}
+
+	reconciled, _, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+	assert.Empty(t, reconciled, "should not overwrite explicit false")
+
+	settings := readSettingsJSON(t, claudeDir)
+	var ep map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &ep))
+	assert.False(t, ep["a@m"], "explicit false preserved")
+}
+
+func TestReconcileEnabledPlugins_PreservesUntracked(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+
+	// settings.json has an entry for a plugin not in effectiveDesired.
+	existing := map[string]json.RawMessage{
+		"enabledPlugins": json.RawMessage(`{"untracked@m": true}`),
+	}
+	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+
+	installed := makeInstalled("a@m")
+	desired := []string{"a@m"}
+
+	reconciled, _, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a@m"}, reconciled)
+
+	settings := readSettingsJSON(t, claudeDir)
+	var ep map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &ep))
+	assert.True(t, ep["untracked@m"], "untracked entry preserved")
+	assert.True(t, ep["a@m"], "desired entry added")
+}
+
+func TestReconcileEnabledPlugins_NoSettingsFile(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+	// No settings.json exists.
+
+	installed := makeInstalled("a@m")
+	desired := []string{"a@m"}
+
+	reconciled, _, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a@m"}, reconciled)
+
+	settings := readSettingsJSON(t, claudeDir)
+	var ep map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &ep))
+	assert.True(t, ep["a@m"])
+}
+
+func TestReconcileEnabledPlugins_NoopWhenAllPresent(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+
+	existing := map[string]json.RawMessage{
+		"enabledPlugins": json.RawMessage(`{"a@m": true, "b@m": true}`),
+		"model":          json.RawMessage(`"my-model"`),
+	}
+	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+
+	installed := makeInstalled("a@m", "b@m")
+	desired := []string{"a@m", "b@m"}
+
+	reconciled, _, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+	assert.Empty(t, reconciled, "nothing to reconcile")
+}
+
+func TestReconcileEnabledPlugins_IgnoresDesiredButNotInstalled(t *testing.T) {
+	claudeDir := setupApplySettingsEnv(t)
+
+	existing := map[string]json.RawMessage{
+		"enabledPlugins": json.RawMessage(`{}`),
+	}
+	require.NoError(t, claudecode.WriteSettings(claudeDir, existing))
+
+	// "b@m" is desired but NOT in installed_plugins.json (install failed).
+	installed := makeInstalled("a@m")
+	desired := []string{"a@m", "b@m"}
+
+	reconciled, _, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a@m"}, reconciled, "only installed plugin reconciled")
+
+	settings := readSettingsJSON(t, claudeDir)
+	var ep map[string]bool
+	require.NoError(t, json.Unmarshal(settings["enabledPlugins"], &ep))
+	assert.True(t, ep["a@m"])
+	_, hasBM := ep["b@m"]
+	assert.False(t, hasBM, "not-installed plugin should not get an entry")
+}
