@@ -11,6 +11,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	plugins "github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -819,4 +820,324 @@ func TestMergeExistingConfig_CommandsSkills_InvalidKeys(t *testing.T) {
 		require.NotNil(t, scan.CommandsSkills)
 		assert.Empty(t, scan.CommandsSkills.Items)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// mergeMemory helper tests
+// ---------------------------------------------------------------------------
+
+func TestMergeMemory_InjectsNew(t *testing.T) {
+	scan := &commands.InitScanResult{
+		MemoryFiles: []string{"existing-mem"},
+		ConfigOnly:  make(map[string]bool),
+	}
+	cfg := &config.Config{
+		Memory: config.MemoryConfig{
+			Include: []string{"existing-mem", "new-mem"},
+		},
+	}
+
+	commands.MergeExistingConfig(scan, cfg, "")
+
+	assert.Contains(t, scan.MemoryFiles, "new-mem")
+	assert.True(t, scan.ConfigOnly["memory:new-mem"])
+}
+
+func TestMergeMemory_SkipsExisting(t *testing.T) {
+	scan := &commands.InitScanResult{
+		MemoryFiles: []string{"already-here"},
+		ConfigOnly:  make(map[string]bool),
+	}
+	cfg := &config.Config{
+		Memory: config.MemoryConfig{
+			Include: []string{"already-here"},
+		},
+	}
+
+	commands.MergeExistingConfig(scan, cfg, "")
+
+	assert.Equal(t, []string{"already-here"}, scan.MemoryFiles)
+	assert.Empty(t, scan.ConfigOnly)
+}
+
+func TestMergeMemory_NilSlice(t *testing.T) {
+	scan := &commands.InitScanResult{
+		ConfigOnly: make(map[string]bool),
+	}
+	cfg := &config.Config{
+		Memory: config.MemoryConfig{
+			Include: []string{"new-mem"},
+		},
+	}
+
+	commands.MergeExistingConfig(scan, cfg, "")
+
+	assert.Equal(t, []string{"new-mem"}, scan.MemoryFiles)
+	assert.True(t, scan.ConfigOnly["memory:new-mem"])
+}
+
+// ---------------------------------------------------------------------------
+// Combined MergeExisting tests
+// ---------------------------------------------------------------------------
+
+func TestMergeExisting_BaseConfigOnly(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	cfg := &config.Config{
+		Upstream:    []string{"p1@mkt"},
+		Settings:    map[string]any{"theme": "dark"},
+		MCP:         map[string]json.RawMessage{"srv": json.RawMessage(`{"cmd":"x"}`)},
+		Permissions: config.Permissions{Allow: []string{"Bash(git *)"}},
+	}
+
+	commands.MergeExisting(scan, cfg, nil, "")
+
+	assert.Contains(t, scan.PluginKeys, "p1@mkt")
+	assert.Contains(t, scan.Upstream, "p1@mkt")
+	assert.Equal(t, "dark", scan.Settings["theme"])
+	assert.Equal(t, json.RawMessage(`{"cmd":"x"}`), scan.MCP["srv"])
+	assert.Contains(t, scan.Permissions.Allow, "Bash(git *)")
+
+	assert.True(t, scan.ConfigOnly["plugin:p1@mkt"])
+	assert.True(t, scan.ConfigOnly["setting:theme"])
+	assert.True(t, scan.ConfigOnly["mcp:srv"])
+	assert.True(t, scan.ConfigOnly["allow:Bash(git *)"])
+}
+
+func TestMergeExisting_ProfilesOnly(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	profs := map[string]profiles.Profile{
+		"dev": {
+			Plugins:  profiles.ProfilePlugins{Add: []string{"plugin-a@mkt"}},
+			Settings: map[string]any{"editor": "vim"},
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{"dev-srv": json.RawMessage(`{"cmd":"dev"}`)},
+			},
+			Permissions: profiles.ProfilePermissions{AddAllow: []string{"Bash(npm *)"}},
+			Hooks: profiles.ProfileHooks{
+				Add: map[string]json.RawMessage{"PreToolUse": json.RawMessage(`[{"type":"command","command":"echo"}]`)},
+			},
+			Keybindings: profiles.ProfileKeybindings{Override: map[string]any{"ctrl+d": "debug"}},
+			Memory:      profiles.ProfileMemory{Add: []string{"dev-notes"}},
+		},
+	}
+
+	commands.MergeExisting(scan, nil, profs, "")
+
+	// Plugins
+	assert.Contains(t, scan.PluginKeys, "plugin-a@mkt")
+	assert.Contains(t, scan.Upstream, "plugin-a@mkt")
+	assert.True(t, scan.ConfigOnly["plugin:plugin-a@mkt"])
+
+	// Settings
+	assert.Equal(t, "vim", scan.Settings["editor"])
+	assert.True(t, scan.ConfigOnly["setting:editor"])
+
+	// MCP
+	assert.Equal(t, json.RawMessage(`{"cmd":"dev"}`), scan.MCP["dev-srv"])
+	assert.True(t, scan.ConfigOnly["mcp:dev-srv"])
+
+	// Permissions
+	assert.Contains(t, scan.Permissions.Allow, "Bash(npm *)")
+	assert.True(t, scan.ConfigOnly["allow:Bash(npm *)"])
+
+	// Hooks
+	assert.NotNil(t, scan.Hooks["PreToolUse"])
+	assert.True(t, scan.ConfigOnly["hook:PreToolUse"])
+
+	// Keybindings
+	assert.Equal(t, "debug", scan.Keybindings["ctrl+d"])
+	assert.True(t, scan.ConfigOnly["keybinding:ctrl+d"])
+
+	// Memory
+	assert.Contains(t, scan.MemoryFiles, "dev-notes")
+	assert.True(t, scan.ConfigOnly["memory:dev-notes"])
+}
+
+func TestMergeExisting_BaseAndProfiles(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	cfg := &config.Config{
+		Upstream: []string{"base-plugin@mkt"},
+		Settings: map[string]any{"theme": "dark"},
+	}
+	profs := map[string]profiles.Profile{
+		"dev": {
+			Plugins:  profiles.ProfilePlugins{Add: []string{"base-plugin@mkt", "dev-plugin@mkt"}},
+			Settings: map[string]any{"theme": "light", "editor": "vim"},
+		},
+	}
+
+	commands.MergeExisting(scan, cfg, profs, "")
+
+	// base-plugin should appear once (base injected it; profile dedup skips it).
+	count := 0
+	for _, k := range scan.PluginKeys {
+		if k == "base-plugin@mkt" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "base-plugin@mkt should appear exactly once")
+
+	// dev-plugin should be injected by the profile.
+	assert.Contains(t, scan.PluginKeys, "dev-plugin@mkt")
+	assert.True(t, scan.ConfigOnly["plugin:dev-plugin@mkt"])
+
+	// "theme" was injected by base config; profile dedup skips it.
+	assert.Equal(t, "dark", scan.Settings["theme"])
+	assert.True(t, scan.ConfigOnly["setting:theme"])
+
+	// "editor" is new from the profile.
+	assert.Equal(t, "vim", scan.Settings["editor"])
+	assert.True(t, scan.ConfigOnly["setting:editor"])
+}
+
+func TestMergeExisting_MultiProfileDedup(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	profs := map[string]profiles.Profile{
+		"alpha": {
+			Plugins:  profiles.ProfilePlugins{Add: []string{"shared@mkt"}},
+			Settings: map[string]any{"shared-key": "alpha-val"},
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{"shared-mcp": json.RawMessage(`{"from":"alpha"}`)},
+			},
+		},
+		"beta": {
+			Plugins:  profiles.ProfilePlugins{Add: []string{"shared@mkt"}},
+			Settings: map[string]any{"shared-key": "beta-val"},
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{"shared-mcp": json.RawMessage(`{"from":"beta"}`)},
+			},
+		},
+	}
+
+	commands.MergeExisting(scan, nil, profs, "")
+
+	// Plugin should appear exactly once.
+	pluginCount := 0
+	for _, k := range scan.PluginKeys {
+		if k == "shared@mkt" {
+			pluginCount++
+		}
+	}
+	assert.Equal(t, 1, pluginCount, "shared@mkt should appear exactly once in PluginKeys")
+
+	// Settings: first profile to be processed wins (map iteration order is
+	// nondeterministic, but the value should be one of the two).
+	val, ok := scan.Settings["shared-key"]
+	assert.True(t, ok)
+	assert.Contains(t, []any{"alpha-val", "beta-val"}, val)
+
+	// MCP: same, first wins.
+	_, mcpOk := scan.MCP["shared-mcp"]
+	assert.True(t, mcpOk)
+}
+
+func TestMergeExisting_ForkedProfilePlugin(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	forkedKey := "my-fork@" + plugins.MarketplaceName
+	profs := map[string]profiles.Profile{
+		"dev": {
+			Plugins: profiles.ProfilePlugins{Add: []string{forkedKey, "normal@mkt"}},
+		},
+	}
+
+	commands.MergeExisting(scan, nil, profs, "")
+
+	// The forked plugin should end up in AutoForked (with marketplace suffix).
+	assert.Contains(t, scan.AutoForked, forkedKey)
+	assert.True(t, scan.ConfigOnly["plugin:"+forkedKey])
+
+	// The normal plugin should be in Upstream.
+	assert.Contains(t, scan.Upstream, "normal@mkt")
+	assert.True(t, scan.ConfigOnly["plugin:normal@mkt"])
+
+	// Both should be in PluginKeys.
+	assert.Contains(t, scan.PluginKeys, forkedKey)
+	assert.Contains(t, scan.PluginKeys, "normal@mkt")
+}
+
+func TestMergeExisting_ConflictBaseVsProfile(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	cfg := &config.Config{
+		MCP: map[string]json.RawMessage{
+			"shared-mcp": json.RawMessage(`{"from":"base"}`),
+		},
+		Settings: map[string]any{"shared-key": "base-val"},
+	}
+	profs := map[string]profiles.Profile{
+		"dev": {
+			MCP: profiles.ProfileMCP{
+				Add: map[string]json.RawMessage{
+					"shared-mcp": json.RawMessage(`{"from":"profile"}`),
+				},
+			},
+			Settings: map[string]any{"shared-key": "profile-val"},
+		},
+	}
+
+	commands.MergeExisting(scan, cfg, profs, "")
+
+	// Base config was processed first, so its value should be in the scan.
+	// Profile dedup sees the key already exists and skips it.
+	assert.Equal(t, json.RawMessage(`{"from":"base"}`), scan.MCP["shared-mcp"])
+	assert.Equal(t, "base-val", scan.Settings["shared-key"])
+}
+
+func TestMergeExisting_EmptyScan(t *testing.T) {
+	scan := &commands.InitScanResult{}
+	cfg := &config.Config{
+		Upstream:    []string{"base@mkt"},
+		Forked:      []string{"fork1"},
+		Settings:    map[string]any{"k": "v"},
+		Hooks:       map[string]json.RawMessage{"H": json.RawMessage(`{}`)},
+		Permissions: config.Permissions{Allow: []string{"A"}, Deny: []string{"D"}},
+		MCP:         map[string]json.RawMessage{"M": json.RawMessage(`{}`)},
+		Keybindings: map[string]any{"B": "bind"},
+		Memory:      config.MemoryConfig{Include: []string{"mem1"}},
+	}
+	profs := map[string]profiles.Profile{
+		"extra": {
+			Plugins:     profiles.ProfilePlugins{Add: []string{"prof-plugin@mkt"}},
+			Settings:    map[string]any{"pk": "pv"},
+			Permissions: profiles.ProfilePermissions{AddAllow: []string{"PA"}, AddDeny: []string{"PD"}},
+			Memory:      profiles.ProfileMemory{Add: []string{"prof-mem"}},
+		},
+	}
+
+	commands.MergeExisting(scan, cfg, profs, "")
+
+	forkedKey := "fork1@" + plugins.MarketplaceName
+
+	// Base items.
+	assert.Contains(t, scan.PluginKeys, "base@mkt")
+	assert.Contains(t, scan.PluginKeys, forkedKey)
+	assert.Equal(t, "v", scan.Settings["k"])
+	assert.NotNil(t, scan.Hooks["H"])
+	assert.Contains(t, scan.Permissions.Allow, "A")
+	assert.Contains(t, scan.Permissions.Deny, "D")
+	assert.NotNil(t, scan.MCP["M"])
+	assert.Equal(t, "bind", scan.Keybindings["B"])
+	assert.Contains(t, scan.MemoryFiles, "mem1")
+
+	// Profile items.
+	assert.Contains(t, scan.PluginKeys, "prof-plugin@mkt")
+	assert.Equal(t, "pv", scan.Settings["pk"])
+	assert.Contains(t, scan.Permissions.Allow, "PA")
+	assert.Contains(t, scan.Permissions.Deny, "PD")
+	assert.Contains(t, scan.MemoryFiles, "prof-mem")
+
+	// ConfigOnly tracking for all injected items.
+	assert.True(t, scan.ConfigOnly["plugin:base@mkt"])
+	assert.True(t, scan.ConfigOnly["plugin:"+forkedKey])
+	assert.True(t, scan.ConfigOnly["setting:k"])
+	assert.True(t, scan.ConfigOnly["hook:H"])
+	assert.True(t, scan.ConfigOnly["allow:A"])
+	assert.True(t, scan.ConfigOnly["deny:D"])
+	assert.True(t, scan.ConfigOnly["mcp:M"])
+	assert.True(t, scan.ConfigOnly["keybinding:B"])
+	assert.True(t, scan.ConfigOnly["memory:mem1"])
+	assert.True(t, scan.ConfigOnly["plugin:prof-plugin@mkt"])
+	assert.True(t, scan.ConfigOnly["setting:pk"])
+	assert.True(t, scan.ConfigOnly["allow:PA"])
+	assert.True(t, scan.ConfigOnly["deny:PD"])
+	assert.True(t, scan.ConfigOnly["memory:prof-mem"])
 }

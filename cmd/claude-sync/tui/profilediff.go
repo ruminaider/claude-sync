@@ -392,13 +392,19 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	p.Plugins.Add = sortedKeys(pluginDiff.adds)
 	p.Plugins.Remove = sortedKeys(pluginDiff.removes)
 
-	// Settings (only adds, look up values from scan)
+	// Settings (only adds, look up values from profile first, then scan)
 	baseSettings := m.pickers[SectionSettings].SelectedKeys()
 	profSettings := pm[SectionSettings].SelectedKeys()
 	settingsDiff := computeSectionDiff(baseSettings, profSettings)
 	if len(settingsDiff.adds) > 0 {
 		p.Settings = make(map[string]any)
 		for k := range settingsDiff.adds {
+			if vals, ok := m.profileAddValues[name]; ok {
+				if v, ok := vals.Settings[k]; ok {
+					p.Settings[k] = v
+					continue
+				}
+			}
 			if v, ok := m.scanResult.Settings[k]; ok {
 				p.Settings[k] = v
 			}
@@ -426,12 +432,18 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 		p.ClaudeMD.Remove = sortedKeys(claudeDiff.removes)
 	}
 
-	// MCP (adds need raw JSON values)
+	// MCP (adds need raw JSON values; prefer profile originals over scan)
 	baseMCP := m.pickers[SectionMCP].SelectedKeys()
 	profMCP := pm[SectionMCP].SelectedKeys()
 	mcpDiff := computeSectionDiff(baseMCP, profMCP)
 	mcpAdd := make(map[string]json.RawMessage)
 	for k := range mcpDiff.adds {
+		if vals, ok := m.profileAddValues[name]; ok {
+			if raw, ok := vals.MCP[k]; ok {
+				mcpAdd[k] = raw
+				continue
+			}
+		}
 		if raw, ok := m.scanResult.MCP[k]; ok {
 			mcpAdd[k] = raw
 		} else if raw, ok := m.discoveredMCP[k]; ok {
@@ -451,12 +463,18 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 		p.MCP = profiles.ProfileMCP{Add: mcpAdd, Remove: mcpRemoves}
 	}
 
-	// Hooks (adds need raw JSON values)
+	// Hooks (adds need raw JSON values; prefer profile originals over scan)
 	baseHooks := m.pickers[SectionHooks].SelectedKeys()
 	profHooks := pm[SectionHooks].SelectedKeys()
 	hooksDiff := computeSectionDiff(baseHooks, profHooks)
 	hookAdd := make(map[string]json.RawMessage)
 	for k := range hooksDiff.adds {
+		if vals, ok := m.profileAddValues[name]; ok {
+			if raw, ok := vals.Hooks[k]; ok {
+				hookAdd[k] = raw
+				continue
+			}
+		}
 		if raw, ok := m.scanResult.Hooks[k]; ok {
 			hookAdd[k] = raw
 		}
@@ -466,13 +484,17 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 		p.Hooks = profiles.ProfileHooks{Add: hookAdd, Remove: hookRemoves}
 	}
 
-	// Keybindings
+	// Keybindings (prefer profile originals over scan)
 	baseKB := m.pickers[SectionKeybindings].SelectedKeys()
 	profKB := pm[SectionKeybindings].SelectedKeys()
 	if !setsEqual(toSet(baseKB), toSet(profKB)) {
 		if len(profKB) > 0 {
+			override := m.scanResult.Keybindings
+			if vals, ok := m.profileAddValues[name]; ok && len(vals.Keybindings) > 0 {
+				override = vals.Keybindings
+			}
 			p.Keybindings = profiles.ProfileKeybindings{
-				Override: m.scanResult.Keybindings,
+				Override: override,
 			}
 		}
 	}

@@ -46,6 +46,16 @@ const (
 	overlayHelp                                // help modal
 )
 
+// profileValues stores original values from a profile's add sections.
+// Used when profile values differ from scan values (e.g., MCP server
+// with uvx config in profile vs Docker config in local scan).
+type profileValues struct {
+	MCP         map[string]json.RawMessage
+	Hooks       map[string]json.RawMessage
+	Settings    map[string]any
+	Keybindings map[string]any
+}
+
 // Model is the root bubbletea model that composes all TUI child components.
 type Model struct {
 	// Scan data (read-only after init).
@@ -89,6 +99,9 @@ type Model struct {
 	// Profile diffs: tracks explicit add/remove overrides relative to base per section.
 	profileDiffs map[string]map[Section]*sectionDiff
 
+	// Original profile add-section values, keyed by profile name.
+	profileAddValues map[string]profileValues
+
 	// Discovered MCP servers from project-level .mcp.json files.
 	discoveredMCP  map[string]json.RawMessage // server name → config
 	mcpSources     map[string]string          // server name → shortened source path
@@ -117,7 +130,8 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		pickers:            make(map[Section]Picker),
 		profilePickers:     make(map[string]map[Section]Picker),
 		profilePreviews:    make(map[string]Preview),
-		profileDiffs: make(map[string]map[Section]*sectionDiff),
+		profileDiffs:     make(map[string]map[Section]*sectionDiff),
+		profileAddValues: make(map[string]profileValues),
 		activeTab:          "Base",
 		activeSection:      SectionPlugins,
 		focusZone:          FocusSidebar,
@@ -1035,6 +1049,7 @@ func (m *Model) resetToDefaults() {
 	m.mcpPluginKeys = make(map[string]string)
 	m.discoveredCmdSkills = nil
 	m.profileDiffs = make(map[string]map[Section]*sectionDiff)
+	m.profileAddValues = make(map[string]profileValues)
 
 	previewSections := ClaudeMDPreviewSections(m.scanResult.ClaudeMDSections, "~/.claude/CLAUDE.md")
 	m.preview = NewPreview(previewSections)
@@ -1265,6 +1280,11 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 
 	// Memory fragments.
 	opts.MemoryIncludes = m.pickers[SectionMemory].SelectedKeys()
+
+	// Preserve existing marketplace sources during config update.
+	if m.editMode && m.existingConfig != nil && len(m.existingConfig.Marketplaces) > 0 {
+		opts.ExtraMarketplaces = m.existingConfig.Marketplaces
+	}
 
 	// Profiles.
 	if m.useProfiles && len(m.profilePickers) > 0 {
@@ -1751,6 +1771,35 @@ func (m *Model) restoreProfiles(cfg *config.Config, existingProfiles map[string]
 
 	for _, name := range names {
 		profile := existingProfiles[name]
+
+		// Store original profile add-section values before they are lost
+		// to scan-based reconstruction.
+		vals := profileValues{}
+		if len(profile.MCP.Add) > 0 {
+			vals.MCP = make(map[string]json.RawMessage, len(profile.MCP.Add))
+			for k, v := range profile.MCP.Add {
+				vals.MCP[k] = v
+			}
+		}
+		if len(profile.Hooks.Add) > 0 {
+			vals.Hooks = make(map[string]json.RawMessage, len(profile.Hooks.Add))
+			for k, v := range profile.Hooks.Add {
+				vals.Hooks[k] = v
+			}
+		}
+		if len(profile.Settings) > 0 {
+			vals.Settings = make(map[string]any, len(profile.Settings))
+			for k, v := range profile.Settings {
+				vals.Settings[k] = v
+			}
+		}
+		if len(profile.Keybindings.Override) > 0 {
+			vals.Keybindings = make(map[string]any, len(profile.Keybindings.Override))
+			for k, v := range profile.Keybindings.Override {
+				vals.Keybindings[k] = v
+			}
+		}
+		m.profileAddValues[name] = vals
 
 		// createProfile initializes empty diffs and rebuilds from base.
 		m.createProfile(name)

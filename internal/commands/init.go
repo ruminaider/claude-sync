@@ -88,6 +88,7 @@ type InitOptions struct {
 	ExtraUpstream     []string                    // config-only upstream plugin keys to preserve
 	ExtraForked       []string                    // config-only forked plugin names to preserve
 	ExtraSettings     map[string]any              // config-only setting values to preserve
+	ExtraMarketplaces map[string]config.MarketplaceSource // config-only marketplace sources to preserve
 }
 
 // Fields from settings.json that should NOT be synced.
@@ -567,11 +568,30 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 			mktIDs[parts[1]] = true
 		}
 	}
+	// Also collect marketplace IDs from profile-add plugins.
+	for _, profile := range opts.Profiles {
+		for _, key := range profile.Plugins.Add {
+			parts := strings.SplitN(key, "@", 2)
+			if len(parts) == 2 {
+				mktIDs[parts[1]] = true
+			}
+		}
+	}
 	var mktIDList []string
 	for id := range mktIDs {
 		mktIDList = append(mktIDList, id)
 	}
 	customMkts := marketplace.CollectCustomMarketplaceSources(claudeDir, mktIDList)
+
+	// Merge config-only marketplace sources that weren't detected locally.
+	for id, src := range opts.ExtraMarketplaces {
+		if customMkts == nil {
+			customMkts = make(map[string]config.MarketplaceSource)
+		}
+		if _, exists := customMkts[id]; !exists {
+			customMkts[id] = src
+		}
+	}
 
 	cfg := config.Config{
 		Version:      "1.0.0",
