@@ -21,6 +21,9 @@ import (
 )
 
 // InitScanResult holds what was found during scanning without writing anything.
+// After construction, MergeExistingConfig may inject additional items from the
+// existing config that were not detected locally. Those items are tracked in
+// ConfigOnly so the TUI can distinguish them.
 type InitScanResult struct {
 	PluginKeys      []string                   // all plugin keys
 	Upstream        []string                   // portable marketplace plugins
@@ -34,6 +37,7 @@ type InitScanResult struct {
 	MCPSecrets      []DetectedSecret           // secrets detected in MCP configs
 	Keybindings     map[string]any             // keybindings found
 	CommandsSkills  *cmdskill.ScanResult
+	ConfigOnly      map[string]bool            // keys injected from existing config, not detected locally
 }
 
 // InitResult describes how plugins were categorized during init.
@@ -73,6 +77,13 @@ type InitOptions struct {
 	Keybindings       map[string]any              // keybindings to include
 	Commands          []string                    // selected command keys to include
 	Skills            []string                    // selected skill keys to include
+	// Extra* fields carry config-only values through sections where
+	// buildAndWriteConfig re-reads from local files. Other sections (hooks,
+	// MCP, permissions, keybindings, CLAUDE.md, commands/skills) pass values
+	// directly through opts and do not need Extra* fields.
+	ExtraUpstream     []string                    // config-only upstream plugin keys to preserve
+	ExtraForked       []string                    // config-only forked plugin names to preserve
+	ExtraSettings     map[string]any              // config-only setting values to preserve
 }
 
 // Fields from settings.json that should NOT be synced.
@@ -432,6 +443,22 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 		}
 	}
 
+	// Preserve config-only upstream plugins that are not currently installed.
+	for _, key := range opts.ExtraUpstream {
+		if !slices.Contains(upstream, key) {
+			upstream = append(upstream, key)
+			result.Upstream = append(result.Upstream, key)
+		}
+	}
+
+	// Preserve config-only forked plugins that are not currently installed.
+	for _, name := range opts.ExtraForked {
+		if !slices.Contains(forkedNames, name) {
+			forkedNames = append(forkedNames, name)
+			result.AutoForked = append(result.AutoForked, name+"@"+forkedplugins.MarketplaceName)
+		}
+	}
+
 	// Always include the bundled claude-sync plugin as forked.
 	if !slices.Contains(forkedNames, bundled.PluginName) {
 		forkedNames = append(forkedNames, bundled.PluginName)
@@ -480,6 +507,20 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 					cfgSettings[k] = v
 					result.IncludedSettings = append(result.IncludedSettings, k)
 				}
+			}
+		}
+		sort.Strings(result.IncludedSettings)
+	}
+
+	// Merge config-only settings that were not detected locally.
+	if len(opts.ExtraSettings) > 0 {
+		if cfgSettings == nil {
+			cfgSettings = make(map[string]any)
+		}
+		for k, v := range opts.ExtraSettings {
+			if _, exists := cfgSettings[k]; !exists {
+				cfgSettings[k] = v
+				result.IncludedSettings = append(result.IncludedSettings, k)
 			}
 		}
 		sort.Strings(result.IncludedSettings)
