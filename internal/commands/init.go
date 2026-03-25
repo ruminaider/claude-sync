@@ -14,6 +14,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/memory"
 	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
@@ -37,6 +38,7 @@ type InitScanResult struct {
 	MCPSecrets      []DetectedSecret           // secrets detected in MCP configs
 	Keybindings     map[string]any             // keybindings found
 	CommandsSkills  *cmdskill.ScanResult
+	MemoryFiles     []string                   // discovered memory fragment names (without .md extension)
 	ConfigOnly      map[string]bool            // keys injected from existing config, not detected locally
 }
 
@@ -56,6 +58,7 @@ type InitResult struct {
 	KeybindingsIncluded bool     // whether keybindings were included
 	CommandsIncluded    int
 	SkillsIncluded      int
+	MemoryImported      int
 }
 
 // InitOptions configures what Init includes in the sync config.
@@ -77,6 +80,7 @@ type InitOptions struct {
 	Keybindings       map[string]any              // keybindings to include
 	Commands          []string                    // selected command keys to include
 	Skills            []string                    // selected skill keys to include
+	MemoryIncludes    []string                    // selected memory fragment names to include
 	// Extra* fields carry config-only values through sections where
 	// buildAndWriteConfig re-reads from local files. Other sections (hooks,
 	// MCP, permissions, keybindings, CLAUDE.md, commands/skills) pass values
@@ -208,6 +212,16 @@ func InitScan(claudeDir string) (*InitScanResult, error) {
 	cs, csErr := cmdskill.ScanAll(claudeDir, nil)
 	if csErr == nil {
 		result.CommandsSkills = cs
+	}
+
+	// Scan memory files
+	memDir := filepath.Join(claudeDir, "memory")
+	if entries, err := os.ReadDir(memDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && !strings.EqualFold(e.Name(), "MEMORY.md") {
+				result.MemoryFiles = append(result.MemoryFiles, strings.TrimSuffix(e.Name(), ".md"))
+			}
+		}
 	}
 
 	return result, nil
@@ -679,6 +693,39 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 						result.SkillsIncluded++
 					}
 				}
+			}
+		}
+	}
+
+	// Import memory files if requested.
+	if len(opts.MemoryIncludes) > 0 {
+		syncMemDir := filepath.Join(syncDir, "memory")
+		sourceMemDir := filepath.Join(claudeDir, "memory")
+		importResult, err := memory.ImportFromDir(sourceMemDir, syncMemDir)
+		if err != nil {
+			return nil, nil, fmt.Errorf("importing memory: %w", err)
+		}
+		// Only include fragments the user selected.
+		selectedSet := make(map[string]bool, len(opts.MemoryIncludes))
+		for _, name := range opts.MemoryIncludes {
+			selectedSet[name] = true
+		}
+		var included []string
+		for _, name := range importResult.Imported {
+			if selectedSet[name] {
+				included = append(included, name)
+			}
+		}
+		if len(included) > 0 {
+			cfg.Memory.Include = included
+			result.MemoryImported = len(included)
+			// Re-write config with updated Memory.Include.
+			cfgData, err = config.Marshal(cfg)
+			if err != nil {
+				return nil, nil, fmt.Errorf("marshaling config with memory: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(syncDir, "config.yaml"), cfgData, 0644); err != nil {
+				return nil, nil, fmt.Errorf("writing config with memory: %w", err)
 			}
 		}
 	}

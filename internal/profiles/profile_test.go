@@ -943,3 +943,34 @@ func TestMarshalProfile_Keybindings(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "clear", parsed.Keybindings.Override["ctrl+k"])
 }
+
+func TestMergeMemory(t *testing.T) {
+	base := []string{"user-prefers-terse", "feedback-no-mocks"}
+	profile := profiles.Profile{
+		Memory: profiles.ProfileMemory{
+			Add:    []string{"feedback-wheel-intake"},
+			Remove: []string{"feedback-no-mocks"},
+		},
+	}
+	result := profiles.MergeMemory(base, profile)
+	assert.Equal(t, []string{"user-prefers-terse", "feedback-wheel-intake"}, result)
+}
+
+func TestProfileMemoryParseAndMarshal(t *testing.T) {
+	yamlInput := `
+memory:
+  add:
+    - feedback-wheel-intake
+  remove:
+    - old-memory
+`
+	p, err := profiles.ParseProfile([]byte(yamlInput))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"feedback-wheel-intake"}, p.Memory.Add)
+	assert.Equal(t, []string{"old-memory"}, p.Memory.Remove)
+
+	data, err := profiles.MarshalProfile(p)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "memory:")
+	assert.Contains(t, string(data), "feedback-wheel-intake")
+}

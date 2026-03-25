@@ -60,13 +60,18 @@ func TestSplit(t *testing.T) {
 		assert.Equal(t, "C", sections[2].Header)
 	})
 
-	t.Run("does not split on ### or ##word", func(t *testing.T) {
+	t.Run("splits on ### within ## but not ##word", func(t *testing.T) {
 		content := "## Real Section\nContent\n### Subsection\nMore\n##notsplit\nEnd"
 		sections := claudemd.Split(content)
-		require.Len(t, sections, 1)
+		require.Len(t, sections, 2)
+
 		assert.Equal(t, "Real Section", sections[0].Header)
-		assert.Contains(t, sections[0].Content, "### Subsection")
-		assert.Contains(t, sections[0].Content, "##notsplit")
+		assert.Equal(t, "## Real Section\nContent", sections[0].Content)
+		assert.Equal(t, "", sections[0].Group)
+
+		assert.Equal(t, "Subsection", sections[1].Header)
+		assert.Equal(t, "### Subsection\nMore\n##notsplit\nEnd", sections[1].Content)
+		assert.Equal(t, "real-section", sections[1].Group)
 	})
 }
 
@@ -268,4 +273,49 @@ func TestContentSimilarity(t *testing.T) {
 	t.Run("both empty", func(t *testing.T) {
 		assert.Equal(t, 1.0, claudemd.ContentSimilarity("", ""))
 	})
+}
+
+func TestSplitWithSubSections(t *testing.T) {
+	content := "## Work Style\n\nIntro text.\n\n### Git Commits\n\nDo NOT include Co-Authored-By.\n\n### Verification\n\nDiff behavior."
+	sections := claudemd.Split(content)
+	require.Len(t, sections, 3)
+
+	assert.Equal(t, "Work Style", sections[0].Header)
+	assert.Equal(t, "## Work Style\n\nIntro text.", sections[0].Content)
+	assert.Equal(t, "", sections[0].Group)
+
+	assert.Equal(t, "Git Commits", sections[1].Header)
+	assert.Equal(t, "### Git Commits\n\nDo NOT include Co-Authored-By.", sections[1].Content)
+	assert.Equal(t, "work-style", sections[1].Group)
+
+	assert.Equal(t, "Verification", sections[2].Header)
+	assert.Equal(t, "### Verification\n\nDiff behavior.", sections[2].Content)
+	assert.Equal(t, "work-style", sections[2].Group)
+}
+
+func TestSplitPreservesExistingBehavior(t *testing.T) {
+	// No ### headers, should work exactly as before
+	content := "## First\nContent A\n## Second\nContent B"
+	sections := claudemd.Split(content)
+	require.Len(t, sections, 2)
+	assert.Equal(t, "", sections[0].Group)
+	assert.Equal(t, "", sections[1].Group)
+}
+
+func TestSplitSubSectionBeforeAnyH2(t *testing.T) {
+	// ### before any ## should be treated as top-level
+	content := "### Orphan Sub\nOrphan content\n## Real Section\nContent"
+	sections := claudemd.Split(content)
+	require.Len(t, sections, 2)
+
+	assert.Equal(t, "Orphan Sub", sections[0].Header)
+	assert.Equal(t, "", sections[0].Group)
+
+	assert.Equal(t, "Real Section", sections[1].Header)
+	assert.Equal(t, "", sections[1].Group)
+}
+
+func TestChildFragmentName(t *testing.T) {
+	assert.Equal(t, "work-style--git-commits",
+		claudemd.ChildFragmentName("work-style", "Git Commits"))
 }

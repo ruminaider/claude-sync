@@ -18,10 +18,15 @@ const claudeMdSubdir = "claude-md"
 type Section struct {
 	Header  string // "" for preamble (content before first ## header)
 	Content string // the full content of the section including the ## header line
+	Group   string // parent fragment name for ### sub-sections; empty for top-level
 }
 
-// Split splits markdown content on "## " headers.
+// Split splits markdown content on "## " and "### " headers.
 // Content before the first "## " becomes a preamble section with empty Header.
+// A "### " header within a "## " section creates a sub-section whose Group is
+// set to HeaderToFragmentName(parentHeader). The parent section's content is
+// truncated at the first "### " boundary.
+// If "### " appears before any "## ", it is treated as top-level (Group = "").
 // Empty/whitespace-only input returns nil.
 func Split(content string) []Section {
 	if strings.TrimSpace(content) == "" {
@@ -32,26 +37,38 @@ func Split(content string) []Section {
 	lines := strings.Split(content, "\n")
 	var current []string
 	currentHeader := ""
+	currentGroup := ""
+	parentHeader := "" // tracks the active ## header for grouping ### sections
 	inPreamble := true
 
+	flush := func() {
+		if len(current) > 0 {
+			sections = append(sections, Section{
+				Header:  currentHeader,
+				Content: strings.TrimRight(strings.Join(current, "\n"), "\n"),
+				Group:   currentGroup,
+			})
+		}
+	}
+
 	for _, line := range lines {
-		if strings.HasPrefix(line, "## ") {
+		if strings.HasPrefix(line, "## ") && !strings.HasPrefix(line, "### ") {
 			// Flush previous section
-			if inPreamble {
-				if len(current) > 0 {
-					sections = append(sections, Section{
-						Header:  "",
-						Content: strings.Join(current, "\n"),
-					})
-				}
-				inPreamble = false
-			} else {
-				sections = append(sections, Section{
-					Header:  currentHeader,
-					Content: strings.Join(current, "\n"),
-				})
-			}
+			flush()
+			inPreamble = false
 			currentHeader = strings.TrimPrefix(line, "## ")
+			parentHeader = currentHeader
+			currentGroup = ""
+			current = []string{line}
+		} else if strings.HasPrefix(line, "### ") {
+			// Flush previous section
+			flush()
+			currentHeader = strings.TrimPrefix(line, "### ")
+			if inPreamble {
+				currentGroup = ""
+			} else {
+				currentGroup = HeaderToFragmentName(parentHeader)
+			}
 			current = []string{line}
 		} else {
 			current = append(current, line)
@@ -59,21 +76,14 @@ func Split(content string) []Section {
 	}
 
 	// Flush last section
-	if len(current) > 0 {
-		if inPreamble {
-			sections = append(sections, Section{
-				Header:  "",
-				Content: strings.Join(current, "\n"),
-			})
-		} else {
-			sections = append(sections, Section{
-				Header:  currentHeader,
-				Content: strings.Join(current, "\n"),
-			})
-		}
-	}
+	flush()
 
 	return sections
+}
+
+// ChildFragmentName creates a fragment name for a ### sub-section.
+func ChildFragmentName(parentName, childHeader string) string {
+	return parentName + "--" + HeaderToFragmentName(childHeader)
 }
 
 // Assemble concatenates sections with a single newline separator between them.
@@ -114,6 +124,7 @@ func ContentHash(content string) string {
 type FragmentMeta struct {
 	Header      string `yaml:"header"`
 	ContentHash string `yaml:"content_hash"`
+	Group       string `yaml:"group,omitempty"`
 }
 
 // Manifest tracks all fragments and their order.
@@ -185,12 +196,18 @@ func ImportClaudeMD(syncDir, content string) (*ImportResult, error) {
 	var names []string
 
 	for _, sec := range sections {
-		name := HeaderToFragmentName(sec.Header)
+		var name string
+		if sec.Group != "" {
+			name = ChildFragmentName(sec.Group, sec.Header)
+		} else {
+			name = HeaderToFragmentName(sec.Header)
+		}
 		names = append(names, name)
 		manifest.Order = append(manifest.Order, name)
 		manifest.Fragments[name] = FragmentMeta{
 			Header:      sec.Header,
 			ContentHash: ContentHash(sec.Content),
+			Group:       sec.Group,
 		}
 		if err := WriteFragment(claudeMdDir, name, sec.Content); err != nil {
 			return nil, err
@@ -217,7 +234,13 @@ func AssembleFromDir(syncDir string, include []string) (string, error) {
 		}
 		// Recover the header from the content to build a proper Section
 		sec := Section{Content: content}
-		if strings.HasPrefix(content, "## ") {
+		if strings.HasPrefix(content, "### ") {
+			if idx := strings.Index(content, "\n"); idx != -1 {
+				sec.Header = strings.TrimPrefix(content[:idx], "### ")
+			} else {
+				sec.Header = strings.TrimPrefix(content, "### ")
+			}
+		} else if strings.HasPrefix(content, "## ") {
 			if idx := strings.Index(content, "\n"); idx != -1 {
 				sec.Header = strings.TrimPrefix(content[:idx], "## ")
 			} else {

@@ -80,17 +80,19 @@ func TestSidebarNavSkipsUnavailable(t *testing.T) {
 
 	// Only Plugins and MCP are available
 	s.UpdateCounts(SectionPlugins, 3, 5)
-	s.UpdateCounts(SectionSettings, 0, 0)    // unavailable
-	s.UpdateCounts(SectionClaudeMD, 0, 0)    // unavailable
-	s.UpdateCounts(SectionPermissions, 0, 0) // unavailable
+	s.UpdateCounts(SectionSettings, 0, 0)        // unavailable
+	s.UpdateCounts(SectionClaudeMD, 0, 0)        // unavailable
+	s.UpdateCounts(SectionMemory, 0, 0)          // unavailable
+	s.UpdateCounts(SectionPermissions, 0, 0)     // unavailable
 	s.UpdateCounts(SectionMCP, 2, 3)
-	s.UpdateCounts(SectionKeybindings, 0, 0) // unavailable
-	s.UpdateCounts(SectionHooks, 0, 0)       // unavailable
+	s.UpdateCounts(SectionCommandsSkills, 0, 0)  // unavailable
+	s.UpdateCounts(SectionKeybindings, 0, 0)     // unavailable
+	s.UpdateCounts(SectionHooks, 0, 0)           // unavailable
 
 	// Start at Plugins
 	assert.Equal(t, SectionPlugins, s.ActiveSection())
 
-	// Navigate down: should skip Settings, ClaudeMD, Permissions and land on MCP
+	// Navigate down: should skip Settings, ClaudeMD, Memory, Permissions and land on MCP
 	s, _ = s.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, SectionMCP, s.ActiveSection())
 

@@ -26,6 +26,7 @@ var (
 	initSkipMCP            bool
 	initSkipKeybindings    bool
 	initSkipCommandsSkills bool
+	initSkipMemory         bool
 )
 
 // capitalize returns the string with its first letter uppercased.
@@ -109,7 +110,8 @@ func runConfigFlow(isUpdate bool, existingConfig *config.Config, existingProfile
 		scan.ClaudeMDContent == "" &&
 		len(scan.MCP) == 0 &&
 		len(scan.Keybindings) == 0 &&
-		(scan.CommandsSkills == nil || len(scan.CommandsSkills.Items) == 0) {
+		(scan.CommandsSkills == nil || len(scan.CommandsSkills.Items) == 0) &&
+		len(scan.MemoryFiles) == 0 {
 		fmt.Println("No Claude Code configuration found to sync.")
 		return nil
 	}
@@ -121,6 +123,7 @@ func runConfigFlow(isUpdate bool, existingConfig *config.Config, existingProfile
 		Hooks:          initSkipHooks,
 		Permissions:    initSkipPermissions,
 		ClaudeMD:       initSkipClaudeMD,
+		Memory:         initSkipMemory,
 		MCP:            initSkipMCP,
 		Keybindings:    initSkipKeybindings,
 		CommandsSkills: initSkipCommandsSkills,
@@ -243,6 +246,7 @@ func registerConfigFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&initSkipMCP, "skip-mcp", false, "Don't include MCP servers in sync config")
 	cmd.Flags().BoolVar(&initSkipKeybindings, "skip-keybindings", false, "Don't include keybindings in sync config")
 	cmd.Flags().BoolVar(&initSkipCommandsSkills, "skip-commands-skills", false, "Don't include commands/skills in sync config")
+	cmd.Flags().BoolVar(&initSkipMemory, "skip-memory", false, "Don't include memory fragments in sync config")
 }
 
 func init() {

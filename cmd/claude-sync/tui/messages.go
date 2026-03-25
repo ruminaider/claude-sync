@@ -17,6 +17,7 @@ const (
 	SectionPlugins        Section = iota
 	SectionSettings               // Claude settings (model, env, etc.)
 	SectionClaudeMD               // CLAUDE.md fragments
+	SectionMemory                 // Memory.md fragments
 	SectionPermissions            // Allow/deny permission rules
 	SectionMCP                    // MCP server configs
 	SectionCommandsSkills         // Commands (.md) and skills (SKILL.md)
@@ -33,6 +34,8 @@ func (s Section) String() string {
 		return "Settings"
 	case SectionClaudeMD:
 		return "CLAUDE.md"
+	case SectionMemory:
+		return "Memory.md"
 	case SectionPermissions:
 		return "Permissions"
 	case SectionMCP:
@@ -53,6 +56,7 @@ var AllSections = []Section{
 	SectionPlugins,
 	SectionSettings,
 	SectionClaudeMD,
+	SectionMemory,
 	SectionPermissions,
 	SectionMCP,
 	SectionCommandsSkills,
