@@ -34,6 +34,7 @@ type InitScanResult struct {
 	MCPSecrets      []DetectedSecret           // secrets detected in MCP configs
 	Keybindings     map[string]any             // keybindings found
 	CommandsSkills  *cmdskill.ScanResult
+	ConfigOnly      map[string]bool            // keys injected from existing config, not detected locally
 }
 
 // InitResult describes how plugins were categorized during init.
