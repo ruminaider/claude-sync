@@ -51,8 +51,16 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 	}
 
 	// Read user preferences for auto-commit mode.
-	prefsData, _ := os.ReadFile(filepath.Join(syncDir, "user-preferences.yaml"))
-	prefs, _ := config.ParseUserPreferences(prefsData)
+	prefsData, err := os.ReadFile(filepath.Join(syncDir, "user-preferences.yaml"))
+	var prefs config.UserPreferences
+	if err == nil {
+		prefs, err = config.ParseUserPreferences(prefsData)
+		if err != nil {
+			return nil, fmt.Errorf("parsing user preferences: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("reading user preferences: %w", err)
+	}
 	claudeMDMode := prefs.Sync.AutoCommit.Mode("claude_md")
 
 	var changes []string
@@ -101,9 +109,12 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 			}
 		}
 		for _, src := range memSources {
+			if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+				continue
+			}
 			reconcileResult, err := memory.Reconcile(src, syncMemDir)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("reconciling memory from %s: %w", src, err)
 			}
 			if len(reconcileResult.Updated) > 0 {
 				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
@@ -113,7 +124,9 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 				names := make([]string, len(reconcileResult.New))
 				for i, f := range reconcileResult.New {
 					names[i] = f.SlugName
-					memory.WriteFragment(syncMemDir, f.SlugName, f.Content)
+					if err := memory.WriteFragment(syncMemDir, f.SlugName, f.Content); err != nil {
+						return nil, fmt.Errorf("writing new memory fragment %s: %w", f.SlugName, err)
+					}
 				}
 				changes = append(changes, "add memory "+strings.Join(names, ", "))
 				stagedFiles = append(stagedFiles, "memory")
@@ -122,7 +135,9 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 				}
 				configChanged = true
 			}
-			break
+			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryMode == "all") {
+				break // Only break when we found actionable changes
+			}
 		}
 	}
 
@@ -257,8 +272,16 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 	effectiveMCP := profiles.MergeMCP(cfg.MCP, profile)
 
 	// Read user preferences for auto-commit mode.
-	prefsData, _ := os.ReadFile(filepath.Join(opts.SyncDir, "user-preferences.yaml"))
-	prefs, _ := config.ParseUserPreferences(prefsData)
+	prefsData, prefsErr := os.ReadFile(filepath.Join(opts.SyncDir, "user-preferences.yaml"))
+	var prefs config.UserPreferences
+	if prefsErr == nil {
+		prefs, prefsErr = config.ParseUserPreferences(prefsData)
+		if prefsErr != nil {
+			return nil, fmt.Errorf("parsing user preferences: %w", prefsErr)
+		}
+	} else if !os.IsNotExist(prefsErr) {
+		return nil, fmt.Errorf("reading user preferences: %w", prefsErr)
+	}
 	claudeMDMode := prefs.Sync.AutoCommit.Mode("claude_md")
 
 	var changes []string
@@ -307,9 +330,12 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 			}
 		}
 		for _, src := range memSources {
+			if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+				continue
+			}
 			reconcileResult, err := memory.Reconcile(src, syncMemDir)
 			if err != nil {
-				continue
+				return nil, fmt.Errorf("reconciling memory from %s: %w", src, err)
 			}
 			if len(reconcileResult.Updated) > 0 {
 				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
@@ -319,7 +345,9 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 				names := make([]string, len(reconcileResult.New))
 				for i, f := range reconcileResult.New {
 					names[i] = f.SlugName
-					memory.WriteFragment(syncMemDir, f.SlugName, f.Content)
+					if err := memory.WriteFragment(syncMemDir, f.SlugName, f.Content); err != nil {
+						return nil, fmt.Errorf("writing new memory fragment %s: %w", f.SlugName, err)
+					}
 				}
 				changes = append(changes, "add memory "+strings.Join(names, ", "))
 				stagedFiles = append(stagedFiles, "memory")
@@ -328,7 +356,9 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 				}
 				configChanged = true
 			}
-			break
+			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryModeCtx == "all") {
+				break // Only break when we found actionable changes
+			}
 		}
 	}
 
