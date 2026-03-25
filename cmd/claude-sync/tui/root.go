@@ -14,6 +14,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 )
 
@@ -151,8 +152,31 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 	}
 	m.pickers[SectionCommandsSkills] = csPicker
 
+	// Tag config-only items so they render with [config] indicator.
+	if scan.ConfigOnly != nil {
+		for sec := range m.pickers {
+			p := m.pickers[sec]
+			for i, it := range p.items {
+				if scan.ConfigOnly[it.Key] {
+					p.items[i].Tag = "[config]"
+				}
+			}
+			m.pickers[sec] = p
+		}
+	}
+
 	// Build CLAUDE.md preview.
 	previewSections := ClaudeMDPreviewSections(scan.ClaudeMDSections, "~/.claude/CLAUDE.md")
+
+	// Tag config-only CLAUDE.md fragments.
+	if scan.ConfigOnly != nil {
+		for i, sec := range previewSections {
+			if scan.ConfigOnly["fragment:"+sec.FragmentKey] {
+				previewSections[i].Header = sec.Header + " [config]"
+			}
+		}
+	}
+
 	m.preview = NewPreview(previewSections)
 	m.preview.searching = true
 
@@ -1090,6 +1114,20 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 		}
 	}
 
+	// Populate ExtraUpstream and ExtraForked for config-only plugins.
+	if m.scanResult.ConfigOnly != nil {
+		for _, key := range pluginKeys {
+			if m.scanResult.ConfigOnly[key] {
+				if strings.HasSuffix(key, "@"+plugins.MarketplaceName) {
+					name := strings.TrimSuffix(key, "@"+plugins.MarketplaceName)
+					opts.ExtraForked = append(opts.ExtraForked, name)
+				} else {
+					opts.ExtraUpstream = append(opts.ExtraUpstream, key)
+				}
+			}
+		}
+	}
+
 	// Settings: IncludeSettings + SettingsFilter.
 	settingsKeys := m.pickers[SectionSettings].SelectedKeys()
 	if len(settingsKeys) > 0 {
@@ -1099,6 +1137,18 @@ func (m Model) buildInitOptions() *commands.InitOptions {
 			opts.SettingsFilter = nil // nil = all
 		} else {
 			opts.SettingsFilter = settingsKeys
+		}
+	}
+
+	// Populate ExtraSettings for config-only settings.
+	if m.scanResult.ConfigOnly != nil {
+		for _, key := range settingsKeys {
+			if m.scanResult.ConfigOnly[key] {
+				if opts.ExtraSettings == nil {
+					opts.ExtraSettings = make(map[string]any)
+				}
+				opts.ExtraSettings[key] = m.scanResult.Settings[key]
+			}
 		}
 	}
 
