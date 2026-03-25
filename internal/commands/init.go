@@ -516,6 +516,7 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 				result.IncludedSettings = append(result.IncludedSettings, k)
 			}
 		}
+		sort.Strings(result.IncludedSettings)
 	}
 
 	// Apply hooks filter.

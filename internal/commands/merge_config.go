@@ -196,7 +196,9 @@ func mergeClaudeMDFragments(scan *InitScanResult, cfg *config.Config, syncDir st
 // missing from the scan. It reads content from the sync dir when available,
 // falling back to a placeholder when the file doesn't exist locally.
 func mergeCommandsSkills(scan *InitScanResult, cfg *config.Config, syncDir string) {
-	allKeys := append(cfg.Commands, cfg.Skills...)
+	allKeys := make([]string, 0, len(cfg.Commands)+len(cfg.Skills))
+	allKeys = append(allKeys, cfg.Commands...)
+	allKeys = append(allKeys, cfg.Skills...)
 	if len(allKeys) == 0 {
 		return
 	}
