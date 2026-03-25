@@ -46,7 +46,10 @@ func WriteManifest(dir string, m Manifest) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create dir %s: %w", dir, err)
 	}
-	return os.WriteFile(filepath.Join(dir, manifestFile), data, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, manifestFile), data, 0o644); err != nil {
+		return fmt.Errorf("writing manifest to %s: %w", dir, err)
+	}
+	return nil
 }
 
 // ReadManifest reads the manifest from dir/manifest.yaml.
@@ -74,14 +77,17 @@ func WriteFragment(dir, name, content string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create dir %s: %w", dir, err)
 	}
-	return os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0o644); err != nil {
+		return fmt.Errorf("writing fragment %s to %s: %w", name, dir, err)
+	}
+	return nil
 }
 
 // ReadFragment reads content from dir/name.md.
 func ReadFragment(dir, name string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(dir, name+".md"))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading fragment %s in %s: %w", name, dir, err)
 	}
 	return string(data), nil
 }
@@ -301,12 +307,19 @@ func RegenerateIndex(dir string) error {
 }
 
 var nonAlphanumHyphen = regexp.MustCompile(`[^a-z0-9-]`)
+var multiHyphen = regexp.MustCompile(`-{2,}`)
 
 // SlugifyName lowercases the input, replaces spaces with hyphens,
-// and removes non-alphanumeric-hyphen characters.
+// removes non-alphanumeric-hyphen characters, and collapses multiple hyphens.
+// Returns "unnamed" if the result would be empty.
 func SlugifyName(name string) string {
-	s := strings.ToLower(name)
+	s := strings.ToLower(strings.TrimSpace(name))
 	s = strings.ReplaceAll(s, " ", "-")
 	s = nonAlphanumHyphen.ReplaceAllString(s, "")
+	s = multiHyphen.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return "unnamed"
+	}
 	return s
 }

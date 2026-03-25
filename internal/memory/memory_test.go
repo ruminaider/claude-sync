@@ -141,7 +141,11 @@ func TestSlugifyName(t *testing.T) {
 		{"already-slugified", "already-slugified"},
 		{"UPPER CASE", "upper-case"},
 		{"special@chars#here", "specialcharshere"},
-		{"multiple   spaces", "multiple---spaces"},
+		{"multiple   spaces", "multiple-spaces"},
+		{"@@@", "unnamed"},
+		{"", "unnamed"},
+		{"  leading and trailing  ", "leading-and-trailing"},
+		{"---dashes---", "dashes"},
 	}
 
 	for _, tt := range tests {

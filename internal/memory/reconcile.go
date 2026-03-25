@@ -89,6 +89,9 @@ func Reconcile(sourceDir, syncMemDir string) (*ReconcileResult, error) {
 			if err := WriteFragment(syncMemDir, slug, local.content); err != nil {
 				return nil, fmt.Errorf("write updated fragment %s: %w", slug, err)
 			}
+			// Update the manifest entry with the new hash
+			meta.ContentHash = ContentHash(local.content)
+			manifest.Fragments[slug] = meta
 		}
 	}
 
@@ -100,6 +103,13 @@ func Reconcile(sourceDir, syncMemDir string) (*ReconcileResult, error) {
 				FilePath: local.filePath,
 				Content:  local.content,
 			})
+		}
+	}
+
+	// Persist updated manifest so content hashes stay current
+	if len(result.Updated) > 0 {
+		if err := WriteManifest(syncMemDir, manifest); err != nil {
+			return nil, fmt.Errorf("writing updated manifest: %w", err)
 		}
 	}
 

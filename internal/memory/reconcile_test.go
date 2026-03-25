@@ -136,4 +136,13 @@ func TestReconcile(t *testing.T) {
 	got, err := memory.ReadFragment(syncMemDir, "coding-style")
 	require.NoError(t, err)
 	assert.Equal(t, updatedContent, got)
+
+	// Verify manifest was updated with new content hash
+	updatedManifest, err := memory.ReadManifest(syncMemDir)
+	require.NoError(t, err)
+	assert.Equal(t, memory.ContentHash(updatedContent), updatedManifest.Fragments["coding-style"].ContentHash,
+		"manifest should have updated content hash after reconcile")
+	// Unchanged fragment should retain original hash
+	assert.Equal(t, memory.ContentHash(unchangedContent), updatedManifest.Fragments["project-notes"].ContentHash,
+		"unchanged fragment hash should remain the same")
 }
