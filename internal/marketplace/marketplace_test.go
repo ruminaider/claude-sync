@@ -1421,6 +1421,54 @@ func TestAutoRegisterFromPlugins_DirectoryEntryFormat(t *testing.T) {
 
 // ─── QueryRemoteVersion (skipped by default — requires network) ────────────
 
+func TestValidateMarketplaceSource_ValidGithub(t *testing.T) {
+	err := marketplace.ValidateMarketplaceSource("my-mkt", config.MarketplaceSource{
+		Source: "github",
+		Repo:   "myorg/my-repo",
+	})
+	assert.NoError(t, err)
+}
+
+func TestValidateMarketplaceSource_ValidGit(t *testing.T) {
+	err := marketplace.ValidateMarketplaceSource("my-mkt", config.MarketplaceSource{
+		Source: "git",
+		URL:    "https://example.com/repo.git",
+	})
+	assert.NoError(t, err)
+}
+
+func TestValidateMarketplaceSource_InvalidSource(t *testing.T) {
+	err := marketplace.ValidateMarketplaceSource("bad-mkt", config.MarketplaceSource{
+		Source: "ftp",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown source type")
+	assert.Contains(t, err.Error(), "ftp")
+}
+
+func TestValidateMarketplaceSource_InvalidRepoFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		repo string
+	}{
+		{"empty", ""},
+		{"no slash", "myrepo"},
+		{"too many slashes", "org/repo/extra"},
+		{"empty owner", "/repo"},
+		{"empty repo name", "org/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := marketplace.ValidateMarketplaceSource("bad-mkt", config.MarketplaceSource{
+				Source: "github",
+				Repo:   tt.repo,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid github repo format")
+		})
+	}
+}
+
 func TestQueryRemoteVersion_InvalidURL(t *testing.T) {
 	// Verify that an invalid URL produces a clear error.
 	_, err := marketplace.QueryRemoteVersion("https://invalid.example.com/no-such-repo.git", "test-plugin")

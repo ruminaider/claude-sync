@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/config"
 	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 )
 
 // ConfigOnly key prefixes. Each section namespaces its keys to prevent
@@ -24,6 +26,7 @@ const (
 	configOnlyHookPrefix       = "hook:"
 	configOnlyMCPPrefix        = "mcp:"
 	configOnlyKeybindingPrefix = "keybinding:"
+	configOnlyMemoryPrefix     = "memory:"
 )
 
 // ConfigOnlySectionPrefix maps TUI section identifiers to their ConfigOnly
@@ -37,6 +40,65 @@ var ConfigOnlySectionPrefix = map[string]string{
 	"mcp":             configOnlyMCPPrefix,
 	"keybindings":     configOnlyKeybindingPrefix,
 	"commands_skills": "",
+	"memory":          configOnlyMemoryPrefix,
+}
+
+// MergeExisting injects config-only items from the base config and profile-add
+// sections into the scan, so they appear in TUI pickers with [config] tags.
+// Base config items are processed first, then profile-add items. This ordering
+// ensures profile dedup checks see base items that were already injected.
+func MergeExisting(scan *InitScanResult, cfg *config.Config, existingProfiles map[string]profiles.Profile, syncDir string) {
+	if scan.ConfigOnly == nil {
+		scan.ConfigOnly = make(map[string]bool)
+	}
+
+	// Phase 1: Base config items.
+	if cfg != nil {
+		mergeUpstreamPlugins(scan, cfg.Upstream)
+		mergeForkedPlugins(scan, cfg.Forked)
+		mergeSettings(scan, cfg.Settings)
+		mergeHooks(scan, cfg.Hooks)
+		mergePermissions(scan, cfg.Permissions.Allow, cfg.Permissions.Deny)
+		mergeMCP(scan, cfg.MCP)
+		mergeKeybindings(scan, cfg.Keybindings)
+		mergeClaudeMDFragments(scan, cfg.ClaudeMD.Include, syncDir)
+		mergeCommandsSkills(scan, cfg.Commands, cfg.Skills, syncDir)
+		mergeMemory(scan, cfg.Memory.Include)
+	}
+
+	// Phase 2: Profile-add items. Sort profile names for deterministic output
+	// when two profiles add the same key with different values.
+	profileNames := make([]string, 0, len(existingProfiles))
+	for name := range existingProfiles {
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+	for _, pname := range profileNames {
+		profile := existingProfiles[pname]
+		// Route profile plugins to upstream or forked based on marketplace suffix.
+		var upstreamKeys, forkedKeys []string
+		for _, key := range profile.Plugins.Add {
+			name, mkt := splitPluginKey(key)
+			if mkt == forkedplugins.MarketplaceName {
+				// Forked plugins store the bare name (without marketplace suffix)
+				// in the config. mergeForkedPlugins re-appends the suffix.
+				forkedKeys = append(forkedKeys, name)
+			} else {
+				upstreamKeys = append(upstreamKeys, key)
+			}
+		}
+		mergeUpstreamPlugins(scan, upstreamKeys)
+		mergeForkedPlugins(scan, forkedKeys)
+
+		mergeSettings(scan, profile.Settings)
+		mergeHooks(scan, profile.Hooks.Add)
+		mergePermissions(scan, profile.Permissions.AddAllow, profile.Permissions.AddDeny)
+		mergeMCP(scan, profile.MCP.Add)
+		mergeKeybindings(scan, profile.Keybindings.Override)
+		mergeClaudeMDFragments(scan, profile.ClaudeMD.Add, syncDir)
+		mergeCommandsSkills(scan, profile.Commands.Add, profile.Skills.Add, syncDir)
+		mergeMemory(scan, profile.Memory.Add)
+	}
 }
 
 // MergeExistingConfig injects items from an existing config into the scan
@@ -46,24 +108,15 @@ var ConfigOnlySectionPrefix = map[string]string{
 //
 // Each injected item is tracked in scan.ConfigOnly so the TUI can label it.
 // Keys are prefixed by section to prevent cross-section collisions.
+//
+// Deprecated: Use MergeExisting instead. This delegates to MergeExisting
+// with nil profiles for backward compatibility.
 func MergeExistingConfig(scan *InitScanResult, cfg *config.Config, syncDir string) {
-	if scan.ConfigOnly == nil {
-		scan.ConfigOnly = make(map[string]bool)
-	}
-
-	mergeUpstreamPlugins(scan, cfg)
-	mergeForkedPlugins(scan, cfg)
-	mergeSettings(scan, cfg)
-	mergeHooks(scan, cfg)
-	mergePermissions(scan, cfg)
-	mergeMCP(scan, cfg)
-	mergeKeybindings(scan, cfg)
-	mergeClaudeMDFragments(scan, cfg, syncDir)
-	mergeCommandsSkills(scan, cfg, syncDir)
+	MergeExisting(scan, cfg, nil, syncDir)
 }
 
-func mergeUpstreamPlugins(scan *InitScanResult, cfg *config.Config) {
-	for _, key := range cfg.Upstream {
+func mergeUpstreamPlugins(scan *InitScanResult, keys []string) {
+	for _, key := range keys {
 		if slices.Contains(scan.PluginKeys, key) {
 			continue
 		}
@@ -73,8 +126,8 @@ func mergeUpstreamPlugins(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-func mergeForkedPlugins(scan *InitScanResult, cfg *config.Config) {
-	for _, name := range cfg.Forked {
+func mergeForkedPlugins(scan *InitScanResult, names []string) {
+	for _, name := range names {
 		key := name + "@" + forkedplugins.MarketplaceName
 		if slices.Contains(scan.PluginKeys, key) {
 			continue
@@ -85,14 +138,14 @@ func mergeForkedPlugins(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-func mergeSettings(scan *InitScanResult, cfg *config.Config) {
-	if len(cfg.Settings) == 0 {
+func mergeSettings(scan *InitScanResult, settings map[string]any) {
+	if len(settings) == 0 {
 		return
 	}
 	if scan.Settings == nil {
 		scan.Settings = make(map[string]any)
 	}
-	for k, v := range cfg.Settings {
+	for k, v := range settings {
 		if _, exists := scan.Settings[k]; exists {
 			continue
 		}
@@ -101,14 +154,14 @@ func mergeSettings(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-func mergeHooks(scan *InitScanResult, cfg *config.Config) {
-	if len(cfg.Hooks) == 0 {
+func mergeHooks(scan *InitScanResult, hooks map[string]json.RawMessage) {
+	if len(hooks) == 0 {
 		return
 	}
 	if scan.Hooks == nil {
 		scan.Hooks = make(map[string]json.RawMessage)
 	}
-	for k, v := range cfg.Hooks {
+	for k, v := range hooks {
 		if _, exists := scan.Hooks[k]; exists {
 			continue
 		}
@@ -117,18 +170,18 @@ func mergeHooks(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-// mergePermissions injects allow/deny rules from cfg that are missing from
-// the scan. Keys in ConfigOnly use "allow:"+rule and "deny:"+rule prefixes
-// to match the TUI picker convention.
-func mergePermissions(scan *InitScanResult, cfg *config.Config) {
-	for _, rule := range cfg.Permissions.Allow {
+// mergePermissions injects allow/deny rules that are missing from the scan.
+// Keys in ConfigOnly use "allow:"+rule and "deny:"+rule prefixes to match
+// the TUI picker convention.
+func mergePermissions(scan *InitScanResult, allow []string, deny []string) {
+	for _, rule := range allow {
 		if slices.Contains(scan.Permissions.Allow, rule) {
 			continue
 		}
 		scan.Permissions.Allow = append(scan.Permissions.Allow, rule)
 		scan.ConfigOnly["allow:"+rule] = true
 	}
-	for _, rule := range cfg.Permissions.Deny {
+	for _, rule := range deny {
 		if slices.Contains(scan.Permissions.Deny, rule) {
 			continue
 		}
@@ -137,14 +190,14 @@ func mergePermissions(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-func mergeMCP(scan *InitScanResult, cfg *config.Config) {
-	if len(cfg.MCP) == 0 {
+func mergeMCP(scan *InitScanResult, mcp map[string]json.RawMessage) {
+	if len(mcp) == 0 {
 		return
 	}
 	if scan.MCP == nil {
 		scan.MCP = make(map[string]json.RawMessage)
 	}
-	for k, v := range cfg.MCP {
+	for k, v := range mcp {
 		if _, exists := scan.MCP[k]; exists {
 			continue
 		}
@@ -153,14 +206,14 @@ func mergeMCP(scan *InitScanResult, cfg *config.Config) {
 	}
 }
 
-func mergeKeybindings(scan *InitScanResult, cfg *config.Config) {
-	if len(cfg.Keybindings) == 0 {
+func mergeKeybindings(scan *InitScanResult, keybindings map[string]any) {
+	if len(keybindings) == 0 {
 		return
 	}
 	if scan.Keybindings == nil {
 		scan.Keybindings = make(map[string]any)
 	}
-	for k, v := range cfg.Keybindings {
+	for k, v := range keybindings {
 		if _, exists := scan.Keybindings[k]; exists {
 			continue
 		}
@@ -170,10 +223,10 @@ func mergeKeybindings(scan *InitScanResult, cfg *config.Config) {
 }
 
 // mergeClaudeMDFragments injects CLAUDE.md fragment sections from the sync
-// dir's claude-md/ directory when the config references fragments not present
-// in the scan. Uses "fragment:" prefix for ConfigOnly keys to avoid collisions.
-func mergeClaudeMDFragments(scan *InitScanResult, cfg *config.Config, syncDir string) {
-	if len(cfg.ClaudeMD.Include) == 0 {
+// dir's claude-md/ directory when the given fragments are not present in the
+// scan. Uses "fragment:" prefix for ConfigOnly keys to avoid collisions.
+func mergeClaudeMDFragments(scan *InitScanResult, fragments []string, syncDir string) {
+	if len(fragments) == 0 {
 		return
 	}
 
@@ -186,7 +239,7 @@ func mergeClaudeMDFragments(scan *InitScanResult, cfg *config.Config, syncDir st
 
 	claudeMdDir := filepath.Join(syncDir, "claude-md")
 
-	for _, fragKey := range cfg.ClaudeMD.Include {
+	for _, fragKey := range fragments {
 		if existing[fragKey] {
 			continue
 		}
@@ -210,13 +263,13 @@ func mergeClaudeMDFragments(scan *InitScanResult, cfg *config.Config, syncDir st
 	}
 }
 
-// mergeCommandsSkills injects commands and skills from the config that are
-// missing from the scan. It reads content from the sync dir when available,
-// falling back to a placeholder when the file doesn't exist locally.
-func mergeCommandsSkills(scan *InitScanResult, cfg *config.Config, syncDir string) {
-	allKeys := make([]string, 0, len(cfg.Commands)+len(cfg.Skills))
-	allKeys = append(allKeys, cfg.Commands...)
-	allKeys = append(allKeys, cfg.Skills...)
+// mergeCommandsSkills injects commands and skills that are missing from the
+// scan. It reads content from the sync dir when available, falling back to a
+// placeholder when the file doesn't exist locally.
+func mergeCommandsSkills(scan *InitScanResult, commands []string, skills []string, syncDir string) {
+	allKeys := make([]string, 0, len(commands)+len(skills))
+	allKeys = append(allKeys, commands...)
+	allKeys = append(allKeys, skills...)
 	if len(allKeys) == 0 {
 		return
 	}
@@ -276,5 +329,16 @@ func mergeCommandsSkills(scan *InitScanResult, cfg *config.Config, syncDir strin
 
 		scan.ConfigOnly[key] = true
 		existing[key] = true
+	}
+}
+
+// mergeMemory injects memory fragment names that are missing from the scan.
+func mergeMemory(scan *InitScanResult, memoryFiles []string) {
+	for _, name := range memoryFiles {
+		if slices.Contains(scan.MemoryFiles, name) {
+			continue
+		}
+		scan.MemoryFiles = append(scan.MemoryFiles, name)
+		scan.ConfigOnly[configOnlyMemoryPrefix+name] = true
 	}
 }
