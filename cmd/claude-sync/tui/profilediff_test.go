@@ -623,6 +623,216 @@ func TestDiffsToProfile_NewMCPServerNotSpuriouslyRemoved(t *testing.T) {
 		"new MCP server added to base should NOT appear as a profile removal")
 }
 
+func TestDiffsToProfile_PrefersMCPProfileValue(t *testing.T) {
+	// When a profile has a stored MCP value that differs from scan,
+	// diffsToProfile should use the profile value.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		MCP: map[string]json.RawMessage{
+			"myserver": json.RawMessage(`{"command":"docker","args":["run","myserver"]}`),
+		},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Store a different profile value for the same MCP key.
+	profileMCP := json.RawMessage(`{"command":"uvx","args":["myserver"]}`)
+	m.profileAddValues["work"] = profileValues{
+		MCP: map[string]json.RawMessage{"myserver": profileMCP},
+	}
+
+	m.createProfile("work")
+
+	// Deselect MCP from base so it becomes a profile-only add.
+	baseMCP := m.pickers[SectionMCP]
+	for i := range baseMCP.items {
+		if baseMCP.items[i].Key == "myserver" {
+			baseMCP.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionMCP] = baseMCP
+
+	prof := m.diffsToProfile("work")
+
+	require.Contains(t, prof.MCP.Add, "myserver")
+	// Should use the profile value (uvx), not the scan value (docker).
+	assert.Contains(t, string(prof.MCP.Add["myserver"]), "uvx")
+	assert.NotContains(t, string(prof.MCP.Add["myserver"]), "docker")
+}
+
+func TestDiffsToProfile_PrefersHooksProfileValue(t *testing.T) {
+	// When a profile has a stored hook value that differs from scan,
+	// diffsToProfile should use the profile value.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		Hooks: map[string]json.RawMessage{
+			"PreToolUse": json.RawMessage(`[{"hooks":[{"command":"lint-v2"}]}]`),
+		},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	profileHook := json.RawMessage(`[{"hooks":[{"command":"lint-v1"}]}]`)
+	m.profileAddValues["work"] = profileValues{
+		Hooks: map[string]json.RawMessage{"PreToolUse": profileHook},
+	}
+
+	m.createProfile("work")
+
+	// Deselect hook from base so it becomes a profile-only add.
+	baseHooks := m.pickers[SectionHooks]
+	for i := range baseHooks.items {
+		if baseHooks.items[i].Key == "PreToolUse" {
+			baseHooks.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionHooks] = baseHooks
+
+	prof := m.diffsToProfile("work")
+
+	require.Contains(t, prof.Hooks.Add, "PreToolUse")
+	assert.Contains(t, string(prof.Hooks.Add["PreToolUse"]), "lint-v1")
+	assert.NotContains(t, string(prof.Hooks.Add["PreToolUse"]), "lint-v2")
+}
+
+func TestDiffsToProfile_PrefersSettingsProfileValue(t *testing.T) {
+	// When a profile has a stored setting value that differs from scan,
+	// diffsToProfile should use the profile value.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		Settings: map[string]any{"model": "opus"},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	m.profileAddValues["work"] = profileValues{
+		Settings: map[string]any{"model": "sonnet"},
+	}
+
+	m.createProfile("work")
+
+	// Deselect setting from base so it becomes a profile-only add.
+	baseSettings := m.pickers[SectionSettings]
+	for i := range baseSettings.items {
+		if baseSettings.items[i].Key == "model" {
+			baseSettings.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionSettings] = baseSettings
+
+	prof := m.diffsToProfile("work")
+
+	require.Contains(t, prof.Settings, "model")
+	assert.Equal(t, "sonnet", prof.Settings["model"])
+}
+
+func TestDiffsToProfile_PrefersKeybindingsProfileValue(t *testing.T) {
+	// When a profile has stored keybinding values that differ from scan,
+	// diffsToProfile should use the profile values.
+	scan := &commands.InitScanResult{
+		Upstream:    []string{"a@m"},
+		Keybindings: map[string]any{"ctrl+s": "save-scan"},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	m.profileAddValues["work"] = profileValues{
+		Keybindings: map[string]any{"ctrl+s": "save-profile"},
+	}
+
+	m.createProfile("work")
+
+	// Deselect keybindings from base so profile becomes an add.
+	baseKB := m.pickers[SectionKeybindings]
+	for i := range baseKB.items {
+		if baseKB.items[i].Key == "keybindings" {
+			baseKB.items[i].Selected = false
+		}
+	}
+	m.pickers[SectionKeybindings] = baseKB
+
+	prof := m.diffsToProfile("work")
+
+	require.NotEmpty(t, prof.Keybindings.Override)
+	assert.Equal(t, "save-profile", prof.Keybindings.Override["ctrl+s"])
+}
+
+func TestDiffsToProfile_FallsBackToScanValue(t *testing.T) {
+	// When a key is not in profileAddValues, diffsToProfile should use the
+	// scan value as before.
+	scan := &commands.InitScanResult{
+		Upstream: []string{"a@m"},
+		Settings: map[string]any{"model": "opus"},
+		MCP:      map[string]json.RawMessage{"server1": json.RawMessage(`{"url":"http://s1"}`)},
+		Hooks:    map[string]json.RawMessage{"PreToolUse": json.RawMessage(`[{"hooks":[{"command":"lint"}]}]`)},
+	}
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// No profileAddValues set for "work" (empty map from init).
+
+	m.createProfile("work")
+
+	// Deselect everything from base so they become profile-only adds.
+	for _, sec := range []Section{SectionSettings, SectionMCP, SectionHooks} {
+		p := m.pickers[sec]
+		for i := range p.items {
+			if isSelectableItem(p.items[i]) {
+				p.items[i].Selected = false
+			}
+		}
+		m.pickers[sec] = p
+	}
+
+	prof := m.diffsToProfile("work")
+
+	// Settings should fall back to scan value.
+	require.Contains(t, prof.Settings, "model")
+	assert.Equal(t, "opus", prof.Settings["model"])
+
+	// MCP should fall back to scan value.
+	require.Contains(t, prof.MCP.Add, "server1")
+	assert.Contains(t, string(prof.MCP.Add["server1"]), "http://s1")
+
+	// Hooks should fall back to scan value.
+	require.Contains(t, prof.Hooks.Add, "PreToolUse")
+	assert.Contains(t, string(prof.Hooks.Add["PreToolUse"]), "lint")
+}
+
+func TestProfileAddValues_ResetOnRebuildAll(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	m.ready = true
+	m.width = 80
+	m.height = 30
+	m.distributeSize()
+
+	// Populate profileAddValues.
+	m.profileAddValues["work"] = profileValues{
+		Settings: map[string]any{"model": "sonnet"},
+	}
+	require.NotEmpty(t, m.profileAddValues)
+
+	// Reset clears profileAddValues.
+	m.resetToDefaults()
+	assert.Empty(t, m.profileAddValues)
+}
+
 func TestBuildInitOptions_NoSpuriousRemovesEndToEnd(t *testing.T) {
 	// End-to-end test through the production call chain:
 	// syncProfilesBeforeSave -> buildInitOptions -> buildProfiles -> diffsToProfile.

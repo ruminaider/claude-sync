@@ -738,6 +738,24 @@ func registerDirectoryMarketplaces(claudeDir string, entries []dirEntry) ([]stri
 	return registered, nil
 }
 
+// ValidateMarketplaceSource checks that a marketplace source declaration has a
+// known source type and, for github sources, a valid owner/repo format.
+func ValidateMarketplaceSource(id string, src config.MarketplaceSource) error {
+	switch src.Source {
+	case "github", "git":
+		// valid source types
+	default:
+		return fmt.Errorf("marketplace %q has unknown source type %q", id, src.Source)
+	}
+	if src.Source == "github" {
+		parts := strings.SplitN(src.Repo, "/", 3)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("marketplace %q has invalid github repo format %q (expected owner/repo)", id, src.Repo)
+		}
+	}
+	return nil
+}
+
 // EnsureRegistered checks if each declared marketplace exists in
 // known_marketplaces.json. If missing, registers it as a GitHub or git source.
 // Skips marketplaces that are already registered (idempotent).
@@ -762,6 +780,9 @@ func EnsureRegistered(claudeDir string, declared map[string]config.MarketplaceSo
 	}
 
 	for name, src := range declared {
+		if err := ValidateMarketplaceSource(name, src); err != nil {
+			return err
+		}
 		dest := filepath.Join(claudeDir, "plugins", "marketplaces", name)
 
 		if raw, exists := mkts[name]; exists {

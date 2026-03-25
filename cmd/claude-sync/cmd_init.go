@@ -97,8 +97,8 @@ func runConfigFlow(isUpdate bool, existingConfig *config.Config, existingProfile
 
 	// In update mode, inject config-only items into scan results so the TUI
 	// can display them and the user can choose to keep or remove them.
-	if isUpdate && existingConfig != nil {
-		commands.MergeExistingConfig(scan, existingConfig, syncDir)
+	if isUpdate {
+		commands.MergeExisting(scan, existingConfig, existingProfiles, syncDir)
 	}
 
 	// Check if anything was found.
