@@ -384,6 +384,7 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	p := profiles.Profile{}
 
 	pm := m.profilePickers[name]
+	pvals, hasPvals := m.profileAddValues[name]
 
 	// Plugins
 	basePlugins := m.pickers[SectionPlugins].SelectedKeys()
@@ -399,8 +400,8 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	if len(settingsDiff.adds) > 0 {
 		p.Settings = make(map[string]any)
 		for k := range settingsDiff.adds {
-			if vals, ok := m.profileAddValues[name]; ok {
-				if v, ok := vals.Settings[k]; ok {
+			if hasPvals {
+				if v, ok := pvals.Settings[k]; ok {
 					p.Settings[k] = v
 					continue
 				}
@@ -438,8 +439,8 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	mcpDiff := computeSectionDiff(baseMCP, profMCP)
 	mcpAdd := make(map[string]json.RawMessage)
 	for k := range mcpDiff.adds {
-		if vals, ok := m.profileAddValues[name]; ok {
-			if raw, ok := vals.MCP[k]; ok {
+		if hasPvals {
+			if raw, ok := pvals.MCP[k]; ok {
 				mcpAdd[k] = raw
 				continue
 			}
@@ -469,8 +470,8 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	hooksDiff := computeSectionDiff(baseHooks, profHooks)
 	hookAdd := make(map[string]json.RawMessage)
 	for k := range hooksDiff.adds {
-		if vals, ok := m.profileAddValues[name]; ok {
-			if raw, ok := vals.Hooks[k]; ok {
+		if hasPvals {
+			if raw, ok := pvals.Hooks[k]; ok {
 				hookAdd[k] = raw
 				continue
 			}
@@ -490,8 +491,8 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	if !setsEqual(toSet(baseKB), toSet(profKB)) {
 		if len(profKB) > 0 {
 			override := m.scanResult.Keybindings
-			if vals, ok := m.profileAddValues[name]; ok && len(vals.Keybindings) > 0 {
-				override = vals.Keybindings
+			if hasPvals && len(pvals.Keybindings) > 0 {
+				override = pvals.Keybindings
 			}
 			p.Keybindings = profiles.ProfileKeybindings{
 				Override: override,

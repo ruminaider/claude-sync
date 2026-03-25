@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/claudemd"
@@ -65,16 +66,23 @@ func MergeExisting(scan *InitScanResult, cfg *config.Config, existingProfiles ma
 		mergeMemory(scan, cfg.Memory.Include)
 	}
 
-	// Phase 2: Profile-add items.
-	for _, profile := range existingProfiles {
+	// Phase 2: Profile-add items. Sort profile names for deterministic output
+	// when two profiles add the same key with different values.
+	profileNames := make([]string, 0, len(existingProfiles))
+	for name := range existingProfiles {
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+	for _, pname := range profileNames {
+		profile := existingProfiles[pname]
 		// Route profile plugins to upstream or forked based on marketplace suffix.
 		var upstreamKeys, forkedKeys []string
 		for _, key := range profile.Plugins.Add {
-			parts := strings.SplitN(key, "@", 2)
-			if len(parts) == 2 && parts[1] == forkedplugins.MarketplaceName {
+			name, mkt := splitPluginKey(key)
+			if mkt == forkedplugins.MarketplaceName {
 				// Forked plugins store the bare name (without marketplace suffix)
 				// in the config. mergeForkedPlugins re-appends the suffix.
-				forkedKeys = append(forkedKeys, parts[0])
+				forkedKeys = append(forkedKeys, name)
 			} else {
 				upstreamKeys = append(upstreamKeys, key)
 			}

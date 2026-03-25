@@ -571,9 +571,8 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 	// Also collect marketplace IDs from profile-add plugins.
 	for _, profile := range opts.Profiles {
 		for _, key := range profile.Plugins.Add {
-			parts := strings.SplitN(key, "@", 2)
-			if len(parts) == 2 {
-				mktIDs[parts[1]] = true
+			if _, mkt := splitPluginKey(key); mkt != "" {
+				mktIDs[mkt] = true
 			}
 		}
 	}
@@ -584,10 +583,10 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 	customMkts := marketplace.CollectCustomMarketplaceSources(claudeDir, mktIDList)
 
 	// Merge config-only marketplace sources that weren't detected locally.
+	if len(opts.ExtraMarketplaces) > 0 && customMkts == nil {
+		customMkts = make(map[string]config.MarketplaceSource)
+	}
 	for id, src := range opts.ExtraMarketplaces {
-		if customMkts == nil {
-			customMkts = make(map[string]config.MarketplaceSource)
-		}
 		if _, exists := customMkts[id]; !exists {
 			customMkts[id] = src
 		}

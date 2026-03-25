@@ -837,7 +837,7 @@ func TestMergeMemory_InjectsNew(t *testing.T) {
 		},
 	}
 
-	commands.MergeExistingConfig(scan, cfg, "")
+	commands.MergeExisting(scan, cfg, nil, "")
 
 	assert.Contains(t, scan.MemoryFiles, "new-mem")
 	assert.True(t, scan.ConfigOnly["memory:new-mem"])
@@ -854,7 +854,7 @@ func TestMergeMemory_SkipsExisting(t *testing.T) {
 		},
 	}
 
-	commands.MergeExistingConfig(scan, cfg, "")
+	commands.MergeExisting(scan, cfg, nil, "")
 
 	assert.Equal(t, []string{"already-here"}, scan.MemoryFiles)
 	assert.Empty(t, scan.ConfigOnly)
@@ -870,7 +870,7 @@ func TestMergeMemory_NilSlice(t *testing.T) {
 		},
 	}
 
-	commands.MergeExistingConfig(scan, cfg, "")
+	commands.MergeExisting(scan, cfg, nil, "")
 
 	assert.Equal(t, []string{"new-mem"}, scan.MemoryFiles)
 	assert.True(t, scan.ConfigOnly["memory:new-mem"])
