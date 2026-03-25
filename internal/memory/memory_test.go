@@ -131,6 +131,20 @@ func TestRegenerateIndex(t *testing.T) {
 	assert.Greater(t, projectIdx, userIdx, "User section should come before Project section")
 }
 
+func TestRegenerateIndexWithUnknownType(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "custom-type.md"),
+		[]byte("---\nname: Custom\ndescription: A custom type\ntype: custom\n---\n\nContent."), 0o644))
+
+	err := memory.RegenerateIndex(dir)
+	require.NoError(t, err)
+
+	index, err := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(index), "Custom")
+	assert.Contains(t, string(index), "## Custom") // unknown types should still appear
+}
+
 func TestSlugifyName(t *testing.T) {
 	tests := []struct {
 		input    string

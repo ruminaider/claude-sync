@@ -107,3 +107,55 @@ func TestReconcile(t *testing.T) {
 		assert.Empty(t, result.Renamed)
 	})
 }
+
+func TestReconcileWithSubSections(t *testing.T) {
+	t.Run("updated child section detected", func(t *testing.T) {
+		syncDir := t.TempDir()
+
+		// Import initial content with parent + child.
+		initialContent := "## Work Style\n\nIntro.\n\n### Git Commits\n\nOriginal git rules."
+		_, err := claudemd.ImportClaudeMD(syncDir, initialContent)
+		require.NoError(t, err)
+
+		// Modify the child section.
+		updatedContent := "## Work Style\n\nIntro.\n\n### Git Commits\n\nUpdated git rules."
+		result, err := claudemd.Reconcile(syncDir, updatedContent)
+		require.NoError(t, err)
+
+		// Should detect child as updated.
+		assert.Contains(t, result.Updated, "work-style--git-commits")
+		assert.Empty(t, result.New)
+		assert.Empty(t, result.Deleted)
+	})
+
+	t.Run("new child section detected", func(t *testing.T) {
+		syncDir := t.TempDir()
+
+		initialContent := "## Work Style\n\nIntro."
+		_, err := claudemd.ImportClaudeMD(syncDir, initialContent)
+		require.NoError(t, err)
+
+		// Add a child section.
+		updatedContent := "## Work Style\n\nIntro.\n\n### New Child\n\nNew content."
+		result, err := claudemd.Reconcile(syncDir, updatedContent)
+		require.NoError(t, err)
+
+		assert.Len(t, result.New, 1)
+		assert.Equal(t, "New Child", result.New[0].Header)
+	})
+
+	t.Run("deleted child section detected", func(t *testing.T) {
+		syncDir := t.TempDir()
+
+		initialContent := "## Work Style\n\nIntro.\n\n### Git Commits\n\nRules."
+		_, err := claudemd.ImportClaudeMD(syncDir, initialContent)
+		require.NoError(t, err)
+
+		// Remove the child, keep parent.
+		updatedContent := "## Work Style\n\nIntro."
+		result, err := claudemd.Reconcile(syncDir, updatedContent)
+		require.NoError(t, err)
+
+		assert.Contains(t, result.Deleted, "work-style--git-commits")
+	})
+}
