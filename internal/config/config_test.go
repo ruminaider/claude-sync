@@ -515,6 +515,65 @@ plugins:
 	})
 }
 
+func TestParseMemory(t *testing.T) {
+	yaml := `
+version: "1.0.0"
+memory:
+  include:
+    - user-prefers-terse
+    - feedback-no-mocks
+`
+	cfg, err := config.Parse([]byte(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user-prefers-terse", "feedback-no-mocks"}, cfg.Memory.Include)
+}
+
+func TestMarshalMemory(t *testing.T) {
+	cfg := config.Config{
+		Version: "1.0.0",
+		Pinned:  map[string]string{},
+		Memory:  config.MemoryConfig{Include: []string{"user-prefers-terse"}},
+	}
+	data, err := config.Marshal(cfg)
+	require.NoError(t, err)
+
+	parsed, err := config.Parse(data)
+	require.NoError(t, err)
+	assert.Equal(t, cfg.Memory.Include, parsed.Memory.Include)
+}
+
+func TestParseUserPreferencesAutoCommit(t *testing.T) {
+	yaml := `
+sync_mode: union
+sync:
+  auto_commit:
+    claude_md: tracked
+    memory: manual
+`
+	prefs, err := config.ParseUserPreferences([]byte(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, config.AutoCommitTracked, prefs.Sync.AutoCommit.ClaudeMD)
+	assert.Equal(t, config.AutoCommitManual, prefs.Sync.AutoCommit.Memory)
+}
+
+func TestAutoCommitModeDefaults(t *testing.T) {
+	prefs := config.DefaultUserPreferences()
+	assert.Equal(t, config.AutoCommitTracked, prefs.Sync.AutoCommit.ClaudeMD)
+	assert.Equal(t, config.AutoCommitTracked, prefs.Sync.AutoCommit.Memory)
+}
+
+func TestAutoCommitModeHelper(t *testing.T) {
+	p := config.AutoCommitPrefs{ClaudeMD: config.AutoCommitAll, Memory: ""}
+	assert.Equal(t, config.AutoCommitAll, p.Mode("claude_md"))
+	assert.Equal(t, config.AutoCommitTracked, p.Mode("memory")) // defaults to tracked
+	assert.Equal(t, config.AutoCommitTracked, p.Mode("unknown"))
+}
+
+func TestAutoCommitModeInvalidClampedToTracked(t *testing.T) {
+	p := config.AutoCommitPrefs{ClaudeMD: "typo"}
+	assert.Equal(t, config.AutoCommitTracked, p.Mode("claude_md"))
+}
+
 func TestParseUserPreferences_WithSync(t *testing.T) {
 	input := []byte(`sync_mode: union
 sync:

@@ -20,6 +20,7 @@ type PreviewSection struct {
 	Content     string // full section content
 	FragmentKey string // fragment name via HeaderToFragmentName
 	Source      string // source file path (for grouping)
+	Group       string // parent fragment name for ### sub-sections; empty for top-level
 	IsBase      bool   // inherited from base (profile view)
 }
 
@@ -93,6 +94,7 @@ func ClaudeMDPreviewSections(sections []claudemd.Section, source string) []Previ
 			Content:     sec.Content,
 			FragmentKey: fragKey,
 			Source:      source,
+			Group:       sec.Group,
 		})
 	}
 	return result
@@ -144,6 +146,32 @@ func (p *Preview) rebuildRows() {
 }
 
 // --- Methods ---
+
+// isParent returns true if the section at index i has child sub-sections
+// (i.e., other sections whose Group matches this section's FragmentKey).
+func (p Preview) isParent(i int) bool {
+	key := p.sections[i].FragmentKey
+	if key == "" {
+		return false
+	}
+	for j, sec := range p.sections {
+		if j != i && sec.Group == key {
+			return true
+		}
+	}
+	return false
+}
+
+// childIndices returns the indices of all sections whose Group matches parentKey.
+func (p Preview) childIndices(parentKey string) []int {
+	var indices []int
+	for i, sec := range p.sections {
+		if sec.Group == parentKey {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
 
 // SelectedFragmentKeys returns the fragment keys of selected sections.
 func (p Preview) SelectedFragmentKeys() []string {
@@ -300,7 +328,7 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 			if row.isHeader {
 				p.toggleCollapse(row.source)
 			} else {
-				p.selected[row.sectionIdx] = !p.selected[row.sectionIdx]
+				p.toggleSection(row.sectionIdx)
 			}
 		}
 	case "enter":
@@ -313,7 +341,7 @@ func (p Preview) updateList(msg tea.KeyMsg) (Preview, tea.Cmd) {
 			if row.isHeader {
 				p.toggleCollapse(row.source)
 			} else {
-				p.selected[row.sectionIdx] = !p.selected[row.sectionIdx]
+				p.toggleSection(row.sectionIdx)
 			}
 		}
 	case "a":
@@ -386,6 +414,21 @@ func (p *Preview) toggleCollapse(source string) {
 		p.rowCursor = maxCursor
 	}
 	p.clampListScroll()
+}
+
+// toggleSection toggles a section's selection. If the section is a parent
+// (has children with matching Group), all children are toggled to the same state.
+func (p *Preview) toggleSection(idx int) {
+	newState := !p.selected[idx]
+	p.selected[idx] = newState
+
+	// If this section is a parent, cascade to all children.
+	if p.isParent(idx) {
+		parentKey := p.sections[idx].FragmentKey
+		for _, childIdx := range p.childIndices(parentKey) {
+			p.selected[childIdx] = newState
+		}
+	}
 }
 
 func (p Preview) updateViewport(msg tea.KeyMsg) (Preview, tea.Cmd) {
@@ -539,8 +582,18 @@ func (p Preview) viewList() string {
 
 		checkbox := RenderCheckbox(p.focused, p.selected[i])
 
+		// Indent child sections (### sub-sections) under their parent.
+		indent := ""
+		isChild := sec.Group != ""
+		if isChild {
+			indent = "  " // 2 spaces indent for children
+		}
+
 		header := sec.Header
 		maxHeaderLen := p.listWidth - 10
+		if isChild {
+			maxHeaderLen -= 2 // account for indent
+		}
 		if maxHeaderLen < 5 {
 			maxHeaderLen = 5
 		}
@@ -549,7 +602,7 @@ func (p Preview) viewList() string {
 		}
 
 		if sec.IsBase && !p.selected[i] {
-			b.WriteString(cursor + RenderRemovedBaseLine(header, "●", p.focused) + "\n")
+			b.WriteString(cursor + indent + RenderRemovedBaseLine(header, "●", p.focused) + "\n")
 			continue
 		}
 
@@ -559,7 +612,7 @@ func (p Preview) viewList() string {
 			tag = RenderTag("●", p.focused, "")
 		}
 
-		b.WriteString(cursor + checkbox + " " + display + tag + "\n")
+		b.WriteString(cursor + indent + checkbox + " " + display + tag + "\n")
 	}
 
 	if hasBelow {

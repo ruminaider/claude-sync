@@ -685,6 +685,7 @@ func FormatSummaryBody(stats map[string]int, profiles []string) string {
 		{"plugins", "plugins"},
 		{"settings", "settings"},
 		{"claudemd", "CLAUDE.md sections"},
+		{"memory", "memory fragments"},
 		{"permissions", "permissions"},
 		{"mcp", "MCP servers"},
 		{"keybindings", "keybindings"},

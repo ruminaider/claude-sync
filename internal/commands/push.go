@@ -12,6 +12,8 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/memory"
+	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	csync "github.com/ruminaider/claude-sync/internal/sync"
 )
@@ -22,6 +24,7 @@ type PushScanResult struct {
 	ChangedSettings    map[string]csync.SettingChange
 	ChangedPermissions bool
 	ChangedClaudeMD    *claudemd.ReconcileResult
+	ChangedMemory      *memory.ReconcileResult
 	ChangedMCP         bool
 	MCPSecrets         []DetectedSecret // secrets detected in MCP configs (will be auto-replaced)
 	ChangedKeybindings bool
@@ -36,6 +39,7 @@ func (r *PushScanResult) HasChanges() bool {
 	return len(r.AddedPlugins) > 0 || len(r.RemovedPlugins) > 0 ||
 		len(r.ChangedSettings) > 0 ||
 		r.ChangedPermissions || r.ChangedClaudeMD != nil ||
+		r.ChangedMemory != nil ||
 		r.ChangedMCP || r.ChangedKeybindings ||
 		r.ChangedCommands || r.ChangedSkills ||
 		len(r.OrphanedCommands) > 0 || len(r.OrphanedSkills) > 0 ||
@@ -145,6 +149,28 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		}
 	}
 
+	// Scan memory changes.
+	syncMemDir := filepath.Join(syncDir, "memory")
+	memSources := []string{filepath.Join(claudeDir, "memory")}
+	if instances, ok := paths.CCSInstances(); ok {
+		for _, inst := range instances {
+			memSources = append(memSources, paths.CCSInstanceMemoryDir(inst))
+		}
+	}
+	for _, src := range memSources {
+		if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+			continue
+		}
+		reconcileResult, err := memory.Reconcile(src, syncMemDir)
+		if err != nil {
+			return nil, fmt.Errorf("scanning memory from %s: %w", src, err)
+		}
+		if len(reconcileResult.Updated) > 0 || len(reconcileResult.New) > 0 || len(reconcileResult.Deleted) > 0 {
+			result.ChangedMemory = reconcileResult
+			break
+		}
+	}
+
 	// Scan MCP.
 	currentMCP, mcpErr := claudecode.ReadMCPConfig(claudeDir)
 	if mcpErr == nil {
@@ -215,6 +241,7 @@ type PushApplyOptions struct {
 	UpdateKeybindings  bool
 	UpdateCommands     bool
 	UpdateSkills       bool
+	UpdateMemory       bool
 	OrphanedCommands   []string // command files to remove from sync dir
 	OrphanedSkills     []string // skill dirs to remove from sync dir
 	DirtyWorkingTree   bool     // sync repo has uncommitted changes to include
@@ -509,6 +536,11 @@ func PushApply(opts PushApplyOptions) error {
 			if err := git.Add(opts.SyncDir, "skills"); err != nil {
 				return fmt.Errorf("staging skills: %w", err)
 			}
+		}
+	}
+	if opts.UpdateMemory {
+		if err := git.Add(opts.SyncDir, "memory"); err != nil {
+			return fmt.Errorf("staging memory: %w", err)
 		}
 	}
 	// Stage orphan removals individually (the directories are already deleted).

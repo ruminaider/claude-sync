@@ -20,6 +20,11 @@ type ClaudeMDConfig struct {
 	Include []string `yaml:"include,omitempty"`
 }
 
+// MemoryConfig holds memory fragment include paths.
+type MemoryConfig struct {
+	Include []string `yaml:"include,omitempty"`
+}
+
 // MCPServerMeta stores metadata about an imported MCP server.
 type MCPServerMeta struct {
 	SourceProject string `yaml:"source_project,omitempty"`
@@ -55,6 +60,7 @@ type ConfigV2 struct {
 	Hooks         map[string]json.RawMessage    `yaml:"-"`
 	Permissions   Permissions                   `yaml:"-"`
 	ClaudeMD      ClaudeMDConfig                `yaml:"-"`
+	Memory        MemoryConfig                  `yaml:"-"`
 	MCP           map[string]json.RawMessage    `yaml:"-"`
 	MCPMeta       map[string]MCPServerMeta      `yaml:"-"`
 	Keybindings   map[string]any                `yaml:"-"`
@@ -165,6 +171,12 @@ func Parse(data []byte) (Config, error) {
 				return Config{}, fmt.Errorf("parsing config claude_md: %w", err)
 			}
 			cfg.ClaudeMD = cmd
+		case "memory":
+			var mem MemoryConfig
+			if err := valNode.Decode(&mem); err != nil {
+				return Config{}, fmt.Errorf("parsing config memory: %w", err)
+			}
+			cfg.Memory = mem
 		case "mcp":
 			var mcpRaw map[string]any
 			if err := valNode.Decode(&mcpRaw); err != nil {
@@ -434,6 +446,18 @@ func MarshalV2(cfg Config) ([]byte, error) {
 		)
 	}
 
+	// memory
+	if len(cfg.Memory.Include) > 0 {
+		var memNode yaml.Node
+		if err := memNode.Encode(cfg.Memory); err != nil {
+			return nil, fmt.Errorf("encoding memory: %w", err)
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "memory", Tag: "!!str"},
+			&memNode,
+		)
+	}
+
 	// mcp
 	if len(cfg.MCP) > 0 {
 		mcpMap := make(map[string]any, len(cfg.MCP))
@@ -561,11 +585,48 @@ const (
 	CategoryHooks       SyncCategory = "hooks"
 	CategoryPermissions SyncCategory = "permissions"
 	CategoryMCP         SyncCategory = "mcp"
+	CategoryMemory      SyncCategory = "memory"
 )
+
+// AutoCommitMode controls per-category auto-commit behavior.
+type AutoCommitMode string
+
+const (
+	AutoCommitAll     AutoCommitMode = "all"
+	AutoCommitTracked AutoCommitMode = "tracked"
+	AutoCommitManual  AutoCommitMode = "manual"
+)
+
+// AutoCommitPrefs controls per-category auto-commit behavior.
+// Modes: "all" (auto-commit everything), "tracked" (only edits to synced content),
+// "manual" (never auto-commit).
+type AutoCommitPrefs struct {
+	ClaudeMD AutoCommitMode `yaml:"claude_md,omitempty"`
+	Memory   AutoCommitMode `yaml:"memory,omitempty"`
+}
+
+// Mode returns the auto-commit mode for a category, defaulting to AutoCommitTracked.
+// Invalid values are clamped to AutoCommitTracked.
+func (p *AutoCommitPrefs) Mode(category string) AutoCommitMode {
+	var mode AutoCommitMode
+	switch category {
+	case "claude_md":
+		mode = p.ClaudeMD
+	case "memory":
+		mode = p.Memory
+	}
+	switch mode {
+	case AutoCommitAll, AutoCommitManual:
+		return mode
+	default:
+		return AutoCommitTracked
+	}
+}
 
 // SyncPrefs holds per-machine sync opt-out preferences.
 type SyncPrefs struct {
-	Skip []string `yaml:"skip,omitempty"`
+	Skip       []string        `yaml:"skip,omitempty"`
+	AutoCommit AutoCommitPrefs `yaml:"auto_commit,omitempty"`
 }
 
 // UserPreferences represents ~/.claude-sync/user-preferences.yaml.
@@ -610,6 +671,12 @@ func DefaultUserPreferences() UserPreferences {
 	return UserPreferences{
 		SyncMode: "union",
 		Pins:     map[string]string{},
+		Sync: SyncPrefs{
+			AutoCommit: AutoCommitPrefs{
+				ClaudeMD: AutoCommitTracked,
+				Memory:   AutoCommitTracked,
+			},
+		},
 	}
 }
 

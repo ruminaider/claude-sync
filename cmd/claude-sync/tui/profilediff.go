@@ -364,6 +364,16 @@ func profileToSectionDiffs(p profiles.Profile) map[Section]*sectionDiff {
 	}
 	diffs[SectionCommandsSkills] = d
 
+	// Memory
+	d = newSectionDiff()
+	for _, k := range p.Memory.Add {
+		d.adds[k] = true
+	}
+	for _, k := range p.Memory.Remove {
+		d.removes[k] = true
+	}
+	diffs[SectionMemory] = d
+
 	return diffs
 }
 
@@ -480,6 +490,13 @@ func (m Model) diffsToProfile(name string) profiles.Profile {
 	skillDiff := computeSectionDiff(baseSkills, profSkills)
 	p.Skills.Add = sortedKeys(skillDiff.adds)
 	p.Skills.Remove = sortedKeys(skillDiff.removes)
+
+	// Memory
+	baseMem := m.pickers[SectionMemory].SelectedKeys()
+	profMem := pm[SectionMemory].SelectedKeys()
+	memDiff := computeSectionDiff(baseMem, profMem)
+	p.Memory.Add = sortedKeys(memDiff.adds)
+	p.Memory.Remove = sortedKeys(memDiff.removes)
 
 	return p
 }

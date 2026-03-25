@@ -12,6 +12,8 @@ import (
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/memory"
+	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
 )
@@ -48,35 +50,93 @@ func AutoCommit(claudeDir, syncDir string) (*AutoCommitResult, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	// Read user preferences for auto-commit mode.
+	prefsData, err := os.ReadFile(filepath.Join(syncDir, "user-preferences.yaml"))
+	var prefs config.UserPreferences
+	if err == nil {
+		prefs, err = config.ParseUserPreferences(prefsData)
+		if err != nil {
+			return nil, fmt.Errorf("parsing user preferences: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("reading user preferences: %w", err)
+	}
+	claudeMDMode := prefs.Sync.AutoCommit.Mode("claude_md")
+
 	var changes []string
 	var stagedFiles []string
 	configChanged := false
 
-	// Check CLAUDE.md changes.
-	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
-	if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
-		reconcileResult, err := claudemd.Reconcile(syncDir, string(claudeMDData))
-		if err == nil {
-			if len(reconcileResult.Updated) > 0 {
-				changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-			}
-			if len(reconcileResult.New) > 0 {
-				names := make([]string, len(reconcileResult.New))
-				for i, s := range reconcileResult.New {
-					names[i] = claudemd.HeaderToFragmentName(s.Header)
-					// Write new fragment files.
-					claudeMdDir := filepath.Join(syncDir, "claude-md")
-					os.MkdirAll(claudeMdDir, 0755)
-					claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+	// Check CLAUDE.md changes (skipped entirely in manual mode).
+	if claudeMDMode != config.AutoCommitManual {
+		claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+		if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
+			reconcileResult, err := claudemd.Reconcile(syncDir, string(claudeMDData))
+			if err == nil {
+				if len(reconcileResult.Updated) > 0 {
+					changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
 				}
-				changes = append(changes, "add "+strings.Join(names, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-				// Update config.yaml to include new fragments.
+				if len(reconcileResult.New) > 0 && claudeMDMode == config.AutoCommitAll {
+					names := make([]string, len(reconcileResult.New))
+					for i, s := range reconcileResult.New {
+						names[i] = claudemd.HeaderToFragmentName(s.Header)
+						// Write new fragment files.
+						claudeMdDir := filepath.Join(syncDir, "claude-md")
+						os.MkdirAll(claudeMdDir, 0755)
+						claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+					}
+					changes = append(changes, "add "+strings.Join(names, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
+					// Update config.yaml to include new fragments.
+					for _, name := range names {
+						cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+					}
+					configChanged = true
+				}
+			}
+		}
+	}
+
+	// Check memory changes.
+	memoryMode := prefs.Sync.AutoCommit.Mode("memory")
+	if memoryMode != config.AutoCommitManual {
+		syncMemDir := filepath.Join(syncDir, "memory")
+		memSources := []string{filepath.Join(claudeDir, "memory")}
+		if instances, ok := paths.CCSInstances(); ok {
+			for _, inst := range instances {
+				memSources = append(memSources, paths.CCSInstanceMemoryDir(inst))
+			}
+		}
+		for _, src := range memSources {
+			if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+				continue
+			}
+			reconcileResult, err := memory.Reconcile(src, syncMemDir)
+			if err != nil {
+				return nil, fmt.Errorf("reconciling memory from %s: %w", src, err)
+			}
+			if len(reconcileResult.Updated) > 0 {
+				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
+				stagedFiles = append(stagedFiles, "memory")
+			}
+			if len(reconcileResult.New) > 0 && memoryMode == config.AutoCommitAll {
+				names := make([]string, len(reconcileResult.New))
+				for i, f := range reconcileResult.New {
+					names[i] = f.SlugName
+					if err := memory.WriteFragment(syncMemDir, f.SlugName, f.Content); err != nil {
+						return nil, fmt.Errorf("writing new memory fragment %s: %w", f.SlugName, err)
+					}
+				}
+				changes = append(changes, "add memory "+strings.Join(names, ", "))
+				stagedFiles = append(stagedFiles, "memory")
 				for _, name := range names {
-					cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+					cfg.Memory.Include = append(cfg.Memory.Include, name)
 				}
 				configChanged = true
+			}
+			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryMode == config.AutoCommitAll) {
+				break // Only break when we found actionable changes
 			}
 		}
 	}
@@ -211,34 +271,93 @@ func AutoCommitWithContext(opts AutoCommitOptions) (*AutoCommitResult, error) {
 	effectiveSettings := profiles.MergeSettings(cfg.Settings, profile)
 	effectiveMCP := profiles.MergeMCP(cfg.MCP, profile)
 
+	// Read user preferences for auto-commit mode.
+	prefsData, prefsErr := os.ReadFile(filepath.Join(opts.SyncDir, "user-preferences.yaml"))
+	var prefs config.UserPreferences
+	if prefsErr == nil {
+		prefs, prefsErr = config.ParseUserPreferences(prefsData)
+		if prefsErr != nil {
+			return nil, fmt.Errorf("parsing user preferences: %w", prefsErr)
+		}
+	} else if !os.IsNotExist(prefsErr) {
+		return nil, fmt.Errorf("reading user preferences: %w", prefsErr)
+	}
+	claudeMDMode := prefs.Sync.AutoCommit.Mode("claude_md")
+
 	var changes []string
 	var stagedFiles []string
 	profileChanged := false
 	configChanged := false
 
 	// Check CLAUDE.md changes — these still go to base config (fragments are shared).
-	claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
-	if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
-		reconcileResult, err := claudemd.Reconcile(opts.SyncDir, string(claudeMDData))
-		if err == nil {
-			if len(reconcileResult.Updated) > 0 {
-				changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
-			}
-			if len(reconcileResult.New) > 0 {
-				names := make([]string, len(reconcileResult.New))
-				for i, s := range reconcileResult.New {
-					names[i] = claudemd.HeaderToFragmentName(s.Header)
-					claudeMdDir := filepath.Join(opts.SyncDir, "claude-md")
-					os.MkdirAll(claudeMdDir, 0755)
-					claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+	// Skipped entirely in manual mode.
+	if claudeMDMode != config.AutoCommitManual {
+		claudeMDPath := filepath.Join(opts.ClaudeDir, "CLAUDE.md")
+		if claudeMDData, err := os.ReadFile(claudeMDPath); err == nil {
+			reconcileResult, err := claudemd.Reconcile(opts.SyncDir, string(claudeMDData))
+			if err == nil {
+				if len(reconcileResult.Updated) > 0 {
+					changes = append(changes, "update "+strings.Join(reconcileResult.Updated, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
 				}
-				changes = append(changes, "add "+strings.Join(names, ", "))
-				stagedFiles = append(stagedFiles, "claude-md")
+				if len(reconcileResult.New) > 0 && claudeMDMode == config.AutoCommitAll {
+					names := make([]string, len(reconcileResult.New))
+					for i, s := range reconcileResult.New {
+						names[i] = claudemd.HeaderToFragmentName(s.Header)
+						claudeMdDir := filepath.Join(opts.SyncDir, "claude-md")
+						os.MkdirAll(claudeMdDir, 0755)
+						claudemd.WriteFragment(claudeMdDir, names[i], s.Content)
+					}
+					changes = append(changes, "add "+strings.Join(names, ", "))
+					stagedFiles = append(stagedFiles, "claude-md")
+					for _, name := range names {
+						cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+					}
+					configChanged = true
+				}
+			}
+		}
+	}
+
+	// Check memory changes.
+	memoryModeCtx := prefs.Sync.AutoCommit.Mode("memory")
+	if memoryModeCtx != config.AutoCommitManual {
+		syncMemDir := filepath.Join(opts.SyncDir, "memory")
+		memSources := []string{filepath.Join(opts.ClaudeDir, "memory")}
+		if instances, ok := paths.CCSInstances(); ok {
+			for _, inst := range instances {
+				memSources = append(memSources, paths.CCSInstanceMemoryDir(inst))
+			}
+		}
+		for _, src := range memSources {
+			if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+				continue
+			}
+			reconcileResult, err := memory.Reconcile(src, syncMemDir)
+			if err != nil {
+				return nil, fmt.Errorf("reconciling memory from %s: %w", src, err)
+			}
+			if len(reconcileResult.Updated) > 0 {
+				changes = append(changes, "update memory "+strings.Join(reconcileResult.Updated, ", "))
+				stagedFiles = append(stagedFiles, "memory")
+			}
+			if len(reconcileResult.New) > 0 && memoryModeCtx == config.AutoCommitAll {
+				names := make([]string, len(reconcileResult.New))
+				for i, f := range reconcileResult.New {
+					names[i] = f.SlugName
+					if err := memory.WriteFragment(syncMemDir, f.SlugName, f.Content); err != nil {
+						return nil, fmt.Errorf("writing new memory fragment %s: %w", f.SlugName, err)
+					}
+				}
+				changes = append(changes, "add memory "+strings.Join(names, ", "))
+				stagedFiles = append(stagedFiles, "memory")
 				for _, name := range names {
-					cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, name)
+					cfg.Memory.Include = append(cfg.Memory.Include, name)
 				}
 				configChanged = true
+			}
+			if len(reconcileResult.Updated) > 0 || (len(reconcileResult.New) > 0 && memoryModeCtx == config.AutoCommitAll) {
+				break // Only break when we found actionable changes
 			}
 		}
 	}
