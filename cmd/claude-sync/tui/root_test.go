@@ -13,6 +13,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2559,4 +2560,114 @@ func TestPermissions_EditMode_RealWorldScale(t *testing.T) {
 	opts := m.buildInitOptions()
 	assert.Equal(t, expectedCount, len(opts.Permissions.Allow),
 		"saved permissions count after round-trip")
+}
+
+// --- Config-only item tests (Tasks 7, 8, 9) ---
+
+func TestNewModel_ConfigOnlyItemsGetTag(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"a@m", "b@m"},
+		Settings:   map[string]any{"model": "opus", "theme": "dark"},
+		ConfigOnly: map[string]bool{"plugin:b@m": true, "setting:theme": true},
+	}
+
+	m := testModel(scan)
+
+	// Check plugin picker: b@m should have [config] tag, a@m should not.
+	pluginPicker := m.pickers[SectionPlugins]
+	for _, it := range pluginPicker.items {
+		if it.Key == "b@m" {
+			assert.Equal(t, "[config]", it.Tag, "config-only plugin should have [config] tag")
+		} else if it.Key == "a@m" {
+			assert.Empty(t, it.Tag, "locally-detected plugin should not have [config] tag")
+		}
+	}
+
+	// Check settings picker: "theme" should have [config] tag, "model" should not.
+	settingsPicker := m.pickers[SectionSettings]
+	for _, it := range settingsPicker.items {
+		if it.Key == "theme" {
+			assert.Equal(t, "[config]", it.Tag, "config-only setting should have [config] tag")
+		} else if it.Key == "model" {
+			assert.Empty(t, it.Tag, "locally-detected setting should not have [config] tag")
+		}
+	}
+}
+
+func TestBuildInitOptions_PopulatesExtraUpstream(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream:   []string{"a@m", "b@m"},
+		ConfigOnly: map[string]bool{"plugin:b@m": true},
+	}
+
+	m := testModel(scan)
+	opts := m.buildInitOptions()
+
+	assert.Contains(t, opts.ExtraUpstream, "b@m", "config-only upstream should be in ExtraUpstream")
+	assert.NotContains(t, opts.ExtraUpstream, "a@m", "locally-detected plugin should not be in ExtraUpstream")
+}
+
+func TestBuildInitOptions_PopulatesExtraForked(t *testing.T) {
+	forkedKey := "my-fork@" + plugins.MarketplaceName
+	scan := &commands.InitScanResult{
+		AutoForked: []string{forkedKey},
+		ConfigOnly: map[string]bool{"plugin:" + forkedKey: true},
+	}
+
+	m := testModel(scan)
+	opts := m.buildInitOptions()
+
+	assert.Contains(t, opts.ExtraForked, "my-fork", "config-only forked plugin name should be in ExtraForked")
+	assert.Empty(t, opts.ExtraUpstream, "forked plugin should not appear in ExtraUpstream")
+}
+
+func TestBuildInitOptions_PopulatesExtraSettings(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Settings:   map[string]any{"model": "opus", "theme": "dark"},
+		ConfigOnly: map[string]bool{"setting:theme": true},
+	}
+
+	m := testModel(scan)
+	opts := m.buildInitOptions()
+
+	require.NotNil(t, opts.ExtraSettings, "ExtraSettings should be populated")
+	assert.Equal(t, "dark", opts.ExtraSettings["theme"], "config-only setting value should be preserved")
+	_, hasModel := opts.ExtraSettings["model"]
+	assert.False(t, hasModel, "locally-detected setting should not be in ExtraSettings")
+}
+
+func TestBuildInitOptions_NoExtraFieldsWithoutConfigOnly(t *testing.T) {
+	scan := fullScan()
+	m := testModel(scan)
+	opts := m.buildInitOptions()
+
+	assert.Nil(t, opts.ExtraUpstream, "ExtraUpstream should be nil when no ConfigOnly items")
+	assert.Nil(t, opts.ExtraForked, "ExtraForked should be nil when no ConfigOnly items")
+	assert.Nil(t, opts.ExtraSettings, "ExtraSettings should be nil when no ConfigOnly items")
+}
+
+func TestNewModel_ConfigOnlyClaudeMDFragmentsGetTag(t *testing.T) {
+	scan := &commands.InitScanResult{
+		ClaudeMDContent: "## Present\ncontent\n## Gone\nmissing",
+		ClaudeMDSections: []claudemd.Section{
+			{Header: "Present", Content: "## Present\ncontent"},
+			{Header: "Gone", Content: "## Gone\nmissing"},
+		},
+		ConfigOnly: map[string]bool{"fragment:gone": true},
+	}
+
+	m := testModel(scan)
+
+	// Check that the "Gone" fragment has [config] in its header.
+	found := false
+	for _, sec := range m.preview.sections {
+		if strings.Contains(sec.Header, "Gone") {
+			assert.Contains(t, sec.Header, "[config]", "config-only fragment header should contain [config]")
+			found = true
+		}
+		if sec.Header == "Present" {
+			assert.NotContains(t, sec.Header, "[config]", "locally-detected fragment should not have [config]")
+		}
+	}
+	assert.True(t, found, "should have found the Gone fragment")
 }
