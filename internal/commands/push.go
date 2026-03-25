@@ -158,11 +158,16 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		}
 	}
 	for _, src := range memSources {
-		if reconcileResult, err := memory.Reconcile(src, syncMemDir); err == nil {
-			if len(reconcileResult.Updated) > 0 || len(reconcileResult.New) > 0 || len(reconcileResult.Deleted) > 0 {
-				result.ChangedMemory = reconcileResult
-				break
-			}
+		if _, statErr := os.Stat(src); os.IsNotExist(statErr) {
+			continue
+		}
+		reconcileResult, err := memory.Reconcile(src, syncMemDir)
+		if err != nil {
+			return nil, fmt.Errorf("scanning memory from %s: %w", src, err)
+		}
+		if len(reconcileResult.Updated) > 0 || len(reconcileResult.New) > 0 || len(reconcileResult.Deleted) > 0 {
+			result.ChangedMemory = reconcileResult
+			break
 		}
 	}
 

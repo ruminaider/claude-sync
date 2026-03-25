@@ -411,10 +411,13 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 			result.MemoryTotal = len(memIncludes)
 			if len(memIncludes) > 0 {
 				syncMemDir := filepath.Join(syncDir, "memory")
-				applyMemoryFragments(paths.ClaudeMemoryDir(), syncMemDir, memIncludes, appliedHashes, opts.Force, result)
+				if err := applyMemoryFragments(paths.ClaudeMemoryDir(), syncMemDir, memIncludes, appliedHashes, opts.Force, result); err != nil {
+					return nil, fmt.Errorf("applying memory fragments: %w", err)
+				}
 				if instances, ok := paths.CCSInstances(); ok {
 					for _, inst := range instances {
-						applyMemoryFragments(paths.CCSInstanceMemoryDir(inst), syncMemDir, memIncludes, appliedHashes, opts.Force, result)
+						// CCS is best-effort; don't fail pull
+						_ = applyMemoryFragments(paths.CCSInstanceMemoryDir(inst), syncMemDir, memIncludes, appliedHashes, opts.Force, result)
 					}
 				}
 			}
@@ -1282,12 +1285,14 @@ func findProjectRoot(dir string) string {
 	}
 }
 
-func applyMemoryFragments(targetDir, syncMemDir string, includes []string, hashes *AppliedHashes, force bool, result *PullResult) {
-	os.MkdirAll(targetDir, 0755)
+func applyMemoryFragments(targetDir, syncMemDir string, includes []string, hashes *AppliedHashes, force bool, result *PullResult) error {
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("creating memory target dir %s: %w", targetDir, err)
+	}
 	for _, name := range includes {
 		content, err := memory.ReadFragment(syncMemDir, name)
 		if err != nil {
-			continue
+			return fmt.Errorf("reading memory fragment %q: %w", name, err)
 		}
 		targetPath := filepath.Join(targetDir, name+".md")
 		hashKey := HashKeyMemoryPrefix + name
@@ -1295,11 +1300,15 @@ func applyMemoryFragments(targetDir, syncMemDir string, includes []string, hashe
 			result.MemorySkipped++
 			continue
 		}
-		if os.WriteFile(targetPath, []byte(content), 0644) == nil {
-			hashes.Set(hashKey, content)
-			result.MemoryWritten++
+		if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+			return fmt.Errorf("writing memory fragment %q: %w", name, err)
 		}
+		hashes.Set(hashKey, content)
+		result.MemoryWritten++
 	}
-	memory.RegenerateIndex(targetDir)
+	if err := memory.RegenerateIndex(targetDir); err != nil {
+		return fmt.Errorf("regenerating memory index: %w", err)
+	}
+	return nil
 }
 
