@@ -2,8 +2,14 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
+	"github.com/ruminaider/claude-sync/internal/claudemd"
+	"github.com/ruminaider/claude-sync/internal/cmdskill"
 	"github.com/ruminaider/claude-sync/internal/config"
 	forkedplugins "github.com/ruminaider/claude-sync/internal/plugins"
 )
@@ -26,6 +32,8 @@ func MergeExistingConfig(scan *InitScanResult, cfg *config.Config, syncDir strin
 	mergePermissions(scan, cfg)
 	mergeMCP(scan, cfg)
 	mergeKeybindings(scan, cfg)
+	mergeClaudeMDFragments(scan, cfg, syncDir)
+	mergeCommandsSkills(scan, cfg, syncDir)
 }
 
 // mergeUpstreamPlugins injects upstream plugin keys from cfg that are missing
@@ -140,5 +148,113 @@ func mergeKeybindings(scan *InitScanResult, cfg *config.Config) {
 		}
 		scan.Keybindings[k] = v
 		scan.ConfigOnly[k] = true
+	}
+}
+
+// mergeClaudeMDFragments injects CLAUDE.md fragment sections from the sync
+// dir's claude-md/ directory when the config references fragments not present
+// in the scan. Uses "fragment:" prefix for ConfigOnly keys to avoid collisions.
+func mergeClaudeMDFragments(scan *InitScanResult, cfg *config.Config, syncDir string) {
+	if len(cfg.ClaudeMD.Include) == 0 {
+		return
+	}
+
+	// Build a set of fragment keys already present in the scan.
+	existing := make(map[string]bool, len(scan.ClaudeMDSections))
+	for _, sec := range scan.ClaudeMDSections {
+		key := claudemd.HeaderToFragmentName(sec.Header)
+		existing[key] = true
+	}
+
+	claudeMdDir := filepath.Join(syncDir, "claude-md")
+
+	for _, fragKey := range cfg.ClaudeMD.Include {
+		if existing[fragKey] {
+			continue
+		}
+
+		content, err := claudemd.ReadFragment(claudeMdDir, fragKey)
+		if err != nil {
+			// Fragment file not available locally; inject a placeholder.
+			placeholder := claudemd.Section{
+				Header:  fragKey,
+				Content: fmt.Sprintf("## %s\n\n(fragment not available locally)", fragKey),
+			}
+			scan.ClaudeMDSections = append(scan.ClaudeMDSections, placeholder)
+		} else {
+			// Split the fragment content and append all resulting sections.
+			sections := claudemd.Split(content)
+			scan.ClaudeMDSections = append(scan.ClaudeMDSections, sections...)
+		}
+
+		scan.ConfigOnly["fragment:"+fragKey] = true
+		existing[fragKey] = true
+	}
+}
+
+// mergeCommandsSkills injects commands and skills from the config that are
+// missing from the scan. It reads content from the sync dir when available,
+// falling back to a placeholder when the file doesn't exist locally.
+func mergeCommandsSkills(scan *InitScanResult, cfg *config.Config, syncDir string) {
+	allKeys := append(cfg.Commands, cfg.Skills...)
+	if len(allKeys) == 0 {
+		return
+	}
+
+	if scan.CommandsSkills == nil {
+		scan.CommandsSkills = &cmdskill.ScanResult{}
+	}
+
+	// Build set of existing keys from the scan.
+	existing := make(map[string]bool, len(scan.CommandsSkills.Items))
+	for _, item := range scan.CommandsSkills.Items {
+		existing[item.Key()] = true
+	}
+
+	for _, key := range allKeys {
+		if existing[key] {
+			continue
+		}
+
+		// Parse key: "cmd:global:name" or "skill:global:name"
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		typePart, scopePart, name := parts[0], parts[1], parts[2]
+
+		// Only handle global scope for now.
+		if scopePart != "global" {
+			continue
+		}
+
+		var itemType cmdskill.ItemType
+		var filePath string
+		switch typePart {
+		case "cmd":
+			itemType = cmdskill.TypeCommand
+			filePath = filepath.Join(syncDir, "commands", name+".md")
+		case "skill":
+			itemType = cmdskill.TypeSkill
+			filePath = filepath.Join(syncDir, "skills", name, "SKILL.md")
+		default:
+			continue
+		}
+
+		content := "(content not available locally)"
+		if data, err := os.ReadFile(filePath); err == nil {
+			content = string(data)
+		}
+
+		scan.CommandsSkills.Items = append(scan.CommandsSkills.Items, cmdskill.Item{
+			Name:        name,
+			Type:        itemType,
+			Source:      cmdskill.SourceGlobal,
+			SourceLabel: "global",
+			Content:     content,
+		})
+
+		scan.ConfigOnly[key] = true
+		existing[key] = true
 	}
 }
