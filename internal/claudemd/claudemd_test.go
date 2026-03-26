@@ -320,6 +320,15 @@ func TestChildFragmentName(t *testing.T) {
 		claudemd.ChildFragmentName("work-style", "Git Commits"))
 }
 
+func TestSectionFragmentName(t *testing.T) {
+	assert.Equal(t, "git-commits",
+		claudemd.SectionFragmentName(claudemd.Section{Header: "Git Commits"}))
+	assert.Equal(t, "work-style--git-commits",
+		claudemd.SectionFragmentName(claudemd.Section{Header: "Git Commits", Group: "work-style"}))
+	assert.Equal(t, "_preamble",
+		claudemd.SectionFragmentName(claudemd.Section{Header: ""}))
+}
+
 func TestParseQualifiedKey(t *testing.T) {
 	t.Run("global key", func(t *testing.T) {
 		source, frag, isProj := claudemd.ParseQualifiedKey("git-commits")
@@ -351,22 +360,18 @@ func TestProjectFragmentFilename(t *testing.T) {
 	assert.NotEqual(t, name, name3)
 }
 
-func TestReadWriteProjectFragment(t *testing.T) {
+func TestReadFragmentWithQualifiedKey(t *testing.T) {
 	dir := t.TempDir()
 	key := "~/Work/evvy/CLAUDE.md::testing-rules"
 	content := "## Testing Rules\n\nAlways write tests."
 
-	err := claudemd.WriteProjectFragment(dir, key, content)
-	require.NoError(t, err)
+	// Write using the resolved filename, then read back via qualified key.
+	filename := claudemd.ProjectFragmentFilename(key)
+	require.NoError(t, claudemd.WriteFragment(dir, filename, content))
 
-	got, err := claudemd.ReadProjectFragment(dir, key)
+	got, err := claudemd.ReadFragment(dir, key)
 	require.NoError(t, err)
 	assert.Equal(t, content, got)
-
-	// ReadFragment with qualified key should also work.
-	got2, err := claudemd.ReadFragment(dir, key)
-	require.NoError(t, err)
-	assert.Equal(t, content, got2)
 }
 
 func TestDirContentHash(t *testing.T) {
@@ -420,5 +425,4 @@ func TestImportProjectFragments(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "Testing Rules", meta.Header)
 	assert.Equal(t, source, meta.Source)
-	assert.Equal(t, key, meta.QualifiedKey)
 }

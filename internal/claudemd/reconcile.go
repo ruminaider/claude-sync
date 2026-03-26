@@ -3,7 +3,6 @@ package claudemd
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // RenamedFragment describes a fragment whose header changed but content is similar.
@@ -41,12 +40,7 @@ func Reconcile(syncDir, currentContent string) (*ReconcileResult, error) {
 
 	// Pass 1: exact header match.
 	for i, sec := range sections {
-		var name string
-		if sec.Group != "" {
-			name = ChildFragmentName(sec.Group, sec.Header)
-		} else {
-			name = HeaderToFragmentName(sec.Header)
-		}
+		name := SectionFragmentName(sec)
 		meta, exists := manifest.Fragments[name]
 		if !exists {
 			continue
@@ -159,21 +153,21 @@ func Reconcile(syncDir, currentContent string) (*ReconcileResult, error) {
 // stored project fragments and updates any that changed. The qualifiedKeys list
 // contains keys like "~/Work/evvy/CLAUDE.md::section-name". The expandHome
 // function resolves "~/" to the user's home directory.
-func ReconcileProjectFragments(syncDir string, qualifiedKeys []string, expandHome func(string) string) (updated int, err error) {
+func ReconcileProjectFragments(syncDir string, qualifiedKeys []string, expandHome func(string) string) (updated []string, err error) {
 	claudeMdDir := filepath.Join(syncDir, claudeMdSubdir)
 
 	manifest, err := ReadManifest(claudeMdDir)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
-	// Group keys by source path.
+	// Group keys by source path, skipping global (non-project) keys.
 	sourceKeys := make(map[string][]string)
 	for _, key := range qualifiedKeys {
-		if !strings.Contains(key, "::") {
+		source, _, isProject := ParseQualifiedKey(key)
+		if !isProject {
 			continue
 		}
-		source, _, _ := ParseQualifiedKey(key)
 		sourceKeys[source] = append(sourceKeys[source], key)
 	}
 
@@ -190,11 +184,7 @@ func ReconcileProjectFragments(syncDir string, qualifiedKeys []string, expandHom
 		// Build lookup from fragment name to section.
 		sectionMap := make(map[string]Section)
 		for _, sec := range sections {
-			name := HeaderToFragmentName(sec.Header)
-			if sec.Group != "" {
-				name = ChildFragmentName(sec.Group, sec.Header)
-			}
-			sectionMap[name] = sec
+			sectionMap[SectionFragmentName(sec)] = sec
 		}
 
 		for _, key := range keys {
@@ -213,13 +203,12 @@ func ReconcileProjectFragments(syncDir string, qualifiedKeys []string, expandHom
 					return updated, writeErr
 				}
 				manifest.Fragments[filename] = FragmentMeta{
-					Header:       sec.Header,
-					ContentHash:  newHash,
-					Group:        sec.Group,
-					Source:       source,
-					QualifiedKey: key,
+					Header:      sec.Header,
+					ContentHash: newHash,
+					Group:       sec.Group,
+					Source:      source,
 				}
-				updated++
+				updated = append(updated, filename)
 				changed = true
 			}
 		}

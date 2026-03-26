@@ -89,6 +89,15 @@ func ChildFragmentName(parentName, childHeader string) string {
 	return parentName + "--" + HeaderToFragmentName(childHeader)
 }
 
+// SectionFragmentName returns the fragment name for a section,
+// handling both top-level (## ) and child (### ) sections.
+func SectionFragmentName(sec Section) string {
+	if sec.Group != "" {
+		return ChildFragmentName(sec.Group, sec.Header)
+	}
+	return HeaderToFragmentName(sec.Header)
+}
+
 // Assemble concatenates sections with a single newline separator between them.
 func Assemble(sections []Section) string {
 	if len(sections) == 0 {
@@ -172,11 +181,10 @@ func DirContentHash(dir string) (string, error) {
 
 // FragmentMeta holds metadata about a single fragment.
 type FragmentMeta struct {
-	Header       string `yaml:"header"`
-	ContentHash  string `yaml:"content_hash"`
-	Group        string `yaml:"group,omitempty"`
-	Source       string `yaml:"source,omitempty"`        // source file path for project fragments
-	QualifiedKey string `yaml:"qualified_key,omitempty"` // original qualified key for project fragments
+	Header      string `yaml:"header"`
+	ContentHash string `yaml:"content_hash"`
+	Group       string `yaml:"group,omitempty"`
+	Source      string `yaml:"source,omitempty"` // source file path for project fragments
 }
 
 // Manifest tracks all fragments and their order.
@@ -251,18 +259,6 @@ func ProjectFragmentFilename(qualifiedKey string) string {
 	return "proj--" + prefix + "--" + fragment
 }
 
-// ReadProjectFragment reads a project fragment from the claude-md directory.
-func ReadProjectFragment(claudeMdDir, qualifiedKey string) (string, error) {
-	filename := ProjectFragmentFilename(qualifiedKey)
-	return ReadFragment(claudeMdDir, filename)
-}
-
-// WriteProjectFragment writes a project fragment to the claude-md directory.
-func WriteProjectFragment(claudeMdDir, qualifiedKey, content string) error {
-	filename := ProjectFragmentFilename(qualifiedKey)
-	return WriteFragment(claudeMdDir, filename, content)
-}
-
 // ImportProjectFragments reads a project CLAUDE.md file and exports selected
 // sections to the sync repo's claude-md/ directory. It updates the manifest
 // with metadata for each exported fragment.
@@ -273,12 +269,10 @@ func ImportProjectFragments(syncDir, sourcePath, content string, selectedKeys []
 	}
 
 	// Build a set of selected fragment names for this source.
-	selectedFragments := make(map[string]bool)
+	selectedFragments := make(map[string]bool, len(selectedKeys))
 	for _, key := range selectedKeys {
-		src, frag, isProj := ParseQualifiedKey(key)
-		if isProj && src == sourcePath {
-			selectedFragments[frag] = true
-		}
+		_, frag, _ := ParseQualifiedKey(key)
+		selectedFragments[frag] = true
 	}
 
 	if len(selectedFragments) == 0 {
@@ -291,31 +285,37 @@ func ImportProjectFragments(syncDir, sourcePath, content string, selectedKeys []
 		return err
 	}
 
+	changed := false
 	for _, sec := range sections {
-		fragName := HeaderToFragmentName(sec.Header)
-		if sec.Group != "" {
-			fragName = ChildFragmentName(sec.Group, sec.Header)
-		}
+		fragName := SectionFragmentName(sec)
 		if !selectedFragments[fragName] {
 			continue
 		}
 
 		qualifiedKey := sourcePath + "::" + fragName
 		filename := ProjectFragmentFilename(qualifiedKey)
+		newHash := ContentHash(sec.Content)
+
+		if meta, exists := manifest.Fragments[filename]; exists && meta.ContentHash == newHash {
+			continue
+		}
 
 		manifest.Fragments[filename] = FragmentMeta{
 			Header:      sec.Header,
-			ContentHash: ContentHash(sec.Content),
+			ContentHash: newHash,
 			Group:       sec.Group,
 			Source:      sourcePath,
-			QualifiedKey: qualifiedKey,
 		}
 		if err := WriteFragment(claudeMdDir, filename, sec.Content); err != nil {
 			return err
 		}
+		changed = true
 	}
 
-	return WriteManifest(claudeMdDir, manifest)
+	if changed {
+		return WriteManifest(claudeMdDir, manifest)
+	}
+	return nil
 }
 
 // ImportResult holds the result of importing a CLAUDE.md file.
@@ -338,12 +338,7 @@ func ImportClaudeMD(syncDir, content string) (*ImportResult, error) {
 	var names []string
 
 	for _, sec := range sections {
-		var name string
-		if sec.Group != "" {
-			name = ChildFragmentName(sec.Group, sec.Header)
-		} else {
-			name = HeaderToFragmentName(sec.Header)
-		}
+		name := SectionFragmentName(sec)
 		names = append(names, name)
 		manifest.Order = append(manifest.Order, name)
 		manifest.Fragments[name] = FragmentMeta{
