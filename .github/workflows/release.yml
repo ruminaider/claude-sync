@@ -18,6 +18,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Prepare bundled plugin for embed
+        run: cp -r plugin internal/bundled/plugin
+
       - name: Run tests
         run: go test ./... -v
 
