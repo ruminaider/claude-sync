@@ -3,6 +3,7 @@ package claudemd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // RenamedFragment describes a fragment whose header changed but content is similar.
@@ -152,4 +153,83 @@ func Reconcile(syncDir, currentContent string) (*ReconcileResult, error) {
 	}
 
 	return result, nil
+}
+
+// ReconcileProjectFragments compares current project CLAUDE.md content against
+// stored project fragments and updates any that changed. The qualifiedKeys list
+// contains keys like "~/Work/evvy/CLAUDE.md::section-name". The expandHome
+// function resolves "~/" to the user's home directory.
+func ReconcileProjectFragments(syncDir string, qualifiedKeys []string, expandHome func(string) string) (updated int, err error) {
+	claudeMdDir := filepath.Join(syncDir, claudeMdSubdir)
+
+	manifest, err := ReadManifest(claudeMdDir)
+	if err != nil {
+		return 0, err
+	}
+
+	// Group keys by source path.
+	sourceKeys := make(map[string][]string)
+	for _, key := range qualifiedKeys {
+		if !strings.Contains(key, "::") {
+			continue
+		}
+		source, _, _ := ParseQualifiedKey(key)
+		sourceKeys[source] = append(sourceKeys[source], key)
+	}
+
+	changed := false
+	for source, keys := range sourceKeys {
+		expanded := expandHome(source)
+		data, readErr := os.ReadFile(expanded)
+		if readErr != nil {
+			continue // source not available on this machine
+		}
+
+		sections := Split(string(data))
+
+		// Build lookup from fragment name to section.
+		sectionMap := make(map[string]Section)
+		for _, sec := range sections {
+			name := HeaderToFragmentName(sec.Header)
+			if sec.Group != "" {
+				name = ChildFragmentName(sec.Group, sec.Header)
+			}
+			sectionMap[name] = sec
+		}
+
+		for _, key := range keys {
+			_, fragName, _ := ParseQualifiedKey(key)
+			sec, ok := sectionMap[fragName]
+			if !ok {
+				continue
+			}
+
+			filename := ProjectFragmentFilename(key)
+			meta, exists := manifest.Fragments[filename]
+			newHash := ContentHash(sec.Content)
+
+			if !exists || newHash != meta.ContentHash {
+				if writeErr := WriteFragment(claudeMdDir, filename, sec.Content); writeErr != nil {
+					return updated, writeErr
+				}
+				manifest.Fragments[filename] = FragmentMeta{
+					Header:       sec.Header,
+					ContentHash:  newHash,
+					Group:        sec.Group,
+					Source:       source,
+					QualifiedKey: key,
+				}
+				updated++
+				changed = true
+			}
+		}
+	}
+
+	if changed {
+		if writeErr := WriteManifest(claudeMdDir, manifest); writeErr != nil {
+			return updated, writeErr
+		}
+	}
+
+	return updated, nil
 }

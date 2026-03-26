@@ -21,6 +21,7 @@ type Section struct {
 	Header  string // "" for preamble (content before first ## header)
 	Content string // the full content of the section including the ## header line
 	Group   string // parent fragment name for ### sub-sections; empty for top-level
+	Source  string // source file path (e.g., "~/Work/evvy/CLAUDE.md"); empty for global
 }
 
 // Split splits markdown content on "## " and "### " headers.
@@ -171,9 +172,11 @@ func DirContentHash(dir string) (string, error) {
 
 // FragmentMeta holds metadata about a single fragment.
 type FragmentMeta struct {
-	Header      string `yaml:"header"`
-	ContentHash string `yaml:"content_hash"`
-	Group       string `yaml:"group,omitempty"`
+	Header       string `yaml:"header"`
+	ContentHash  string `yaml:"content_hash"`
+	Group        string `yaml:"group,omitempty"`
+	Source       string `yaml:"source,omitempty"`        // source file path for project fragments
+	QualifiedKey string `yaml:"qualified_key,omitempty"` // original qualified key for project fragments
 }
 
 // Manifest tracks all fragments and their order.
@@ -217,12 +220,102 @@ func WriteFragment(claudeMdDir, name, content string) error {
 }
 
 // ReadFragment reads content from claudeMdDir/name.md.
+// For qualified keys (containing "::"), it resolves the project fragment filename.
 func ReadFragment(claudeMdDir, name string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(claudeMdDir, name+".md"))
+	filename := name
+	if _, _, isProj := ParseQualifiedKey(name); isProj {
+		filename = ProjectFragmentFilename(name)
+	}
+	data, err := os.ReadFile(filepath.Join(claudeMdDir, filename+".md"))
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// ParseQualifiedKey splits a fragment key on "::" into source and fragment name.
+// For unqualified keys (no "::"), isProject is false and fragment is the key itself.
+func ParseQualifiedKey(key string) (source, fragment string, isProject bool) {
+	if idx := strings.Index(key, "::"); idx >= 0 {
+		return key[:idx], key[idx+2:], true
+	}
+	return "", key, false
+}
+
+// ProjectFragmentFilename returns the storage filename (without .md extension)
+// for a project fragment. The format is proj--<8-char source hash>--<fragment>.
+func ProjectFragmentFilename(qualifiedKey string) string {
+	source, fragment, _ := ParseQualifiedKey(qualifiedKey)
+	h := sha256.Sum256([]byte(source))
+	prefix := hex.EncodeToString(h[:])[:8]
+	return "proj--" + prefix + "--" + fragment
+}
+
+// ReadProjectFragment reads a project fragment from the claude-md directory.
+func ReadProjectFragment(claudeMdDir, qualifiedKey string) (string, error) {
+	filename := ProjectFragmentFilename(qualifiedKey)
+	return ReadFragment(claudeMdDir, filename)
+}
+
+// WriteProjectFragment writes a project fragment to the claude-md directory.
+func WriteProjectFragment(claudeMdDir, qualifiedKey, content string) error {
+	filename := ProjectFragmentFilename(qualifiedKey)
+	return WriteFragment(claudeMdDir, filename, content)
+}
+
+// ImportProjectFragments reads a project CLAUDE.md file and exports selected
+// sections to the sync repo's claude-md/ directory. It updates the manifest
+// with metadata for each exported fragment.
+func ImportProjectFragments(syncDir, sourcePath, content string, selectedKeys []string) error {
+	claudeMdDir := filepath.Join(syncDir, claudeMdSubdir)
+	if err := os.MkdirAll(claudeMdDir, 0755); err != nil {
+		return err
+	}
+
+	// Build a set of selected fragment names for this source.
+	selectedFragments := make(map[string]bool)
+	for _, key := range selectedKeys {
+		src, frag, isProj := ParseQualifiedKey(key)
+		if isProj && src == sourcePath {
+			selectedFragments[frag] = true
+		}
+	}
+
+	if len(selectedFragments) == 0 {
+		return nil
+	}
+
+	sections := Split(content)
+	manifest, err := ReadManifest(claudeMdDir)
+	if err != nil {
+		return err
+	}
+
+	for _, sec := range sections {
+		fragName := HeaderToFragmentName(sec.Header)
+		if sec.Group != "" {
+			fragName = ChildFragmentName(sec.Group, sec.Header)
+		}
+		if !selectedFragments[fragName] {
+			continue
+		}
+
+		qualifiedKey := sourcePath + "::" + fragName
+		filename := ProjectFragmentFilename(qualifiedKey)
+
+		manifest.Fragments[filename] = FragmentMeta{
+			Header:      sec.Header,
+			ContentHash: ContentHash(sec.Content),
+			Group:       sec.Group,
+			Source:      sourcePath,
+			QualifiedKey: qualifiedKey,
+		}
+		if err := WriteFragment(claudeMdDir, filename, sec.Content); err != nil {
+			return err
+		}
+	}
+
+	return WriteManifest(claudeMdDir, manifest)
 }
 
 // ImportResult holds the result of importing a CLAUDE.md file.

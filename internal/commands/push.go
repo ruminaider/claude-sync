@@ -149,6 +149,20 @@ func PushScan(claudeDir, syncDir string) (*PushScanResult, error) {
 		}
 	}
 
+	// Reconcile project CLAUDE.md fragments.
+	if len(cfg.ClaudeMD.Include) > 0 {
+		projUpdated, projErr := claudemd.ReconcileProjectFragments(syncDir, cfg.ClaudeMD.Include, expandHome)
+		if projErr == nil && projUpdated > 0 {
+			if result.ChangedClaudeMD == nil {
+				result.ChangedClaudeMD = &claudemd.ReconcileResult{}
+			}
+			// Count project fragment updates alongside global ones.
+			for i := 0; i < projUpdated; i++ {
+				result.ChangedClaudeMD.Updated = append(result.ChangedClaudeMD.Updated, "(project fragment)")
+			}
+		}
+	}
+
 	// Scan memory changes.
 	syncMemDir := filepath.Join(syncDir, "memory")
 	memSources := []string{filepath.Join(claudeDir, "memory")}
