@@ -596,7 +596,7 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 		Version:      "1.0.0",
 		Upstream:     upstream,
 		Pinned:       map[string]string{},
-		Forked:       forkedNames,
+		Forked:       removeFromSlice(forkedNames, bundled.PluginName),
 		Excluded:     result.ExcludedPlugins,
 		Settings:     cfgSettings,
 		Hooks:        cfgHooks,

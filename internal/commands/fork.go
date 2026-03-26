@@ -124,8 +124,11 @@ func Unfork(claudeDir, syncDir, pluginName, marketplace string) error {
 	// Remove from forked.
 	cfg.Forked = removeFromSlice(cfg.Forked, pluginName)
 
-	// Clean up marketplace entry if no forks remain.
-	if len(cfg.Forked) == 0 {
+	// Clean up marketplace entry if no forks remain on disk.
+	// Uses directory scan instead of cfg.Forked because the bundled plugin
+	// lives on disk but is not tracked in config.
+	forks, _ := forkedplugins.ListForkedPlugins(syncDir)
+	if len(forks) == 0 {
 		_ = forkedplugins.UnregisterLocalMarketplace(claudeDir)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -117,18 +116,6 @@ func Join(repoURL, claudeDir, syncDir string) (*JoinResult, error) {
 	bundledPluginDir := filepath.Join(syncDir, "plugins", bundled.PluginName)
 	if err := bundled.ExtractPlugin(bundledPluginDir); err != nil {
 		return nil, fmt.Errorf("extracting bundled plugin: %w", err)
-	}
-
-	// Register the bundled plugin in the Forked list so pull can find it.
-	if !slices.Contains(cfg.Forked, bundled.PluginName) {
-		cfg.Forked = append(cfg.Forked, bundled.PluginName)
-		updatedData, err := config.Marshal(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("marshalling config after forked update: %w", err)
-		}
-		if err := os.WriteFile(cfgPath, updatedData, 0644); err != nil {
-			return nil, fmt.Errorf("writing config after forked update: %w", err)
-		}
 	}
 
 	// Expose config categories so the CLI can prompt about them.

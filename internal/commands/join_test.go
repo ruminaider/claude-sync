@@ -482,12 +482,12 @@ func TestJoin_ExtractsBundledPlugin(t *testing.T) {
 	_, err = os.Stat(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"))
 	assert.NoError(t, err, "plugin.json should exist after join")
 
-	// Verify bundled plugin is registered in config.yaml Forked list.
+	// Verify bundled plugin is NOT in config.yaml Forked list (it's infrastructure, not a user fork).
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	require.NoError(t, err)
 	cfg, err := config.Parse(cfgData)
 	require.NoError(t, err)
-	assert.Contains(t, cfg.Forked, "claude-sync")
+	assert.NotContains(t, cfg.Forked, "claude-sync")
 }
 
 func TestNormalizeURL(t *testing.T) {

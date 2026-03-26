@@ -157,7 +157,7 @@ func TestInit_CreatesV2Config(t *testing.T) {
 	assert.Equal(t, "1.0.0", cfg.Version)
 	assert.NotEmpty(t, cfg.Upstream)
 	assert.Empty(t, cfg.Pinned)
-	assert.Contains(t, cfg.Forked, "claude-sync") // bundled plugin is always included
+	assert.NotContains(t, cfg.Forked, "claude-sync") // bundled plugin should not appear in config
 }
 
 func TestInit_AutoForksNonPortablePlugins(t *testing.T) {
@@ -324,7 +324,7 @@ func TestInit_SkipsClaudeSyncForksEntries(t *testing.T) {
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
 	assert.Len(t, cfg.Upstream, 2)
-	assert.Equal(t, []string{"claude-sync"}, cfg.Forked) // bundled plugin always present
+	assert.Empty(t, cfg.Forked) // bundled plugin should not appear in config
 }
 
 func TestInit_IncludesLocalScopePlugins(t *testing.T) {
@@ -388,7 +388,7 @@ func TestInit_AllPortableStaysUpstream(t *testing.T) {
 	cfgData, _ := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 	cfg, _ := config.Parse(cfgData)
 	assert.Len(t, cfg.Upstream, 3)
-	assert.Equal(t, []string{"claude-sync"}, cfg.Forked) // bundled plugin always present
+	assert.Empty(t, cfg.Forked) // bundled plugin should not appear in config
 }
 
 // --- New tests for InitScan and granular Init ---
