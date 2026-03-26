@@ -1183,6 +1183,21 @@ func refreshStalePlugins(claudeDir string, staleKeys []string, installed *claude
 	return updated, failed
 }
 
+// parseEnabledPlugins extracts the enabledPlugins map from a settings object.
+// Always returns a non-nil map on success.
+func parseEnabledPlugins(settings map[string]json.RawMessage) (map[string]bool, error) {
+	var ep map[string]bool
+	if raw, ok := settings["enabledPlugins"]; ok {
+		if err := json.Unmarshal(raw, &ep); err != nil {
+			return nil, err
+		}
+	}
+	if ep == nil {
+		ep = make(map[string]bool)
+	}
+	return ep, nil
+}
+
 // ReconcileEnabledPlugins ensures every plugin that is both in
 // effectiveDesired and installed has an enabledPlugins entry in settings.json.
 // Returns the list of plugin keys that were added and the final enabledPlugins
@@ -1194,14 +1209,9 @@ func ReconcileEnabledPlugins(claudeDir string, effectiveDesired []string, instal
 		settings = make(map[string]json.RawMessage)
 	}
 
-	var ep map[string]bool
-	if raw, ok := settings["enabledPlugins"]; ok {
-		if err := json.Unmarshal(raw, &ep); err != nil {
-			return nil, nil, fmt.Errorf("parsing enabledPlugins: %w", err)
-		}
-	}
-	if ep == nil {
-		ep = make(map[string]bool)
+	ep, err := parseEnabledPlugins(settings)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing enabledPlugins: %w", err)
 	}
 
 	var reconciled []string
@@ -1247,13 +1257,8 @@ func propagateEnabledPluginsToCCS(globalEP map[string]bool) {
 			instSettings = make(map[string]json.RawMessage)
 		}
 
-		var instEP map[string]bool
-		if instRaw, ok := instSettings["enabledPlugins"]; ok {
-			if err := json.Unmarshal(instRaw, &instEP); err != nil {
-				instEP = make(map[string]bool)
-			}
-		}
-		if instEP == nil {
+		instEP, err := parseEnabledPlugins(instSettings)
+		if err != nil {
 			instEP = make(map[string]bool)
 		}
 
