@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // The all: prefix is required so that go:embed includes dotfiles such as
@@ -73,7 +74,11 @@ func ExtractPlugin(dstDir string) error {
 			return fmt.Errorf("creating directory %s: %w", filepath.Dir(target), err)
 		}
 
-		if err := os.WriteFile(target, data, 0644); err != nil {
+		perm := os.FileMode(0644)
+		if strings.HasSuffix(path, ".sh") {
+			perm = 0755
+		}
+		if err := os.WriteFile(target, data, perm); err != nil {
 			return fmt.Errorf("writing %s: %w", target, err)
 		}
 		return nil

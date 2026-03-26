@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,32 @@ func TestExtractPlugin(t *testing.T) {
 	}
 	if _, ok := parsed["name"]; !ok {
 		t.Error("plugin.json missing 'name' field")
+	}
+}
+
+func TestExtractPlugin_ShellScriptsAreExecutable(t *testing.T) {
+	dstDir := filepath.Join(t.TempDir(), "claude-sync")
+
+	if err := ExtractPlugin(dstDir); err != nil {
+		t.Fatalf("ExtractPlugin failed: %v", err)
+	}
+
+	// Walk the extracted directory and check that all .sh files are executable.
+	err := filepath.Walk(dstDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".sh") {
+			return nil
+		}
+		if info.Mode()&0111 == 0 {
+			rel, _ := filepath.Rel(dstDir, path)
+			t.Errorf("%s is not executable (mode %o)", rel, info.Mode())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking extracted directory: %v", err)
 	}
 }
 
