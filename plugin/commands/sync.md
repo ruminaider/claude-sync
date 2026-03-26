@@ -21,6 +21,8 @@ Parse the JSON output and present a human-readable summary showing:
 - Pinned plugins with their locked versions
 - Forked plugins from the sync repo
 - Any untracked or missing plugins
+- Memory sync status (whether `~/.claude/memory/` fragments are tracked)
+- Auto-commit mode (from `user-preferences.yaml`: `all`, `tracked`, or `manual`)
 
 ### /sync pull
 Pull latest configuration from remote. Run: `claude-sync pull`
@@ -37,4 +39,4 @@ Report results including any failures.
 2. Always use the CLI tool via bash — do not modify config files directly
 3. For `status`, use `--json` flag and format the output nicely
 4. Report errors clearly and suggest next steps
-5. If claude-sync is not initialized, guide the user to run `claude-sync init` or `claude-sync join <url>`
+5. If claude-sync is not initialized, guide the user to run `claude-sync config create` or `claude-sync config join <url>`

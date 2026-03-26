@@ -10,6 +10,7 @@ Sync Claude Code configuration across multiple machines.
 - **Profiles** - Compose configurations (base + work/personal)
 - **Full history** - Git-backed versioning with rollback support
 - **User preferences** - Personal overrides on shared team config
+- **Memory sync** - Syncs `~/.claude/memory/` fragments across machines
 
 ## Installation
 
@@ -64,9 +65,19 @@ Both commands install a Claude Code plugin that automatically checks for config 
 claude-sync status        # Show current state
 claude-sync pull          # Pull latest config
 claude-sync push          # Push your changes
-claude-sync config update # Update config from current setup
+claude-sync config update # Update config from current setup (TUI-based)
 claude-sync update        # Apply plugin updates
 ```
+
+`config update` re-scans your local Claude Code state into config.yaml. Items from existing config that aren't detected locally appear with `[config]` tags in the TUI; they are preserved by default but can be deselected to remove them.
+
+### Auto-commit control
+
+The `user-preferences.yaml` file supports a `sync.auto_commit` setting with three modes:
+
+- **`all`** : automatically commit all changes on push (default)
+- **`tracked`** : only auto-commit changes to files already tracked in config
+- **`manual`** : never auto-commit; you manage commits in `~/.claude-sync/` yourself
 
 ### Inside Claude Code
 
@@ -82,6 +93,19 @@ When you initialize or join a shared config, claude-sync detects **non-portable 
 1. The plugin directory is copied to `~/.claude-sync/plugins/<name>/`
 2. The config records it in the `forked:` category instead of `upstream:`
 3. A **local marketplace** (`claude-sync-forks`) is registered in `~/.claude/plugins/known_marketplaces.json` so Claude Code can discover the forked plugins
+
+### Plugin categories
+
+Config.yaml tracks four plugin categories:
+
+- **`plugins.upstream`** : installed from a marketplace, auto-updated on pull
+- **`plugins.pinned`** : marketplace plugins locked at a specific version
+- **`plugins.forked`** : copied into the config repo for local customization
+- **`plugins.excluded`** : plugins explicitly excluded from sync (present locally but not managed)
+
+### enabledPlugins self-healing
+
+`pull` now self-heals `enabledPlugins` entries in `settings.json` that were silently dropped by Claude Code. If a plugin is tracked in config but missing from `enabledPlugins`, pull re-adds it automatically.
 
 You can also manually fork and unfork plugins:
 
@@ -138,7 +162,7 @@ Each key can be independently managed per project:
 
 - **hooks** -- PreToolUse/PostToolUse hook definitions
 - **permissions** -- allow/deny tool permission lists
-- **claude_md** -- CLAUDE.md fragment assembly
+- **claude_md** -- CLAUDE.md fragment assembly (supports `###`-level sub-sections with `parent--child` naming for finer-grained control)
 - **mcp** -- MCP server configuration
 
 ### Conflict resolution

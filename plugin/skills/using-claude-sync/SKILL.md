@@ -19,11 +19,12 @@ claude-sync is a declarative, git-backed config synchronization tool for Claude 
 | Settings | `settings` | `~/.claude/settings.json` |
 | Hooks | `hooks` | `~/.claude/settings.json` (hooks section) |
 | Permissions | `permissions` | `~/.claude/settings.json` (allow/deny) |
-| CLAUDE.md | `claude_md.include` | `~/.claude/CLAUDE.md` (assembled from fragments) |
+| CLAUDE.md | `claude_md.include` | `~/.claude/CLAUDE.md` (assembled from fragments). Supports `###`-level sub-sections with `parent--child` naming for finer-grained control. |
 | MCP Servers | `mcp` | `~/.claude/.mcp.json` |
 | Keybindings | `keybindings` | `~/.claude/keybindings.json` |
 | Commands | `commands` | `~/.claude/commands/*.md` |
 | Skills | `skills` | `~/.claude/skills/*/SKILL.md` |
+| Memory.md | `memory.include` | `~/.claude/memory/` (assembled fragments) |
 
 ## Plugin Sync Model
 
@@ -33,7 +34,8 @@ Three categories with different behaviors:
 |----------|-----------|---------------|---------|
 | **Upstream** | `plugins.upstream` | Marketplace (remote) | Auto-updated on pull |
 | **Pinned** | `plugins.pinned` | Marketplace at version | Locked until unpin |
-| **Forked** | `plugins.forked` | `~/.claude-sync/plugins/` | Manual — you own it |
+| **Forked** | `plugins.forked` | `~/.claude-sync/plugins/` | Manual; you own it |
+| **Excluded** | `plugins.excluded` | N/A (present locally, not managed) | Ignored by sync |
 
 **Key rule:** Upstream plugins are installed from their marketplace. Forked plugins are installed from the config repo's `plugins/` directory. Never edit upstream plugins directly — fork first.
 
@@ -85,9 +87,11 @@ claude-sync unfork plugin-name@marketplace
 | Unfork plugin | `claude-sync unfork name@mkt` | Returns to upstream tracking |
 | Pin version | `claude-sync pin name version` | Locks plugin at specific version |
 | Unpin | `claude-sync unpin name` | Removes version lock |
-| Update config | `claude-sync config update` | Re-scans local Claude Code into config.yaml |
+| Update config | `claude-sync config update` | Re-scans local Claude Code into config.yaml. Items from existing config not detected locally appear with `[config]` tags in the TUI (preserved by default, deselectable to remove). Profile-level items (plugins.add, MCP servers) are also preserved during update. |
 
 **Auto-sync:** A SessionStart hook runs `claude-sync pull --auto` at the start of each session, keeping config current.
+
+**Auto-commit modes:** `user-preferences.yaml` has a `sync.auto_commit` setting: `all` (default, commits everything on push), `tracked` (only commits files already in config), or `manual` (no auto-commits).
 
 ## Pull Behavior: Local Modification Protection
 
@@ -111,6 +115,10 @@ mcp:
 ```
 
 Push auto-detects and replaces secrets with `${VAR}` references. Pull expands them from the shell environment.
+
+## Bundled Plugin
+
+The claude-sync bundled plugin (providing the `/sync` command and SessionStart hook) is infrastructure. It is not tracked in config.yaml's forked list; it is installed and updated automatically by `claude-sync pull` and `claude-sync update`.
 
 ## Common Mistakes
 
