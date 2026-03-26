@@ -58,6 +58,7 @@ type PullResult struct {
 	ProjectInitDir             string   // suggested directory for project init (project root, not CWD)
 	AvailableProfiles          []string // profile names from sync dir (set when ProjectInitEligible)
 	DuplicatePlugins           []plugins.Duplicate // unresolved duplicate plugins (auto mode)
+	EnabledPluginsReconciled   []string // plugins whose enabledPlugins entry was restored
 	SettingsSkipped            bool     // settings.json had local modifications
 	ClaudeMDSkipped            bool     // CLAUDE.md had local modifications
 	KeybindingsSkipped         bool     // keybindings.json had local modifications
@@ -300,6 +301,22 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 	if stale := detectStalePlugins(claudeDir, result.Synced); len(stale) > 0 {
 		installed, _ := claudecode.ReadInstalledPlugins(claudeDir)
 		result.Updated, result.UpdateFailed = refreshStalePlugins(claudeDir, stale, installed, quiet)
+	}
+
+	// Self-heal enabledPlugins lost during failed install cycles.
+	freshInstalled, freshErr := claudecode.ReadInstalledPlugins(claudeDir)
+	if freshErr != nil && !quiet {
+		fmt.Fprintf(os.Stderr, "Warning: could not read installed plugins for reconciliation: %v\n", freshErr)
+	}
+	if freshErr == nil {
+		reconciled, ep, reconErr := ReconcileEnabledPlugins(claudeDir, result.EffectiveDesired, freshInstalled)
+		if reconErr != nil && !quiet {
+			fmt.Fprintf(os.Stderr, "Warning: failed to reconcile enabledPlugins: %v\n", reconErr)
+		}
+		result.EnabledPluginsReconciled = reconciled
+		if ep != nil {
+			propagateEnabledPluginsToCCS(ep)
+		}
 	}
 
 	// Read user preferences for category skip logic.
@@ -1164,6 +1181,108 @@ func refreshStalePlugins(claudeDir string, staleKeys []string, installed *claude
 	}
 
 	return updated, failed
+}
+
+// parseEnabledPlugins extracts the enabledPlugins map from a settings object.
+// Always returns a non-nil map on success.
+func parseEnabledPlugins(settings map[string]json.RawMessage) (map[string]bool, error) {
+	var ep map[string]bool
+	if raw, ok := settings["enabledPlugins"]; ok {
+		if err := json.Unmarshal(raw, &ep); err != nil {
+			return nil, err
+		}
+	}
+	if ep == nil {
+		ep = make(map[string]bool)
+	}
+	return ep, nil
+}
+
+// ReconcileEnabledPlugins ensures every plugin that is both in
+// effectiveDesired and installed has an enabledPlugins entry in settings.json.
+// Returns the list of plugin keys that were added and the final enabledPlugins
+// map (for CCS propagation without re-reading). Entries explicitly set to
+// false (user-disabled) are not overwritten.
+func ReconcileEnabledPlugins(claudeDir string, effectiveDesired []string, installed *claudecode.InstalledPlugins) ([]string, map[string]bool, error) {
+	settings, err := claudecode.ReadSettings(claudeDir)
+	if err != nil {
+		settings = make(map[string]json.RawMessage)
+	}
+
+	ep, err := parseEnabledPlugins(settings)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing enabledPlugins: %w", err)
+	}
+
+	var reconciled []string
+	for _, key := range effectiveDesired {
+		if _, installedOK := installed.Plugins[key]; !installedOK {
+			continue
+		}
+		if _, exists := ep[key]; exists {
+			continue
+		}
+		ep[key] = true
+		reconciled = append(reconciled, key)
+	}
+
+	if len(reconciled) == 0 {
+		return nil, ep, nil
+	}
+
+	updated, err := json.Marshal(ep)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshaling enabledPlugins: %w", err)
+	}
+	settings["enabledPlugins"] = updated
+	if err := claudecode.WriteSettings(claudeDir, settings); err != nil {
+		return nil, nil, fmt.Errorf("writing settings: %w", err)
+	}
+	sort.Strings(reconciled)
+	return reconciled, ep, nil
+}
+
+// propagateEnabledPluginsToCCS merges enabled (true) entries from globalEP
+// into each CCS instance's settings.json. Best-effort: errors are silently
+// ignored, matching the CCS memory sync pattern.
+func propagateEnabledPluginsToCCS(globalEP map[string]bool) {
+	instances, ok := paths.CCSInstances()
+	if !ok {
+		return
+	}
+
+	for _, inst := range instances {
+		instSettings, err := claudecode.ReadSettings(inst)
+		if err != nil {
+			instSettings = make(map[string]json.RawMessage)
+		}
+
+		instEP, err := parseEnabledPlugins(instSettings)
+		if err != nil {
+			instEP = make(map[string]bool)
+		}
+
+		changed := false
+		for k, v := range globalEP {
+			if !v {
+				continue
+			}
+			if _, exists := instEP[k]; !exists {
+				instEP[k] = true
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+
+		updated, err := json.Marshal(instEP)
+		if err != nil {
+			continue
+		}
+		instSettings["enabledPlugins"] = updated
+		_ = claudecode.WriteSettings(inst, instSettings)
+	}
 }
 
 // updatePluginContentHashes computes and stores content hashes for

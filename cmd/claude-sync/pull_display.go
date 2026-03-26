@@ -16,6 +16,9 @@ func printPullResult(result *commands.PullResult) {
 	if len(result.Updated) > 0 {
 		fmt.Printf("✓ %d plugin(s) updated\n", len(result.Updated))
 	}
+	if len(result.EnabledPluginsReconciled) > 0 {
+		fmt.Printf("✓ %d plugin(s) re-enabled in settings\n", len(result.EnabledPluginsReconciled))
+	}
 
 	if len(result.SettingsApplied) > 0 {
 		fmt.Printf("✓ Settings applied: %s\n", strings.Join(result.SettingsApplied, ", "))
@@ -86,7 +89,8 @@ func printPullResult(result *commands.PullResult) {
 		}
 	}
 
-	nothingChanged := len(result.ToInstall) == 0 && len(result.Updated) == 0 && len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
+	nothingChanged := len(result.ToInstall) == 0 && len(result.Updated) == 0 && len(result.EnabledPluginsReconciled) == 0 &&
+		len(result.SettingsApplied) == 0 && len(result.HooksApplied) == 0 &&
 		len(result.HooksSkipped) == 0 && len(result.SkippedCategories) == 0 && !result.PermissionsApplied && !result.ClaudeMDAssembled &&
 		len(result.MCPApplied) == 0 && len(result.MCPProjectApplied) == 0 && !result.KeybindingsApplied &&
 		!result.SettingsSkipped && !result.ClaudeMDSkipped && !result.KeybindingsSkipped
