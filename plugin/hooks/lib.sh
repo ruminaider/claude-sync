@@ -1,6 +1,6 @@
 #!/bin/bash
 # Shared utilities for claude-sync plugin hooks
-# Sourced by session-start.sh, session-end.sh, stop-change-check.sh, stop-next-steps.sh
+# Sourced by session-start.sh, session-end.sh, stop-change-check.sh
 
 SYNC_DIR="$HOME/.claude-sync"
 SESSIONS_DIR="$SYNC_DIR/sessions"
