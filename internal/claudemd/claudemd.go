@@ -3,9 +3,11 @@ package claudemd
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -118,6 +120,52 @@ func HeaderToFragmentName(header string) string {
 func ContentHash(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(h[:])[:16]
+}
+
+// DirContentHash computes a combined hash of all files in a directory.
+// Files are sorted by relative path for determinism. Directories named
+// .git and __pycache__ are skipped, as are .DS_Store files.
+func DirContentHash(dir string) (string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "__pycache__" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == ".DS_Store" {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	sort.Strings(files)
+
+	h := sha256.New()
+	for _, rel := range files {
+		h.Write([]byte(rel))
+		h.Write([]byte{0})
+		data, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			return "", err
+		}
+		h.Write(data)
+		h.Write([]byte{0})
+	}
+
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
 // FragmentMeta holds metadata about a single fragment.

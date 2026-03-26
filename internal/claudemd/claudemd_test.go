@@ -319,3 +319,31 @@ func TestChildFragmentName(t *testing.T) {
 	assert.Equal(t, "work-style--git-commits",
 		claudemd.ChildFragmentName("work-style", "Git Commits"))
 }
+
+func TestDirContentHash(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("world"), 0644))
+
+	h1, err := claudemd.DirContentHash(dir)
+	require.NoError(t, err)
+	assert.Len(t, h1, 16)
+
+	// Same files, same hash.
+	h2, err := claudemd.DirContentHash(dir)
+	require.NoError(t, err)
+	assert.Equal(t, h1, h2)
+
+	// Modify a file, hash changes.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("changed"), 0644))
+	h3, err := claudemd.DirContentHash(dir)
+	require.NoError(t, err)
+	assert.NotEqual(t, h1, h3)
+
+	// .DS_Store is ignored.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte("junk"), 0644))
+	h4, err := claudemd.DirContentHash(dir)
+	require.NoError(t, err)
+	assert.Equal(t, h3, h4, ".DS_Store should be ignored")
+}

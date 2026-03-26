@@ -1046,21 +1046,19 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 			srcDir := filepath.Join(srcSkillsDir, entry.Name())
 			dstDir := filepath.Join(claudeDir, "skills", entry.Name())
 
-			// Hash the SKILL.md content for modification detection.
-			srcSkillMD := filepath.Join(srcDir, "SKILL.md")
-			srcData, err := os.ReadFile(srcSkillMD)
+			// Hash the entire skill directory for modification detection.
+			// This covers SKILL.md and all companion files (README.md, etc.).
+			srcHash, err := claudemd.DirContentHash(srcDir)
 			if err != nil {
-				// No SKILL.md in source — copy without tracking.
+				// Can't hash source directory; copy without tracking.
 				if copyDir(srcDir, dstDir) == nil {
 					skillsRestored++
 				}
 				continue
 			}
 
-			// Check if local SKILL.md was modified since last sync.
-			dstSkillMD := filepath.Join(dstDir, "SKILL.md")
-			if localData, err := os.ReadFile(dstSkillMD); err == nil {
-				localHash := claudemd.ContentHash(string(localData))
+			// Check if any file in the local skill directory was modified since last sync.
+			if localHash, err := claudemd.DirContentHash(dstDir); err == nil {
 				if storedHash, ok := skillHashes.Hashes[entry.Name()]; ok && localHash != storedHash {
 					skillsSkipped++
 					continue
@@ -1068,7 +1066,7 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 			}
 
 			if copyDir(srcDir, dstDir) == nil {
-				skillHashes.Hashes[entry.Name()] = claudemd.ContentHash(string(srcData))
+				skillHashes.Hashes[entry.Name()] = srcHash
 				skillsRestored++
 			}
 		}

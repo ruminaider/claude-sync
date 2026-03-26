@@ -1412,6 +1412,7 @@ skills:
 	skillDir := filepath.Join(syncDir, "skills", "brainstorming")
 	require.NoError(t, os.MkdirAll(skillDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Brainstorming\nOriginal content"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "README.md"), []byte("# Brainstorming README\nCompanion content"), 0644))
 
 	require.NoError(t, exec.Command("git", "init", syncDir).Run())
 	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
@@ -1855,4 +1856,62 @@ func TestReconcileEnabledPlugins_IgnoresDesiredButNotInstalled(t *testing.T) {
 	assert.True(t, ep["a@m"])
 	_, hasBM := ep["b@m"]
 	assert.False(t, hasBM, "not-installed plugin should not get an entry")
+}
+
+func TestRestoreSkipsLocallyModifiedSkillCompanion(t *testing.T) {
+	claudeDir, syncDir := setupCommandSkillEnv(t)
+
+	// First pull: restores skills (including companion files) and creates hash file.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.SkillsRestored)
+	assert.Equal(t, 0, result.SkillsSkipped)
+
+	// Verify companion file was copied.
+	localReadme := filepath.Join(claudeDir, "skills", "brainstorming", "README.md")
+	_, err = os.Stat(localReadme)
+	require.NoError(t, err, "companion README.md should exist after first pull")
+
+	// Modify only the companion file locally (simulates agent editing README).
+	require.NoError(t, os.WriteFile(localReadme, []byte("# Brainstorming README\nLocally modified"), 0644))
+
+	// Second pull: should skip because the directory hash changed.
+	result, err = commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.SkillsRestored, "should not overwrite locally modified companion")
+	assert.Equal(t, 1, result.SkillsSkipped, "should skip skill with modified companion")
+
+	// Local modification should still be present.
+	data, err := os.ReadFile(localReadme)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Locally modified")
+}
+
+func TestRestoreUpdatesSkillCompanionFiles(t *testing.T) {
+	claudeDir, syncDir := setupCommandSkillEnv(t)
+
+	// First pull: restores skills.
+	result, err := commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.SkillsRestored)
+
+	// Update only the companion file in the sync dir (simulates remote change).
+	syncReadme := filepath.Join(syncDir, "skills", "brainstorming", "README.md")
+	require.NoError(t, os.WriteFile(syncReadme, []byte("# Brainstorming README\nUpdated remotely"), 0644))
+
+	// Commit the change so the sync dir is a valid repo.
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "update companion").Run())
+
+	// Second pull: should detect source dir changed and copy the update.
+	result, err = commands.Pull(claudeDir, syncDir, true)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.SkillsRestored, "should copy updated companion from sync dir")
+	assert.Equal(t, 0, result.SkillsSkipped)
+
+	// Verify the updated companion file was copied.
+	localReadme := filepath.Join(claudeDir, "skills", "brainstorming", "README.md")
+	data, err := os.ReadFile(localReadme)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Updated remotely")
 }
