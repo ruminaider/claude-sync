@@ -192,8 +192,26 @@ func NewModel(scan *commands.InitScanResult, claudeDir, syncDir, remoteURL strin
 		}
 	}
 
-	// Build CLAUDE.md preview.
-	previewSections := ClaudeMDPreviewSections(scan.ClaudeMDSections, "~/.claude/CLAUDE.md")
+	// Build CLAUDE.md preview, partitioning sections by source.
+	// Global sections (Source == "") use ~/.claude/CLAUDE.md as the source.
+	// Project sections use their actual Source path.
+	globalSource := "~/.claude/CLAUDE.md"
+	sourceGroups := make(map[string][]claudemd.Section)
+	var sourceOrder []string
+	for _, sec := range scan.ClaudeMDSections {
+		src := sec.Source
+		if src == "" {
+			src = globalSource
+		}
+		if _, seen := sourceGroups[src]; !seen {
+			sourceOrder = append(sourceOrder, src)
+		}
+		sourceGroups[src] = append(sourceGroups[src], sec)
+	}
+	var previewSections []PreviewSection
+	for _, src := range sourceOrder {
+		previewSections = append(previewSections, ClaudeMDPreviewSections(sourceGroups[src], src)...)
+	}
 
 	// Tag config-only CLAUDE.md fragments.
 	if scan.ConfigOnly != nil {

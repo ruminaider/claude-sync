@@ -647,10 +647,30 @@ func buildAndWriteConfig(opts InitOptions) (*InitResult, []string, error) {
 		}
 	}
 
-	// Append project CLAUDE.md fragment selections to config. These are qualified
-	// keys (with "::") that track which project fragments the user selected.
+	// Append project CLAUDE.md fragment selections to config and export their
+	// content to the sync repo so other machines can resolve them.
 	if len(opts.ProjectClaudeMDFragments) > 0 {
 		cfg.ClaudeMD.Include = append(cfg.ClaudeMD.Include, opts.ProjectClaudeMDFragments...)
+
+		// Group selected fragments by source path and export content.
+		sourceFragments := make(map[string][]string)
+		for _, key := range opts.ProjectClaudeMDFragments {
+			source, _, isProj := claudemd.ParseQualifiedKey(key)
+			if isProj {
+				sourceFragments[source] = append(sourceFragments[source], key)
+			}
+		}
+		for source, keys := range sourceFragments {
+			expanded := expandHome(source)
+			data, readErr := os.ReadFile(expanded)
+			if readErr != nil {
+				continue // source not available on this machine; skip export
+			}
+			if exportErr := claudemd.ImportProjectFragments(syncDir, source, string(data), keys); exportErr != nil {
+				return nil, nil, fmt.Errorf("exporting project CLAUDE.md fragments from %s: %w", source, exportErr)
+			}
+		}
+
 		cfgData, err = config.Marshal(cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshaling config with project CLAUDE.md: %w", err)

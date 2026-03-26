@@ -538,6 +538,62 @@ func TestMergeExistingConfig_ClaudeMDFragments_NoDuplicates(t *testing.T) {
 	})
 }
 
+func TestMergeClaudeMDFragments_SkipsUnavailableProjectFragment(t *testing.T) {
+	t.Run("does not inject placeholder for unavailable project fragment", func(t *testing.T) {
+		syncDir := t.TempDir()
+		// No exported project fragment file exists in claude-md/.
+
+		scan := &commands.InitScanResult{}
+		cfg := &config.Config{
+			ClaudeMD: config.ClaudeMDConfig{
+				Include: []string{"~/Work/evvy/CLAUDE.md::beads-issue-tracking"},
+			},
+		}
+
+		commands.MergeExistingConfig(scan, cfg, syncDir)
+
+		// No section should be added: project fragments without exported
+		// content are silently skipped to avoid garbled qualified keys.
+		assert.Empty(t, scan.ClaudeMDSections)
+
+		// The key should still be tracked in ConfigOnly so it isn't lost.
+		assert.True(t, scan.ConfigOnly["fragment:~/Work/evvy/CLAUDE.md::beads-issue-tracking"])
+	})
+}
+
+func TestMergeClaudeMDFragments_InjectsAvailableProjectFragment(t *testing.T) {
+	t.Run("injects sections with Source from exported project fragment", func(t *testing.T) {
+		syncDir := t.TempDir()
+		claudeMdDir := filepath.Join(syncDir, "claude-md")
+		require.NoError(t, os.MkdirAll(claudeMdDir, 0755))
+
+		qualifiedKey := "~/Work/evvy/CLAUDE.md::beads-issue-tracking"
+		fragFilename := claudemd.ProjectFragmentFilename(qualifiedKey)
+		fragContent := "## Beads Issue Tracking\n\nTrack issues in Linear project BEADS."
+
+		require.NoError(t, os.WriteFile(
+			filepath.Join(claudeMdDir, fragFilename+".md"),
+			[]byte(fragContent), 0644,
+		))
+
+		scan := &commands.InitScanResult{}
+		cfg := &config.Config{
+			ClaudeMD: config.ClaudeMDConfig{
+				Include: []string{qualifiedKey},
+			},
+		}
+
+		commands.MergeExistingConfig(scan, cfg, syncDir)
+
+		// The exported content should be split and injected with the correct Source.
+		require.Len(t, scan.ClaudeMDSections, 1)
+		assert.Equal(t, "Beads Issue Tracking", scan.ClaudeMDSections[0].Header)
+		assert.Equal(t, "~/Work/evvy/CLAUDE.md", scan.ClaudeMDSections[0].Source)
+		assert.Contains(t, scan.ClaudeMDSections[0].Content, "Track issues in Linear project BEADS")
+		assert.True(t, scan.ConfigOnly["fragment:"+qualifiedKey])
+	})
+}
+
 func TestMergeExistingConfig_ClaudeMDFragments_EmptyInclude(t *testing.T) {
 	t.Run("no-op when config has no CLAUDE.md includes", func(t *testing.T) {
 		scan := &commands.InitScanResult{}

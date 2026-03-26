@@ -244,9 +244,19 @@ func mergeClaudeMDFragments(scan *InitScanResult, fragments []string, syncDir st
 			continue
 		}
 
+		source, _, isProject := claudemd.ParseQualifiedKey(fragKey)
+
 		content, err := claudemd.ReadFragment(claudeMdDir, fragKey)
 		if err != nil {
-			// Fragment file not available locally; inject a placeholder.
+			if isProject {
+				// Project fragment not available: skip the placeholder entirely.
+				// The key is preserved in config.yaml but showing a garbled
+				// qualified key as a section header confuses the user.
+				scan.ConfigOnly["fragment:"+fragKey] = true
+				existing[fragKey] = true
+				continue
+			}
+			// Global fragment not available: inject placeholder as before.
 			placeholder := claudemd.Section{
 				Header:  fragKey,
 				Content: fmt.Sprintf("## %s\n\n(fragment not available locally)", fragKey),
@@ -255,6 +265,11 @@ func mergeClaudeMDFragments(scan *InitScanResult, fragments []string, syncDir st
 		} else {
 			// Split the fragment content and append all resulting sections.
 			sections := claudemd.Split(content)
+			for i := range sections {
+				if isProject {
+					sections[i].Source = source
+				}
+			}
 			scan.ClaudeMDSections = append(scan.ClaudeMDSections, sections...)
 		}
 

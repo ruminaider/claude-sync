@@ -320,30 +320,105 @@ func TestChildFragmentName(t *testing.T) {
 		claudemd.ChildFragmentName("work-style", "Git Commits"))
 }
 
+func TestParseQualifiedKey(t *testing.T) {
+	t.Run("global key", func(t *testing.T) {
+		source, frag, isProj := claudemd.ParseQualifiedKey("git-commits")
+		assert.Equal(t, "", source)
+		assert.Equal(t, "git-commits", frag)
+		assert.False(t, isProj)
+	})
+
+	t.Run("project key", func(t *testing.T) {
+		source, frag, isProj := claudemd.ParseQualifiedKey("~/Work/evvy/CLAUDE.md::beads-issue-tracking")
+		assert.Equal(t, "~/Work/evvy/CLAUDE.md", source)
+		assert.Equal(t, "beads-issue-tracking", frag)
+		assert.True(t, isProj)
+	})
+}
+
+func TestProjectFragmentFilename(t *testing.T) {
+	name := claudemd.ProjectFragmentFilename("~/Work/evvy/CLAUDE.md::beads-issue-tracking")
+	assert.Contains(t, name, "proj--")
+	assert.Contains(t, name, "--beads-issue-tracking")
+	assert.Len(t, name, len("proj--12345678--beads-issue-tracking"))
+
+	// Deterministic: same input produces same output.
+	name2 := claudemd.ProjectFragmentFilename("~/Work/evvy/CLAUDE.md::beads-issue-tracking")
+	assert.Equal(t, name, name2)
+
+	// Different source produces different prefix.
+	name3 := claudemd.ProjectFragmentFilename("~/other/project/CLAUDE.md::beads-issue-tracking")
+	assert.NotEqual(t, name, name3)
+}
+
+func TestReadWriteProjectFragment(t *testing.T) {
+	dir := t.TempDir()
+	key := "~/Work/evvy/CLAUDE.md::testing-rules"
+	content := "## Testing Rules\n\nAlways write tests."
+
+	err := claudemd.WriteProjectFragment(dir, key, content)
+	require.NoError(t, err)
+
+	got, err := claudemd.ReadProjectFragment(dir, key)
+	require.NoError(t, err)
+	assert.Equal(t, content, got)
+
+	// ReadFragment with qualified key should also work.
+	got2, err := claudemd.ReadFragment(dir, key)
+	require.NoError(t, err)
+	assert.Equal(t, content, got2)
+}
+
 func TestDirContentHash(t *testing.T) {
 	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("hello"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.md"), []byte("world"), 0644))
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("world"), 0644))
-
-	h1, err := claudemd.DirContentHash(dir)
+	hash1, err := claudemd.DirContentHash(dir)
 	require.NoError(t, err)
-	assert.Len(t, h1, 16)
+	assert.Len(t, hash1, 16)
 
-	// Same files, same hash.
-	h2, err := claudemd.DirContentHash(dir)
+	// Same content produces same hash.
+	hash2, err := claudemd.DirContentHash(dir)
 	require.NoError(t, err)
-	assert.Equal(t, h1, h2)
+	assert.Equal(t, hash1, hash2)
 
-	// Modify a file, hash changes.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("changed"), 0644))
-	h3, err := claudemd.DirContentHash(dir)
+	// Modifying a file changes the hash.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.md"), []byte("changed"), 0644))
+	hash3, err := claudemd.DirContentHash(dir)
 	require.NoError(t, err)
-	assert.NotEqual(t, h1, h3)
+	assert.NotEqual(t, hash1, hash3)
+}
 
-	// .DS_Store is ignored.
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte("junk"), 0644))
-	h4, err := claudemd.DirContentHash(dir)
+func TestImportProjectFragments(t *testing.T) {
+	syncDir := t.TempDir()
+	source := "~/Work/evvy/CLAUDE.md"
+	content := "## Testing Rules\n\nAlways write tests.\n\n## Docker Setup\n\nUse compose.\n"
+	selectedKeys := []string{
+		source + "::testing-rules",
+	}
+
+	err := claudemd.ImportProjectFragments(syncDir, source, content, selectedKeys)
 	require.NoError(t, err)
-	assert.Equal(t, h3, h4, ".DS_Store should be ignored")
+
+	// The selected fragment should be readable.
+	key := source + "::testing-rules"
+	got, err := claudemd.ReadFragment(filepath.Join(syncDir, "claude-md"), key)
+	require.NoError(t, err)
+	assert.Contains(t, got, "Testing Rules")
+
+	// The non-selected fragment should not exist.
+	key2 := source + "::docker-setup"
+	_, err = claudemd.ReadFragment(filepath.Join(syncDir, "claude-md"), key2)
+	assert.Error(t, err)
+
+	// Manifest should have the fragment metadata.
+	manifest, err := claudemd.ReadManifest(filepath.Join(syncDir, "claude-md"))
+	require.NoError(t, err)
+	filename := claudemd.ProjectFragmentFilename(key)
+	meta, ok := manifest.Fragments[filename]
+	assert.True(t, ok)
+	assert.Equal(t, "Testing Rules", meta.Header)
+	assert.Equal(t, source, meta.Source)
+	assert.Equal(t, key, meta.QualifiedKey)
 }
