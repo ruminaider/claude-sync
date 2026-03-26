@@ -31,6 +31,8 @@ func setupForkTestEnv(t *testing.T) (claudeDir, syncDir string) {
 	require.NoError(t, os.WriteFile(filepath.Join(pluginCacheDir, "manifest.json"), []byte(`{"name":"test-plugin"}`), 0644))
 	require.NoError(t, os.MkdirAll(filepath.Join(pluginCacheDir, "src"), 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginCacheDir, "src", "index.js"), []byte(`console.log("hello")`), 0644))
+	require.NoError(t, os.MkdirAll(filepath.Join(pluginCacheDir, "hooks"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginCacheDir, "hooks", "start.sh"), []byte("#!/bin/bash\necho hi"), 0755))
 
 	// Create installed_plugins.json pointing to the cache dir.
 	pluginsDir := filepath.Join(claudeDir, "plugins")
@@ -96,6 +98,11 @@ func TestFork(t *testing.T) {
 	indexJS, err := os.ReadFile(filepath.Join(syncDir, "plugins", "test-plugin", "src", "index.js"))
 	require.NoError(t, err)
 	assert.Contains(t, string(indexJS), "hello")
+
+	// Verify executable permissions are preserved on .sh files.
+	shInfo, err := os.Stat(filepath.Join(syncDir, "plugins", "test-plugin", "hooks", "start.sh"))
+	require.NoError(t, err)
+	assert.NotEqual(t, os.FileMode(0), shInfo.Mode()&0111, "shell script should be executable after fork copy")
 
 	// Verify config was updated.
 	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
