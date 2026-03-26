@@ -1684,7 +1684,8 @@ func applyPickerSelection(p *Picker, selectedSet map[string]bool) {
 
 // applyExistingConfig pre-populates base picker selections from an existing config.
 func (m *Model) applyExistingConfig(cfg *config.Config, existingProfiles map[string]profiles.Profile) {
-	// Plugins: select only those in the existing config.
+	// Plugins: select those in the existing config, plus locally-detected
+	// plugins not explicitly excluded.
 	pluginSet := toSet(cfg.AllPluginKeys())
 	// AllPluginKeys() maps Forked names to name@claude-sync-forks, but the
 	// picker uses scan AutoForked keys (name@original-marketplace). Add
@@ -1693,6 +1694,18 @@ func (m *Model) applyExistingConfig(cfg *config.Config, existingProfiles map[str
 	for _, key := range m.scanResult.AutoForked {
 		parts := strings.SplitN(key, "@", 2)
 		if len(parts) == 2 && forkedNames[parts[0]] {
+			pluginSet[key] = true
+		}
+	}
+	// When a user deselects a plugin during config update it goes into the
+	// excluded list. A plugin that is locally installed but absent from both
+	// the config plugin lists and the excluded list is either newly installed
+	// or was intentionally un-excluded; pre-select it so config update doesn't
+	// silently re-exclude it (#44).
+	excludedSet := toSet(cfg.Excluded)
+	pluginPrefix := commands.ConfigOnlySectionPrefix["plugins"]
+	for _, key := range append(m.scanResult.Upstream, m.scanResult.AutoForked...) {
+		if !pluginSet[key] && !excludedSet[key] && !m.scanResult.ConfigOnly[pluginPrefix+key] {
 			pluginSet[key] = true
 		}
 	}

@@ -1976,10 +1976,12 @@ func TestBuildInitOptions_IncludesPluginMCP_WhenPluginDeselected(t *testing.T) {
 func TestNewModel_EditMode_PrePopulatesSelections(t *testing.T) {
 	scan := fullScan()
 
-	// Existing config with only a subset selected.
+	// Existing config with only a subset selected. Plugins not wanted are
+	// in the excluded list (the way config update records deselections).
 	existingCfg := &config.Config{
 		Version:  "1.0.0",
 		Upstream: []string{"a@m"}, // only a@m, not b@m
+		Excluded: []string{"b@m", "c@local"}, // explicitly excluded
 		Settings: map[string]any{"model": "opus"}, // only model, not env
 		Hooks:    map[string]json.RawMessage{"PreToolUse": json.RawMessage(`[{"hooks":[{"command":"lint"}]}]`)},
 		Permissions: config.Permissions{
@@ -1999,14 +2001,14 @@ func TestNewModel_EditMode_PrePopulatesSelections(t *testing.T) {
 	m.overlay = Overlay{}
 	m.overlayCtx = overlayNone
 
-	// Plugins: only a@m selected, not b@m or c@local.
+	// Plugins: only a@m selected; b@m and c@local are excluded.
 	pluginPicker := m.pickers[SectionPlugins]
 	for _, it := range pluginPicker.items {
 		if it.Key == "a@m" {
 			assert.True(t, it.Selected, "a@m should be selected")
 		}
 		if it.Key == "b@m" {
-			assert.False(t, it.Selected, "b@m should NOT be selected")
+			assert.False(t, it.Selected, "b@m should NOT be selected (excluded)")
 		}
 	}
 
@@ -2045,6 +2047,77 @@ func TestNewModel_EditMode_PrePopulatesSelections(t *testing.T) {
 
 	// editMode flag should be set.
 	assert.True(t, m.editMode, "editMode should be true")
+}
+
+// TestEditMode_ForkedPlugin_UpstreamNotReExcluded verifies that when a plugin
+// exists both as a fork and an upstream marketplace entry, the upstream version
+// is pre-selected if it is not in the excluded list. Regression test for #44:
+// config update was silently re-excluding upstream plugins that the user had
+// intentionally removed from the excluded list.
+func TestEditMode_ForkedPlugin_UpstreamNotReExcluded(t *testing.T) {
+	upstreamKey := "my-plugin@my-marketplace"
+	forkedKey := "my-plugin@" + plugins.MarketplaceName
+
+	scan := &commands.InitScanResult{
+		// InitScan finds the upstream marketplace version but skips the
+		// claude-sync-forks version. MergeExisting re-injects the fork.
+		Upstream:   []string{upstreamKey},
+		AutoForked: []string{forkedKey},
+		PluginKeys: []string{upstreamKey, forkedKey},
+		ConfigOnly: map[string]bool{
+			// The fork was injected by MergeExisting (config-only).
+			"plugin:" + forkedKey: true,
+		},
+	}
+
+	existingCfg := &config.Config{
+		Version: "1.0.0",
+		Forked:  []string{"my-plugin"},
+		// Upstream key is NOT in Upstream, NOT in Excluded.
+		// User intentionally removed it from excluded.
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	pluginPicker := m.pickers[SectionPlugins]
+	for _, it := range pluginPicker.items {
+		if it.Key == upstreamKey {
+			assert.True(t, it.Selected, "upstream should be pre-selected (not in excluded list)")
+		}
+		if it.Key == forkedKey {
+			assert.True(t, it.Selected, "fork should be pre-selected")
+		}
+	}
+}
+
+// TestEditMode_ExcludedPluginStaysDeselected verifies that explicitly excluded
+// plugins remain deselected in edit mode, complementing the #44 fix.
+func TestEditMode_ExcludedPluginStaysDeselected(t *testing.T) {
+	scan := &commands.InitScanResult{
+		Upstream: []string{"wanted@m", "unwanted@m"},
+	}
+
+	existingCfg := &config.Config{
+		Version:  "1.0.0",
+		Upstream: []string{"wanted@m"},
+		Excluded: []string{"unwanted@m"},
+	}
+
+	m := NewModel(scan, "/test/claude", "/test/sync", "", true, SkipFlags{}, existingCfg, nil)
+	m.overlay = Overlay{}
+	m.overlayCtx = overlayNone
+
+	pluginPicker := m.pickers[SectionPlugins]
+	for _, it := range pluginPicker.items {
+		if it.Key == "wanted@m" {
+			assert.True(t, it.Selected, "wanted@m should be selected")
+		}
+		if it.Key == "unwanted@m" {
+			assert.False(t, it.Selected, "unwanted@m should stay deselected (excluded)")
+		}
+	}
 }
 
 func TestNewModel_EditMode_SkipsOverlay(t *testing.T) {
@@ -2253,6 +2326,7 @@ func TestBuildInitOptions_EditMode(t *testing.T) {
 	existingCfg := &config.Config{
 		Version:  "1.0.0",
 		Upstream: []string{"a@m"},
+		Excluded: []string{"b@m", "c@local"}, // explicitly excluded
 		Settings: map[string]any{"model": "opus"},
 	}
 
