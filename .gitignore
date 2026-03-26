@@ -39,3 +39,6 @@ internal/bundled/plugin/
 
 # Worktrees
 .worktrees/
+
+# Plans and design docs (local scaffolding, not committed)
+docs/plans/
