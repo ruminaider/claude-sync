@@ -1,12 +1,9 @@
 package marketplace
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
 )
@@ -338,56 +336,10 @@ func ResolvePluginSourceDir(claudeDir, pluginKey string) (string, error) {
 	return filepath.Join(installLocation, sourcePath), nil
 }
 
-// ComputePluginContentHash walks all files in sourceDir (sorted, excluding
-// .git/, node_modules/, and .DS_Store), hashes relative paths + contents via
-// SHA-256, and returns a 16-char hex prefix matching the claudemd.ContentHash
-// convention.
+// ComputePluginContentHash walks all files in sourceDir and returns a
+// deterministic 16-char hex hash. Delegates to claudemd.DirContentHash.
 func ComputePluginContentHash(sourceDir string) (string, error) {
-	// Collect all file paths relative to sourceDir.
-	var files []string
-	err := filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if name == ".git" || name == "node_modules" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if name == ".DS_Store" {
-			return nil
-		}
-		rel, err := filepath.Rel(sourceDir, path)
-		if err != nil {
-			return err
-		}
-		files = append(files, rel)
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("walking source dir: %w", err)
-	}
-
-	sort.Strings(files)
-
-	h := sha256.New()
-	for _, rel := range files {
-		// Hash the relative path.
-		h.Write([]byte(rel))
-		h.Write([]byte{0}) // null separator
-
-		// Hash the file contents.
-		data, err := os.ReadFile(filepath.Join(sourceDir, rel))
-		if err != nil {
-			return "", fmt.Errorf("reading %s: %w", rel, err)
-		}
-		h.Write(data)
-		h.Write([]byte{0}) // null separator
-	}
-
-	return hex.EncodeToString(h.Sum(nil))[:16], nil
+	return claudemd.DirContentHash(sourceDir)
 }
 
 // UpgradeDirectoryMarketplaces inspects directory-source marketplace entries

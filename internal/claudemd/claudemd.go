@@ -124,20 +124,21 @@ func ContentHash(content string) string {
 
 // DirContentHash computes a combined hash of all files in a directory.
 // Files are sorted by relative path for determinism. Directories named
-// .git and __pycache__ are skipped, as are .DS_Store files.
+// .git, node_modules, and __pycache__ are skipped, as are .DS_Store files.
 func DirContentHash(dir string) (string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		name := d.Name()
 		if d.IsDir() {
-			if d.Name() == ".git" || d.Name() == "__pycache__" {
+			if name == ".git" || name == "node_modules" || name == "__pycache__" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.Name() == ".DS_Store" {
+		if name == ".DS_Store" {
 			return nil
 		}
 		rel, err := filepath.Rel(dir, path)

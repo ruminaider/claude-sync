@@ -1046,18 +1046,15 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 			srcDir := filepath.Join(srcSkillsDir, entry.Name())
 			dstDir := filepath.Join(claudeDir, "skills", entry.Name())
 
-			// Hash the entire skill directory for modification detection.
-			// This covers SKILL.md and all companion files (README.md, etc.).
 			srcHash, err := claudemd.DirContentHash(srcDir)
 			if err != nil {
-				// Can't hash source directory; copy without tracking.
+				// Can't hash source; copy without tracking.
 				if copyDir(srcDir, dstDir) == nil {
 					skillsRestored++
 				}
 				continue
 			}
 
-			// Check if any file in the local skill directory was modified since last sync.
 			if localHash, err := claudemd.DirContentHash(dstDir); err == nil {
 				if storedHash, ok := skillHashes.Hashes[entry.Name()]; ok && localHash != storedHash {
 					skillsSkipped++
