@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
+	"github.com/ruminaider/claude-sync/internal/bundled"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -126,6 +128,13 @@ func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
 	}
 	for _, name := range cfg.Forked {
 		allDesired = append(allDesired, plugins.ForkedPluginKey(name))
+	}
+	// Include the bundled plugin in the desired set if it exists on disk.
+	// It is not listed in config.yaml to keep the user-facing config clean.
+	// Without this, exact sync mode would flag it as untracked.
+	bundledKey := plugins.ForkedPluginKey(bundled.PluginName)
+	if slices.Contains(forks, bundled.PluginName) && !slices.Contains(allDesired, bundledKey) {
+		allDesired = append(allDesired, bundledKey)
 	}
 
 	// Apply active profile to desired plugins.

@@ -132,6 +132,13 @@ func TestBuildAndWriteConfig_ExtraForked_NoDuplicate(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, count, "claude-sync should not be duplicated in forkedNames")
+
+	// The bundled plugin should be in forkedNames (for internal use) but NOT in config.yaml.
+	cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(cfgData)
+	require.NoError(t, err)
+	assert.NotContains(t, cfg.Forked, "claude-sync", "bundled plugin should not appear in config")
 	_ = result
 }
 
