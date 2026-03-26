@@ -727,6 +727,54 @@ plugins:
 	assert.Equal(t, "", result.ActiveProfile)
 }
 
+func TestPull_ProfileAddOverridesExcluded(t *testing.T) {
+	// Regression test for https://github.com/ruminaider/claude-sync/issues/39
+	// A plugin in the global excluded list should appear in effectiveDesired
+	// when a profile re-adds it via plugins.add.
+	configYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - context7@claude-plugins-official
+  excluded:
+    - excluded-tool@some-marketplace
+`
+	profile := profiles.Profile{
+		Plugins: profiles.ProfilePlugins{
+			Add: []string{"excluded-tool@some-marketplace"},
+		},
+	}
+
+	claudeDir, syncDir := setupPullEnvWithProfile(t, configYAML, "work", profile, true)
+
+	result, err := commands.PullDryRun(claudeDir, syncDir)
+	require.NoError(t, err)
+
+	assert.Contains(t, result.EffectiveDesired, "context7@claude-plugins-official",
+		"base upstream plugin should be in desired")
+	assert.Contains(t, result.EffectiveDesired, "excluded-tool@some-marketplace",
+		"profile plugins.add should override global excluded")
+	assert.Equal(t, "work", result.ActiveProfile)
+}
+
+func TestPull_ProfileAddOverridesExcluded_Reconciliation(t *testing.T) {
+	// End-to-end: an excluded plugin re-added by a profile should appear in
+	// enabledPlugins after reconciliation (the fix from PR #41).
+	claudeDir := setupApplySettingsEnv(t)
+
+	installed := makeInstalled("excluded-tool@some-marketplace", "context7@claude-plugins-official")
+	desired := []string{"context7@claude-plugins-official", "excluded-tool@some-marketplace"}
+
+	reconciled, ep, err := commands.ReconcileEnabledPlugins(claudeDir, desired, installed)
+	require.NoError(t, err)
+
+	assert.Contains(t, reconciled, "excluded-tool@some-marketplace",
+		"profile-added excluded plugin should be reconciled into enabledPlugins")
+	assert.True(t, ep["excluded-tool@some-marketplace"],
+		"plugin should be enabled")
+	assert.True(t, ep["context7@claude-plugins-official"],
+		"base plugin should also be enabled")
+}
+
 // --- New surface tests ---
 
 func TestApplySettingsWithPermissions(t *testing.T) {
