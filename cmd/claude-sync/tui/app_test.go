@@ -9,18 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test helpers — separate from menu_test.go helpers to avoid conflicts
-// when menu_test.go is eventually deleted.
-func appSendKey(m tea.Model, key string) tea.Model {
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
-	return updated
-}
-
-func appSendSpecialKey(m tea.Model, key tea.KeyType) tea.Model {
-	updated, _ := m.Update(tea.KeyMsg{Type: key})
-	return updated
-}
-
 func TestAppModel_InitialState_IsMain(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
@@ -136,32 +124,32 @@ func TestAppModel_ActionCursor(t *testing.T) {
 
 	// Intent layout: [0]=Sync(H), [1]=Pull, [2]=Push, [3]=Plugins(H), [4]=Browse, ...
 	// Move down from 0 => skips header at 0, lands on 1 (Pull)
-	model = appSendKey(model, "j")
+	model = testSendKey(model, "j")
 	app := model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 
 	// Move down again => 2 (Push)
-	model = appSendKey(model, "j")
+	model = testSendKey(model, "j")
 	app = model.(AppModel)
 	assert.Equal(t, 2, app.actionCursor)
 
 	// Move down again => skips header at 3, lands on 4 (Browse)
-	model = appSendKey(model, "j")
+	model = testSendKey(model, "j")
 	app = model.(AppModel)
 	assert.Equal(t, 4, app.actionCursor)
 
 	// Move up from 4 => skips header at 3, lands on 2 (Push)
-	model = appSendKey(model, "k")
+	model = testSendKey(model, "k")
 	app = model.(AppModel)
 	assert.Equal(t, 2, app.actionCursor)
 
 	// Move up => 1 (Pull)
-	model = appSendKey(model, "k")
+	model = testSendKey(model, "k")
 	app = model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 
 	// Move up from 1 => 0 is a header, cursor stays at 1 (headers are skipped)
-	model = appSendKey(model, "k")
+	model = testSendKey(model, "k")
 	app = model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 }
@@ -238,7 +226,7 @@ func TestAppModel_EditConfig_SetsLaunchFlag(t *testing.T) {
 	// Navigate to the edit-config intent using j (skips headers automatically)
 	app := model.(AppModel)
 	for app.actionCursor < editIdx {
-		model = appSendKey(model, "j")
+		model = testSendKey(model, "j")
 		app = model.(AppModel)
 	}
 	require.Equal(t, editIdx, app.actionCursor)
@@ -276,7 +264,7 @@ func TestAppModel_EditConfig_DoesNotSetQuitting(t *testing.T) {
 	// Navigate to edit-config
 	app := model.(AppModel)
 	for app.actionCursor < editIdx {
-		model = appSendKey(model, "j")
+		model = testSendKey(model, "j")
 		app = model.(AppModel)
 	}
 
@@ -630,7 +618,7 @@ func TestAppModel_BrowsePlugins_OpensSubView(t *testing.T) {
 	// Navigate to it
 	app := model.(AppModel)
 	for app.actionCursor < browseIdx {
-		model = appSendKey(model, "j")
+		model = testSendKey(model, "j")
 		app = model.(AppModel)
 	}
 

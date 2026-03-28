@@ -70,7 +70,7 @@ func (m *SubscribeFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.executing = false
 		m.resultDone = true
 		m.resultOk = msg.success
-		m.resultMsg = resolveSubscribeResultMsg(msg.success, msg.message, msg.err)
+		m.resultMsg = resolveResultMsg(msg.success, msg.message, msg.err)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -213,19 +213,6 @@ func executeSubscribe(syncDir, repoURL string) tea.Cmd {
 			err:     nil,
 		}
 	}
-}
-
-func resolveSubscribeResultMsg(success bool, msg string, err error) string {
-	if success {
-		return msg
-	}
-	if msg != "" {
-		return msg
-	}
-	if err != nil {
-		return err.Error()
-	}
-	return "Unknown error"
 }
 
 func renderSubscribeResult(success bool, msg string, width int, height int) string {

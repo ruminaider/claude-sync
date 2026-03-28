@@ -9,17 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// menuSendKey sends a rune key to a MenuModel and returns the updated model.
-func menuSendKey(m tea.Model, key string) tea.Model {
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
-	return updated
-}
-
-func menuSendSpecial(m tea.Model, key tea.KeyType) tea.Model {
-	updated, _ := m.Update(tea.KeyMsg{Type: key})
-	return updated
-}
-
 // --- Constructor tests ---
 
 func TestNewMenuModel_Configured_CursorOnFirstNonHeader(t *testing.T) {
@@ -54,7 +43,7 @@ func TestMenuModel_NavigateDown(t *testing.T) {
 
 	var model tea.Model = m
 	// Start at cursor=1 (Pull). Move down to Push.
-	model = menuSendKey(model, "j")
+	model = testSendKey(model, "j")
 	mm := model.(MenuModel)
 	assert.Equal(t, 2, mm.cursor)
 	assert.Equal(t, ActionPush, mm.items[mm.cursor].actionID)
@@ -66,8 +55,8 @@ func TestMenuModel_NavigateDown_SkipsHeaders(t *testing.T) {
 
 	var model tea.Model = m
 	// Start at cursor=1 (Pull). Move down to Push (2), then next is header (3), should skip to 4.
-	model = menuSendKey(model, "j") // -> 2 (Push)
-	model = menuSendKey(model, "j") // -> 4 (Browse & install, skipping header at 3)
+	model = testSendKey(model, "j") // -> 2 (Push)
+	model = testSendKey(model, "j") // -> 4 (Browse & install, skipping header at 3)
 	mm := model.(MenuModel)
 	assert.Equal(t, 4, mm.cursor)
 	assert.Equal(t, ActionBrowsePlugins, mm.items[mm.cursor].actionID)
@@ -81,7 +70,7 @@ func TestMenuModel_NavigateUp_SkipsHeaders(t *testing.T) {
 
 	var model tea.Model = m
 	// Move up: should skip header at 3 and land on 2 (Push)
-	model = menuSendKey(model, "k")
+	model = testSendKey(model, "k")
 	mm := model.(MenuModel)
 	assert.Equal(t, 2, mm.cursor)
 	assert.Equal(t, ActionPush, mm.items[mm.cursor].actionID)
@@ -93,7 +82,7 @@ func TestMenuModel_NavigateUp_StopsAtTop(t *testing.T) {
 	// cursor is at 1 (first non-header)
 
 	var model tea.Model = m
-	model = menuSendKey(model, "k") // try going up past the Sync header
+	model = testSendKey(model, "k") // try going up past the Sync header
 	mm := model.(MenuModel)
 	assert.Equal(t, 1, mm.cursor, "should not move above first selectable item")
 }
@@ -105,7 +94,7 @@ func TestMenuModel_NavigateDown_StopsAtBottom(t *testing.T) {
 	m.cursor = len(m.items) - 1
 
 	var model tea.Model = m
-	model = menuSendKey(model, "j")
+	model = testSendKey(model, "j")
 	mm := model.(MenuModel)
 	assert.Equal(t, len(m.items)-1, mm.cursor, "should not move past last item")
 }
@@ -115,11 +104,11 @@ func TestMenuModel_ArrowKeys(t *testing.T) {
 	m := NewMenuModel(state)
 
 	var model tea.Model = m
-	model = menuSendSpecial(model, tea.KeyDown)
+	model = testSendSpecial(model, tea.KeyDown)
 	mm := model.(MenuModel)
 	assert.Equal(t, 2, mm.cursor, "down arrow should work")
 
-	model = menuSendSpecial(model, tea.KeyUp)
+	model = testSendSpecial(model, tea.KeyUp)
 	mm = model.(MenuModel)
 	assert.Equal(t, 1, mm.cursor, "up arrow should work")
 }
@@ -326,7 +315,7 @@ func TestMenuModel_FullNavigation_AllSelectableItemsReachable(t *testing.T) {
 	visited[mm.items[mm.cursor].actionID] = true
 
 	for i := 0; i < len(m.items)+5; i++ { // extra iterations to confirm we stop
-		model = menuSendKey(model, "j")
+		model = testSendKey(model, "j")
 		mm = model.(MenuModel)
 		if !mm.items[mm.cursor].isHeader {
 			visited[mm.items[mm.cursor].actionID] = true

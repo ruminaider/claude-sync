@@ -238,24 +238,4 @@ func TestSubscribeFlow_WindowResize(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
-// --- resolveSubscribeResultMsg tests ---
-
-func TestResolveSubscribeResultMsg_Success(t *testing.T) {
-	msg := resolveSubscribeResultMsg(true, "all good", nil)
-	assert.Equal(t, "all good", msg)
-}
-
-func TestResolveSubscribeResultMsg_ErrorWithMessage(t *testing.T) {
-	msg := resolveSubscribeResultMsg(false, "custom error", nil)
-	assert.Equal(t, "custom error", msg)
-}
-
-func TestResolveSubscribeResultMsg_ErrorWithoutMessage(t *testing.T) {
-	msg := resolveSubscribeResultMsg(false, "", assert.AnError)
-	assert.Equal(t, assert.AnError.Error(), msg)
-}
-
-func TestResolveSubscribeResultMsg_UnknownError(t *testing.T) {
-	msg := resolveSubscribeResultMsg(false, "", nil)
-	assert.Equal(t, "Unknown error", msg)
-}
+// resolveResultMsg tests live in result_state_test.go.

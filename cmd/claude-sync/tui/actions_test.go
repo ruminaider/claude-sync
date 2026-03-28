@@ -198,18 +198,6 @@ func TestSelectedAction_SkipsHeaders(t *testing.T) {
 	assert.Equal(t, "browse-plugins", a.id)
 }
 
-func TestActionItemCount_ExcludesHeaders(t *testing.T) {
-	recs := []recommendation{{}, {}}
-	intents := []intent{
-		{label: "H", isHeader: true},
-		{action: actionItem{id: "a"}},
-		{action: actionItem{id: "b"}},
-		{label: "H2", isHeader: true},
-		{action: actionItem{id: "c"}},
-	}
-	assert.Equal(t, 5, actionItemCount(recs, intents), "2 recs + 3 non-header intents")
-}
-
 func TestRawItemCount_IncludesHeaders(t *testing.T) {
 	recs := []recommendation{{}, {}}
 	intents := []intent{

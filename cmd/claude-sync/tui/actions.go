@@ -44,18 +44,6 @@ func rawItemCount(recs []recommendation, intents []intent) int {
 	return len(recs) + len(intents)
 }
 
-// actionItemCount returns the total number of selectable items across both
-// sections. Headers are excluded.
-func actionItemCount(recs []recommendation, intents []intent) int {
-	count := len(recs)
-	for _, it := range intents {
-		if !it.isHeader {
-			count++
-		}
-	}
-	return count
-}
-
 // selectedAction returns the actionItem at the given cursor position.
 // Cursor positions 0..len(recs)-1 address recommendations.
 // Positions len(recs)..len(recs)+len(intents)-1 address intents directly
@@ -85,6 +73,16 @@ func isIntentHeader(recs []recommendation, intents []intent, cursor int) bool {
 		return intents[intentIdx].isHeader
 	}
 	return false
+}
+
+// appendErrorGuidance appends contextual error guidance lines (why + suggested
+// action) when ErrorGuidance returns a match for the given action and error.
+func appendErrorGuidance(lines []string, actionID string, err error) []string {
+	if help := ErrorGuidance(actionID, err); help != nil {
+		lines = append(lines, stDim.Render("  "+help.Why))
+		lines = append(lines, stYellow.Render("  \u2192 "+help.Action))
+	}
+	return lines
 }
 
 // renderRecsSectionWithState renders the "Needs attention" / "Status" section with execution state.
@@ -120,10 +118,7 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 					errMsg = result.err.Error()
 				}
 				lines = append(lines, stRed.Render("\u2717 "+errMsg))
-				if help := ErrorGuidance(result.actionID, result.err); help != nil {
-					lines = append(lines, stDim.Render("  "+help.Why))
-					lines = append(lines, stYellow.Render("  \u2192 "+help.Action))
-				}
+				lines = appendErrorGuidance(lines, result.actionID, result.err)
 			}
 		} else if executing && executingActionID == rec.action.id {
 			// Show executing spinner
@@ -188,10 +183,7 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 					errMsg = result.err.Error()
 				}
 				lines = append(lines, stRed.Render("\u2717 "+errMsg))
-				if help := ErrorGuidance(result.actionID, result.err); help != nil {
-					lines = append(lines, stDim.Render("  "+help.Why))
-					lines = append(lines, stYellow.Render("  \u2192 "+help.Action))
-				}
+				lines = appendErrorGuidance(lines, result.actionID, result.err)
 			}
 			continue
 		}
