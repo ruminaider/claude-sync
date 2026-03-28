@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
@@ -39,6 +40,11 @@ var pullCmd = &cobra.Command{
 				ProjectDir: projectDir,
 			})
 		} else {
+			// Fetch once up front so both preview and pull share the same refs.
+			if git.HasRemote(syncDir, "origin") {
+				_ = git.Fetch(syncDir)
+			}
+
 			// Preview incoming changes before applying.
 			if !quietFlag {
 				preview, previewErr := commands.PullPreview(syncDir)
@@ -66,6 +72,7 @@ var pullCmd = &cobra.Command{
 				SyncDir:   syncDir,
 				Quiet:     quietFlag,
 				Force:     forceFlag,
+				SkipFetch: true, // already fetched above
 				DuplicateResolver: func(dupes []plugins.Duplicate) error {
 					for _, d := range dupes {
 						forkSrc, mktSrc, isFork := isForkDuplicate(d)

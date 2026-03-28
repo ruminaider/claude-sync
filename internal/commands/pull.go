@@ -87,6 +87,10 @@ type PullOptions struct {
 	// ReEvalResolver is called when tracked active-dev plugins need re-evaluation.
 	// nil means skip re-evaluation.
 	ReEvalResolver func(signals []plugins.ReEvalSignal) error
+	// SkipFetch skips the implicit fetch inside git pull. Set this when the
+	// caller has already fetched (e.g. for pull preview) to avoid a redundant
+	// network round-trip.
+	SkipFetch bool
 }
 
 func PullDryRun(claudeDir, syncDir string) (*PullResult, error) {
@@ -220,10 +224,14 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 	}
 
 	if git.HasRemote(syncDir, "origin") {
-		if err := git.Pull(syncDir); err != nil {
-			if !quiet {
-				fmt.Fprintf(os.Stderr, "Warning: git pull failed: %v\n", err)
-			}
+		var mergeErr error
+		if opts.SkipFetch {
+			mergeErr = git.MergeFFOnly(syncDir)
+		} else {
+			mergeErr = git.Pull(syncDir)
+		}
+		if mergeErr != nil && !quiet {
+			fmt.Fprintf(os.Stderr, "Warning: git pull failed: %v\n", mergeErr)
 		}
 	}
 

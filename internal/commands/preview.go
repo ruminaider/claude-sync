@@ -19,20 +19,15 @@ type PullPreviewResult struct {
 	NothingToChange bool
 }
 
-// PullPreview fetches remote changes and returns a summary of what would change
-// without actually applying anything. The caller can display this and ask for
-// confirmation before proceeding.
+// PullPreview returns a summary of what a pull would change without applying
+// anything. The caller must fetch (e.g. git.Fetch) before calling this so that
+// the local tracking refs are up to date.
 func PullPreview(syncDir string) (*PullPreviewResult, error) {
 	result := &PullPreviewResult{}
 
 	if !git.HasRemote(syncDir, "origin") {
 		result.NothingToChange = true
 		return result, nil
-	}
-
-	// Fetch remote changes without merging.
-	if err := git.Fetch(syncDir); err != nil {
-		return nil, fmt.Errorf("fetching remote: %w", err)
 	}
 
 	result.CommitsBehind = git.CommitsBehind(syncDir)

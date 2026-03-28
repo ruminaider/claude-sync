@@ -94,6 +94,13 @@ func Pull(dir string) error {
 	return err
 }
 
+// MergeFFOnly fast-forwards the current branch to its upstream tracking ref.
+// Use this instead of Pull when the caller has already fetched.
+func MergeFFOnly(dir string) error {
+	_, err := Run(dir, "merge", "--ff-only", "@{upstream}")
+	return err
+}
+
 // NonFastForwardError is returned when a push is rejected because the remote
 // has commits not in the local repo.
 type NonFastForwardError struct {
@@ -330,7 +337,13 @@ func DiffNameOnly(dir, refA, refB string) []string {
 	if err != nil || out == "" {
 		return nil
 	}
-	return strings.Split(out, "\n")
+	var files []string
+	for _, f := range strings.Split(out, "\n") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
 }
 
 // CommitsAhead returns how many local commits have not yet been pushed to the upstream.

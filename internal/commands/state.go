@@ -2,7 +2,6 @@ package commands
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -240,12 +239,10 @@ func splitPluginKey(key string) (name, mkt string) {
 
 // detectConfigRepo reads the git remote URL from syncDir and returns a short form.
 func detectConfigRepo(syncDir string) string {
-	cmd := exec.Command("git", "-C", syncDir, "remote", "get-url", "origin")
-	out, err := cmd.Output()
+	url, err := csgit.RemoteURL(syncDir, "origin")
 	if err != nil {
 		return ""
 	}
-	url := strings.TrimSpace(string(out))
 	// Try to parse as GitHub URL for short form
 	if short := marketplace.ParseGitHubRepoURL(url); short != "" {
 		return short

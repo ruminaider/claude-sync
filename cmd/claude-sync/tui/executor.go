@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/git"
 )
 
 // actionResultMsg signals an inline action has completed.
@@ -39,12 +40,21 @@ func executeAction(index int, actionID string, args []string,
 
 		switch actionID {
 		case ActionPull:
+			// Fetch once so both preview and pull share the same refs.
+			if git.HasRemote(syncDir, "origin") {
+				_ = git.Fetch(syncDir)
+			}
 			// Show preview summary of incoming changes before applying.
 			preview, previewErr := commands.PullPreview(syncDir)
 			if previewErr == nil && preview.NothingToChange {
 				// Still run pull for local-only reconciliation (settings, plugins, etc.)
 			}
-			result, pullErr := commands.Pull(claudeDir, syncDir, true)
+			result, pullErr := commands.PullWithOptions(commands.PullOptions{
+				ClaudeDir: claudeDir,
+				SyncDir:   syncDir,
+				Quiet:     true,
+				SkipFetch: true, // already fetched above
+			})
 			err = pullErr
 			if result != nil {
 				pullMsg := formatPullResult(result)
