@@ -225,7 +225,7 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Get filtered lists for navigation
 	filteredRecs := filterRecommendations(m.recommendations, m.filterText)
 	filteredIntents := filterIntents(m.intents, m.filterText)
-	total := actionItemCount(filteredRecs, filteredIntents)
+	total := rawItemCount(filteredRecs, filteredIntents)
 
 	switch msg.String() {
 	case "/":
@@ -245,13 +245,38 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Esc from main screen quits (no dashboard to go back to)
 		m.quitting = true
 		return m, tea.Quit
+	case "r":
+		if m.state.HasPending {
+			m.executing = true
+			m.executingActionID = ActionApprove
+			return m, executeAction(m.actionCursor, ActionApprove, nil, m.claudeDir, m.syncDir)
+		} else if m.state.HasConflicts {
+			m.executing = true
+			m.executingActionID = ActionConflicts
+			return m, executeAction(m.actionCursor, ActionConflicts, nil, m.claudeDir, m.syncDir)
+		}
 	case "j", "down":
 		if m.actionCursor < total-1 {
 			m.actionCursor++
+			// Skip headers
+			for m.actionCursor < total-1 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+				m.actionCursor++
+			}
+			// If we landed on a header at the very end, back up
+			if isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+				m.actionCursor--
+				for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+					m.actionCursor--
+				}
+			}
 		}
 	case "k", "up":
 		if m.actionCursor > 0 {
 			m.actionCursor--
+			// Skip headers
+			for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+				m.actionCursor--
+			}
 		}
 	case "enter":
 		if m.executing {
@@ -314,13 +339,27 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyDown:
 		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
 		filteredIntents := filterIntents(m.intents, m.filterText)
-		total := actionItemCount(filteredRecs, filteredIntents)
+		total := rawItemCount(filteredRecs, filteredIntents)
 		if m.actionCursor < total-1 {
 			m.actionCursor++
+			for m.actionCursor < total-1 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+				m.actionCursor++
+			}
+			if isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+				m.actionCursor--
+				for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+					m.actionCursor--
+				}
+			}
 		}
 	case tea.KeyUp:
+		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
+		filteredIntents := filterIntents(m.intents, m.filterText)
 		if m.actionCursor > 0 {
 			m.actionCursor--
+			for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
+				m.actionCursor--
+			}
 		}
 	}
 	return m, nil
@@ -400,6 +439,7 @@ func (m AppModel) viewMainHelp() string {
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("Actions"))
 	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("/")+"       Filter actions"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("r")+"       Review pending changes"))
 	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("?")+"       Show this help"))
 	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("q")+"       Quit"))
 	lines = append(lines, "")

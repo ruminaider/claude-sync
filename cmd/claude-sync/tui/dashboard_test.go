@@ -142,8 +142,10 @@ func TestRenderMainScreen_ShowsSummaryAndActions(t *testing.T) {
 	// Summary
 	assert.Contains(t, view, "User config")
 	assert.Contains(t, view, "user/repo")
-	// Actions
-	assert.Contains(t, view, "I want to")
+	// Grouped sections
+	assert.Contains(t, view, "Sync")
+	assert.Contains(t, view, "Plugins")
+	assert.Contains(t, view, "Config")
 }
 
 func TestRenderMainScreen_NothingToRecommend(t *testing.T) {

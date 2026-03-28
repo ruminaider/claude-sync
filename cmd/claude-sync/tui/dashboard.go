@@ -114,7 +114,7 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 		// --- Needs attention / Status section ---
 		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingActionID, results))
 
-		// --- I want to... section ---
+		// --- Grouped intent sections (Sync, Plugins, Config) ---
 		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingActionID, results))
 	}
 

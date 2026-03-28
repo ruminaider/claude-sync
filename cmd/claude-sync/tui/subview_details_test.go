@@ -194,7 +194,7 @@ func TestConfigDetails_ShowsFooterHints(t *testing.T) {
 
 // --- AppModel integration ---
 
-func TestAppModel_ViewConfigIntent_OpensConfigDetails(t *testing.T) {
+func TestAppModel_SubscribeIntent_OpensSubView(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 		Plugins: []commands.PluginInfo{
@@ -210,15 +210,15 @@ func TestAppModel_ViewConfigIntent_OpensConfigDetails(t *testing.T) {
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 
-	// Find the view-config intent cursor position
-	var viewIdx int
+	// Find the subscribe intent cursor position
+	var subIdx int
 	for i, it := range m.intents {
-		if it.action.id == "view-config" {
-			viewIdx = len(m.recommendations) + i
+		if it.action.id == ActionSubscribe {
+			subIdx = len(m.recommendations) + i
 			break
 		}
 	}
-	m.actionCursor = viewIdx
+	m.actionCursor = subIdx
 
 	// Press enter
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -226,9 +226,4 @@ func TestAppModel_ViewConfigIntent_OpensConfigDetails(t *testing.T) {
 
 	assert.Equal(t, viewSubView, app.activeView)
 	assert.NotNil(t, app.subView)
-
-	// The sub-view should render config details content
-	view := app.subView.View()
-	assert.Contains(t, view, "Full config details")
-	assert.Contains(t, view, "beads")
 }

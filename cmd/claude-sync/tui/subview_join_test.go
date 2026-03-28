@@ -223,27 +223,18 @@ func TestExecuteJoin_ReturnsCorrectMsgType(t *testing.T) {
 
 // --- AppModel integration tests ---
 
-func TestAppModel_JoinConfigIntent_OpensJoinFlow(t *testing.T) {
+func TestAppModel_JoinConfig_OpensJoinFlow(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 	}
 	m := NewAppModel(state)
+	m.width = 80
+	m.height = 40
 	m.activeView = viewMain
-	m.recommendations = buildRecommendations(m.state)
-	m.intents = buildIntents(m.state)
 
-	// Find the join-config intent cursor position
-	var joinIdx int
-	for i, it := range m.intents {
-		if it.action.id == "join-config" {
-			joinIdx = len(m.recommendations) + i
-			break
-		}
-	}
-	m.actionCursor = joinIdx
-
-	// Press enter
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Open the join-config sub-view directly (no longer in grouped intents,
+	// but still reachable via openSubView for fresh install and other flows)
+	updated, _ := m.openSubView("join-config")
 	app := updated.(AppModel)
 
 	assert.Equal(t, viewSubView, app.activeView)
