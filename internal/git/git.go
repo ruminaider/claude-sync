@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -306,4 +307,32 @@ func HasUnpushedCommits(dir string) bool {
 	}
 	out, err := Run(dir, "rev-list", "@{u}..HEAD")
 	return err == nil && out != ""
+}
+
+// CommitsBehind returns how many commits the local branch is behind its upstream.
+// Returns -1 if the count cannot be determined (no git repo, no upstream, etc.).
+func CommitsBehind(dir string) int {
+	out, err := Run(dir, "rev-list", "HEAD..@{upstream}", "--count")
+	if err != nil {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// CommitsAhead returns how many local commits have not yet been pushed to the upstream.
+// Returns -1 if the count cannot be determined (no git repo, no upstream, etc.).
+func CommitsAhead(dir string) int {
+	out, err := Run(dir, "rev-list", "@{upstream}..HEAD", "--count")
+	if err != nil {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return -1
+	}
+	return n
 }

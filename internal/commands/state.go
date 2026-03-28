@@ -10,6 +10,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
+	csgit "github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
@@ -61,6 +62,11 @@ type MenuState struct {
 	// Dashboard fields
 	ConfigRepo     string       // remote URL or repo shortname
 	CommitsBehind  int          // how many commits behind remote
+	CommitsAhead   int          // how many local commits not yet pushed
+	PluginCount    int          // total unique plugins (deduplicated across upstream/pinned/forked)
+	PendingCount   int          // number of individual pending approval changes
+	RemoteURL      string       // raw git remote URL for sync dir
+	Role           string       // "owner" or "subscriber"
 	Plugins        []PluginInfo // all plugins with status
 	Projects       []ProjectInfo
 	ProjectDir         string // current $PWD (always set)
@@ -165,6 +171,31 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 	// ClaudeMD count: count .md files in claude-md/ directory
 	state.ClaudeMDCount = countClaudeMDFragments(syncDir)
 
+	// --- New dashboard fields ---
+
+	// CommitsAhead: local commits not yet pushed
+	state.CommitsAhead = csgit.CommitsAhead(syncDir)
+
+	// PluginCount: deduplicated count of all plugins
+	if cfg != nil {
+		state.PluginCount = len(cfg.AllPluginKeys())
+	}
+
+	// PendingCount: count individual pending changes (reuse 'pending' from above)
+	state.PendingCount = countPendingChanges(pending)
+
+	// RemoteURL: raw git remote origin URL
+	if url, err := csgit.RemoteURL(syncDir, "origin"); err == nil {
+		state.RemoteURL = url
+	}
+
+	// Role: "subscriber" if config has subscriptions, "owner" otherwise
+	if cfg != nil && len(cfg.Subscriptions) > 0 {
+		state.Role = "subscriber"
+	} else {
+		state.Role = "owner"
+	}
+
 	return state
 }
 
@@ -249,6 +280,17 @@ func detectCommitsBehind(syncDir string) int {
 		return -1
 	}
 	return n
+}
+
+// countPendingChanges returns the total number of individual pending approval items.
+func countPendingChanges(p approval.PendingChanges) int {
+	count := 0
+	if p.Permissions != nil {
+		count += len(p.Permissions.Allow) + len(p.Permissions.Deny)
+	}
+	count += len(p.MCP)
+	count += len(p.Hooks)
+	return count
 }
 
 // countClaudeMDFragments counts .md files in the claude-md/ directory.
