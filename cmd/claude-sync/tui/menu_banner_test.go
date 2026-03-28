@@ -9,39 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- extractRepoName tests ---
-
-func TestExtractRepoName_HTTPS(t *testing.T) {
-	name := extractRepoName("https://github.com/ruminaider/claude-code-config.git")
-	assert.Equal(t, "ruminaider/claude-code-config", name)
-}
-
-func TestExtractRepoName_SSH(t *testing.T) {
-	name := extractRepoName("git@github.com:ruminaider/claude-code-config.git")
-	assert.Equal(t, "ruminaider/claude-code-config", name)
-}
-
-func TestExtractRepoName_HTTPSNoGit(t *testing.T) {
-	name := extractRepoName("https://github.com/owner/repo")
-	assert.Equal(t, "owner/repo", name)
-}
-
-func TestExtractRepoName_Empty(t *testing.T) {
-	name := extractRepoName("")
-	assert.Equal(t, "claude-sync", name)
-}
-
-func TestExtractRepoName_Fallback(t *testing.T) {
-	name := extractRepoName("not-a-url")
-	assert.Equal(t, "claude-sync", name)
-}
-
 // --- Banner tests ---
 
 func TestBanner_ShowsRepoAndRole(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/ruminaider/claude-code-config.git",
+		ConfigRepo:   "ruminaider/claude-code-config",
 		Role:         "owner",
 	}
 	banner := buildBanner(state)
@@ -52,7 +25,7 @@ func TestBanner_ShowsRepoAndRole(t *testing.T) {
 func TestBanner_ShowsSyncBehind(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
-		RemoteURL:     "https://github.com/owner/repo.git",
+		ConfigRepo:    "owner/repo",
 		CommitsBehind: 3,
 		CommitsAhead:  1,
 	}
@@ -64,7 +37,7 @@ func TestBanner_ShowsSyncBehind(t *testing.T) {
 func TestBanner_ShowsSynced(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
-		RemoteURL:     "https://github.com/owner/repo.git",
+		ConfigRepo:    "owner/repo",
 		CommitsBehind: 0,
 		CommitsAhead:  0,
 	}
@@ -85,7 +58,7 @@ func TestBanner_ShowsSyncedWhenBothUnknown(t *testing.T) {
 func TestBanner_ShowsPendingWithCount(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/owner/repo.git",
+		ConfigRepo:   "owner/repo",
 		HasPending:   true,
 		PendingCount: 2,
 	}
@@ -97,7 +70,7 @@ func TestBanner_ShowsPendingWithCount(t *testing.T) {
 func TestBanner_ShowsConflicts(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/owner/repo.git",
+		ConfigRepo:   "owner/repo",
 		HasConflicts: true,
 	}
 	banner := buildBanner(state)
@@ -107,7 +80,7 @@ func TestBanner_ShowsConflicts(t *testing.T) {
 func TestBanner_HidesPendingWhenNone(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/owner/repo.git",
+		ConfigRepo:   "owner/repo",
 		HasPending:   false,
 		HasConflicts: false,
 	}
@@ -119,7 +92,7 @@ func TestBanner_HidesPendingWhenNone(t *testing.T) {
 func TestBanner_ShowsPluginCount(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/owner/repo.git",
+		ConfigRepo:   "owner/repo",
 		PluginCount:  5,
 	}
 	banner := buildBanner(state)
@@ -129,7 +102,7 @@ func TestBanner_ShowsPluginCount(t *testing.T) {
 func TestBanner_ShowsProfile(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists:  true,
-		RemoteURL:     "https://github.com/owner/repo.git",
+		ConfigRepo:    "owner/repo",
 		ActiveProfile: "work",
 	}
 	banner := buildBanner(state)
@@ -139,7 +112,7 @@ func TestBanner_ShowsProfile(t *testing.T) {
 func TestBanner_ShowsProfileNone(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/owner/repo.git",
+		ConfigRepo:   "owner/repo",
 	}
 	banner := buildBanner(state)
 	assert.Contains(t, banner, "profile: none")
@@ -150,7 +123,7 @@ func TestBanner_ShowsProfileNone(t *testing.T) {
 func TestMenuView_ShowsBannerWhenConfigured(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
-		RemoteURL:    "https://github.com/owner/my-config.git",
+		ConfigRepo:   "owner/my-config",
 		Role:         "owner",
 	}
 	m := NewMenuModel(state)

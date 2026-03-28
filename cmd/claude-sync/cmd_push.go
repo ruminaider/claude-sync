@@ -259,16 +259,8 @@ var pushCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Println(commands.PushPreviewSummary(effectiveScan))
 		fmt.Println()
-		var confirmPush bool
-		if promptErr := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title("Push these changes?").
-					Affirmative("Yes").
-					Negative("No").
-					Value(&confirmPush),
-			),
-		).Run(); promptErr != nil || !confirmPush {
+		confirmPush, promptErr := confirmPrompt("Push these changes?")
+		if promptErr != nil || !confirmPush {
 			fmt.Println("Push cancelled.")
 			return nil
 		}

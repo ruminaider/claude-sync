@@ -185,16 +185,15 @@ func executeSubscribe(syncDir, repoURL string) tea.Cmd {
 
 		// For now, just validate the URL is reachable and has a config
 		// Full subscribe logic is delegated to the CLI command
-		tempDir := filepath.Join(os.TempDir(), "claude-sync-validate-"+randStr(8))
-		defer os.RemoveAll(tempDir)
-
-		if err := os.MkdirAll(tempDir, 0755); err != nil {
+		tempDir, mkErr := os.MkdirTemp("", "claude-sync-sub-*")
+		if mkErr != nil {
 			return subscribeResultMsg{
 				success: false,
 				message: "Could not create temp directory",
-				err:     err,
+				err:     mkErr,
 			}
 		}
+		defer os.RemoveAll(tempDir)
 
 		// Quick validation: shallow clone and check for config
 		if err := git.ShallowClone(repoURL, tempDir, "origin/HEAD"); err != nil {
@@ -235,14 +234,9 @@ func resolveSubscribeResultMsg(success bool, msg string, err error) string {
 }
 
 func renderSubscribeResult(success bool, msg string, width int, height int) string {
-	icon := "✓"
+	header := "✓ Subscribe"
 	if !success {
-		icon = "✗"
-	}
-
-	header := fmt.Sprintf("%s Subscribe", icon)
-	if !success {
-		header = fmt.Sprintf("✗ Subscribe failed")
+		header = "✗ Subscribe failed"
 	}
 
 	content := fmt.Sprintf("%s\n\n%s\n\n", header, msg)
@@ -250,11 +244,3 @@ func renderSubscribeResult(success bool, msg string, width int, height int) stri
 	return content
 }
 
-func randStr(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[i%len(charset)]
-	}
-	return string(b)
-}

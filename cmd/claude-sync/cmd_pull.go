@@ -50,16 +50,8 @@ var pullCmd = &cobra.Command{
 				} else {
 					fmt.Println(commands.FormatPullPreview(preview))
 					fmt.Println()
-					var confirm bool
-					if promptErr := huh.NewForm(
-						huh.NewGroup(
-							huh.NewConfirm().
-								Title("Apply these changes?").
-								Affirmative("Yes").
-								Negative("No").
-								Value(&confirm),
-						),
-					).Run(); promptErr != nil || !confirm {
+					confirm, promptErr := confirmPrompt("Apply these changes?")
+					if promptErr != nil || !confirm {
 						fmt.Println("Pull cancelled.")
 						return nil
 					}

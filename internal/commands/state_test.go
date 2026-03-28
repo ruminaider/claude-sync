@@ -472,7 +472,6 @@ func TestDetectMenuState_NewFields_ZeroWhenNotInitialized(t *testing.T) {
 	assert.Equal(t, 0, state.CommitsAhead)
 	assert.Equal(t, 0, state.PluginCount)
 	assert.Equal(t, 0, state.PendingCount)
-	assert.Empty(t, state.RemoteURL)
 	assert.Empty(t, state.Role)
 }
 
@@ -518,9 +517,6 @@ plugins:
 
 	// CommitsAhead: no git repo, so -1
 	assert.Equal(t, -1, state.CommitsAhead)
-
-	// RemoteURL: no git repo, empty
-	assert.Empty(t, state.RemoteURL)
 
 	// Role: no subscriptions, defaults to "owner"
 	assert.Equal(t, "owner", state.Role)
@@ -611,20 +607,3 @@ plugins:
 	assert.Equal(t, 3, state.PluginCount)
 }
 
-func TestDetectMenuState_RemoteURL(t *testing.T) {
-	claudeDir := t.TempDir()
-	syncDir := t.TempDir()
-
-	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte("version: \"1.0.0\"\n"), 0644))
-
-	require.NoError(t, exec.Command("git", "init", syncDir).Run())
-	require.NoError(t, exec.Command("git", "-C", syncDir, "remote", "add", "origin", "https://github.com/ruminaider/claude-sync-config.git").Run())
-
-	origSearchDirs := DefaultProjectSearchDirs
-	DefaultProjectSearchDirs = func() []string { return nil }
-	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
-
-	state := DetectMenuState(claudeDir, syncDir)
-
-	assert.Equal(t, "https://github.com/ruminaider/claude-sync-config.git", state.RemoteURL)
-}

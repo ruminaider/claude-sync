@@ -7,46 +7,6 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 )
 
-// extractRepoName parses an owner/repo name from a git remote URL.
-// Handles HTTPS (https://github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git).
-// Returns "claude-sync" as a fallback if parsing fails.
-func extractRepoName(remoteURL string) string {
-	url := strings.TrimSpace(remoteURL)
-	if url == "" {
-		return "claude-sync"
-	}
-
-	// Strip trailing .git
-	url = strings.TrimSuffix(url, ".git")
-
-	// SSH format: git@github.com:owner/repo
-	if strings.HasPrefix(url, "git@") {
-		// git@github.com:owner/repo -> owner/repo
-		if idx := strings.Index(url, ":"); idx >= 0 {
-			path := url[idx+1:]
-			if path != "" {
-				return path
-			}
-		}
-		return "claude-sync"
-	}
-
-	// HTTPS format: https://github.com/owner/repo
-	// Find the last two path segments (owner/repo)
-	if idx := strings.Index(url, "://"); idx >= 0 {
-		path := url[idx+3:]
-		// Remove host
-		if slashIdx := strings.Index(path, "/"); slashIdx >= 0 {
-			path = path[slashIdx+1:]
-			if path != "" {
-				return path
-			}
-		}
-	}
-
-	return "claude-sync"
-}
-
 // buildBanner renders a 2-3 line status banner for the menu header.
 //
 // Line 1: repoName (role)
@@ -56,7 +16,10 @@ func buildBanner(state commands.MenuState) string {
 	var lines []string
 
 	// Line 1: repo name and role
-	repoName := extractRepoName(state.RemoteURL)
+	repoName := state.ConfigRepo
+	if repoName == "" {
+		repoName = "claude-sync"
+	}
 	line1 := stBlue.Render(repoName)
 	if state.Role != "" {
 		line1 += stDim.Render(" (" + state.Role + ")")
