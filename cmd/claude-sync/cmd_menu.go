@@ -41,7 +41,12 @@ func runMainMenu(cmd *cobra.Command, args []string) error {
 		if app.LaunchConfigEditor {
 			// Run config editor (same as "config update" flow)
 			if err := runConfigFlow(true, nil, nil); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "\n  \u2717 %v\n", err)
+				if help := tui.ErrorGuidance(tui.ActionConfigUpdate, err); help != nil {
+					fmt.Fprintf(os.Stderr, "    %s\n", help.Why)
+					fmt.Fprintf(os.Stderr, "    \u2192 %s\n", help.Action)
+				}
+				fmt.Fprintf(os.Stderr, "\n")
 			}
 			continue // re-launch AppModel with refreshed state
 		}

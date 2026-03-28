@@ -93,6 +93,12 @@ func executeAction(index int, actionID string, args []string,
 		case "import-mcp":
 			// TODO: wire to real MCP import in later task
 			msg = "MCP import not yet available in TUI"
+		case ActionRemovePlugin:
+			msg = "Plugin removal not yet available in TUI — use 'claude-sync config update'"
+		case ActionForkPlugin:
+			msg = "Fork not yet available in TUI — use 'claude-sync fork <plugin>'"
+		case ActionPinPlugin:
+			msg = "Pin not yet available in TUI — use 'claude-sync pin <plugin> <version>'"
 		case "__test_panic":
 			panic("test panic")
 		default:

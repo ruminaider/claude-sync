@@ -110,6 +110,10 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 					errMsg = result.err.Error()
 				}
 				lines = append(lines, stRed.Render("\u2717 "+errMsg))
+				if help := ErrorGuidance(result.actionID, result.err); help != nil {
+					lines = append(lines, stDim.Render("  "+help.Why))
+					lines = append(lines, stYellow.Render("  \u2192 "+help.Action))
+				}
 			}
 		} else if executing && executingActionID == rec.action.id {
 			// Show executing spinner
@@ -165,6 +169,10 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 					errMsg = result.err.Error()
 				}
 				lines = append(lines, stRed.Render("\u2717 "+errMsg))
+				if help := ErrorGuidance(result.actionID, result.err); help != nil {
+					lines = append(lines, stDim.Render("  "+help.Why))
+					lines = append(lines, stYellow.Render("  \u2192 "+help.Action))
+				}
 			}
 			continue
 		}

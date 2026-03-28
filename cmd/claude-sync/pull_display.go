@@ -87,6 +87,8 @@ func printPullResult(result *commands.PullResult) {
 		for _, p := range allFailed {
 			fmt.Fprintf(os.Stderr, "  • %s\n", p)
 		}
+		fmt.Fprintf(os.Stderr, "\n  Plugins may have been renamed, removed, or are unreachable.\n")
+		fmt.Fprintf(os.Stderr, "  → Check network/auth, then edit config.yaml to fix or remove references.\n")
 	}
 
 	nothingChanged := len(result.ToInstall) == 0 && len(result.Updated) == 0 && len(result.EnabledPluginsReconciled) == 0 &&
