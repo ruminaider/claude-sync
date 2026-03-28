@@ -16,6 +16,7 @@ type MenuModel struct {
 	cursor int
 	width  int
 	height int
+	state  commands.MenuState
 
 	// Selected is set when the user presses Enter on a leaf item.
 	// The caller inspects this after tea.Quit to decide what to do.
@@ -36,7 +37,7 @@ func NewMenuModel(state commands.MenuState) MenuModel {
 		items = buildFreshInstallMenu()
 	}
 
-	m := MenuModel{items: items}
+	m := MenuModel{items: items, state: state}
 	// Place cursor on first non-header item.
 	for i, it := range items {
 		if !it.isHeader {
@@ -69,6 +70,14 @@ func (m MenuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveCursor(-1)
 		case "down", "j":
 			m.moveCursor(1)
+		case "r":
+			if m.state.HasPending {
+				m.Selected = &menuItem{label: "Review pending", actionID: ActionApprove, mode: ModeCLI}
+				return m, tea.Quit
+			} else if m.state.HasConflicts {
+				m.Selected = &menuItem{label: "Resolve conflicts", actionID: ActionConflicts, mode: ModeCLI}
+				return m, tea.Quit
+			}
 		case "enter":
 			if m.cursor >= 0 && m.cursor < len(m.items) && !m.items[m.cursor].isHeader {
 				sel := m.items[m.cursor]
@@ -109,6 +118,15 @@ func (m MenuModel) View() string {
 	hintStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 
 	var lines []string
+
+	// Show banner for configured installations.
+	if m.state.ConfigExists {
+		banner := buildBanner(m.state)
+		if banner != "" {
+			lines = append(lines, banner)
+			lines = append(lines, "")
+		}
+	}
 
 	for i, item := range m.items {
 		if item.isHeader {

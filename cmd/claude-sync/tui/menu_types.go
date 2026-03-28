@@ -11,6 +11,8 @@ const (
 	ActionProfileList   = "switch-profile"
 	ActionConfigUpdate  = "edit-config"
 	ActionSubscribe     = "subscribe"
+	ActionApprove       = "approve"
+	ActionConflicts     = "conflicts"
 )
 
 // AllActionIDs returns every action ID that the menu can emit.
@@ -25,6 +27,8 @@ func AllActionIDs() []string {
 		ActionProfileList,
 		ActionConfigUpdate,
 		ActionSubscribe,
+		ActionApprove,
+		ActionConflicts,
 	}
 }
 

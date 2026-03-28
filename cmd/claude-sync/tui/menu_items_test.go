@@ -118,6 +118,8 @@ func TestAllActionIDs_ContainsExpected(t *testing.T) {
 		ActionProfileList,
 		ActionConfigUpdate,
 		ActionSubscribe,
+		ActionApprove,
+		ActionConflicts,
 	}
 	assert.Equal(t, expected, ids)
 }
