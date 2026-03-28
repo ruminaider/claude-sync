@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
@@ -136,7 +135,7 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 	state.ConfigRepo = detectConfigRepo(syncDir)
 
 	// Commits behind: check local tracking info
-	state.CommitsBehind = detectCommitsBehind(syncDir)
+	state.CommitsBehind = csgit.CommitsBehind(syncDir)
 
 	// Detect untracked plugins (installed locally but not in config)
 	installedPlugins, readErr := claudecode.ReadInstalledPlugins(claudeDir)
@@ -264,22 +263,6 @@ func detectConfigRepo(syncDir string) string {
 	}
 	// Return the raw URL if not a GitHub URL
 	return url
-}
-
-// detectCommitsBehind checks how many commits the local branch is behind its upstream.
-// detectCommitsBehind checks how many commits the local branch is behind its upstream.
-// Returns -1 if the status cannot be determined (no git repo, no upstream, etc.).
-func detectCommitsBehind(syncDir string) int {
-	cmd := exec.Command("git", "-C", syncDir, "rev-list", "HEAD..@{upstream}", "--count")
-	out, err := cmd.Output()
-	if err != nil {
-		return -1
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return -1
-	}
-	return n
 }
 
 // countPendingChanges returns the total number of individual pending approval items.

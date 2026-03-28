@@ -9,19 +9,14 @@ import (
 
 // PullPreviewResult summarizes what a pull operation would change.
 type PullPreviewResult struct {
-	CommitsBehind    int
-	ChangedFiles     []string // file paths changed between HEAD and upstream
-	PluginsToInstall int
-	PluginsToUpdate  int
-	SettingsChanged  bool
-	ClaudeMDChanged  bool
-	PermChanged      bool
-	MCPChanged       bool
-	KeybindChanged   bool
-	CommandsChanged  bool
-	SkillsChanged    bool
-	MemoryChanged    bool
-	NothingToChange  bool
+	CommitsBehind   int
+	ChangedFiles    []string // file paths changed between HEAD and upstream
+	SettingsChanged bool
+	ClaudeMDChanged bool
+	CommandsChanged bool
+	SkillsChanged   bool
+	MemoryChanged   bool
+	NothingToChange bool
 }
 
 // PullPreview fetches remote changes and returns a summary of what would change

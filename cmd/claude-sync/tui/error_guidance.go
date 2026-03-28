@@ -45,7 +45,7 @@ func ErrorGuidance(actionID string, err error) *ErrorHelp {
 				Action: "Run 'claude-sync conflicts' to resolve, then retry.",
 			}
 		}
-	case ActionPush, "push-changes":
+	case ActionPush, ActionPushChanges:
 		switch {
 		case strings.Contains(msg, "non-fast-forward") ||
 			strings.Contains(msg, "fetch first") ||

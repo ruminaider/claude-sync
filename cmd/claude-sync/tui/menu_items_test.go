@@ -111,15 +111,19 @@ func TestAllActionIDs_ContainsExpected(t *testing.T) {
 	expected := []string{
 		ActionPull,
 		ActionPush,
+		ActionPushChanges,
 		ActionBrowsePlugins,
 		ActionRemovePlugin,
 		ActionForkPlugin,
 		ActionPinPlugin,
+		ActionPluginUpdate,
 		ActionProfileList,
 		ActionConfigUpdate,
 		ActionSubscribe,
 		ActionApprove,
+		ActionReject,
 		ActionConflicts,
+		ActionImportMCP,
 	}
 	assert.Equal(t, expected, ids)
 }

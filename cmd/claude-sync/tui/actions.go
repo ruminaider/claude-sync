@@ -35,23 +35,23 @@ func buildIntents(state commands.MenuState) []intent {
 		},
 		{
 			hint:   "\u2192",
-			action: actionItem{id: "browse-plugins", label: "Add or discover new plugins"},
+			action: actionItem{id: ActionBrowsePlugins, label: "Add or discover new plugins"},
 		},
 		{
 			hint:   profileHint,
-			action: actionItem{id: "switch-profile", label: profileLabel},
+			action: actionItem{id: ActionProfileList, label: profileLabel},
 		},
 		{
 			hint:   "enter",
-			action: actionItem{id: "push-changes", label: "Push my local changes", inline: true},
+			action: actionItem{id: ActionPushChanges, label: "Push my local changes", inline: true},
 		},
 		{
 			hint:   "\u2192",
-			action: actionItem{id: "edit-config", label: "Edit my full config"},
+			action: actionItem{id: ActionConfigUpdate, label: "Edit my full config"},
 		},
 		{
 			hint:   "enter",
-			action: actionItem{id: "import-mcp", label: "Import MCP servers", inline: true},
+			action: actionItem{id: ActionImportMCP, label: "Import MCP servers", inline: true},
 		},
 		{
 			hint:   "\u2192",

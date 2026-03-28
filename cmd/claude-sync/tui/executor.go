@@ -38,7 +38,7 @@ func executeAction(index int, actionID string, args []string,
 		var err error
 
 		switch actionID {
-		case "pull":
+		case ActionPull:
 			// Show preview summary of incoming changes before applying.
 			preview, previewErr := commands.PullPreview(syncDir)
 			if previewErr == nil && preview.NothingToChange {
@@ -54,7 +54,7 @@ func executeAction(index int, actionID string, args []string,
 				}
 				msg = pullMsg
 			}
-		case "push", "push-changes":
+		case ActionPush, ActionPushChanges:
 			scanResult, scanErr := commands.PushScan(claudeDir, syncDir)
 			if scanErr != nil {
 				err = scanErr
@@ -80,29 +80,31 @@ func executeAction(index int, actionID string, args []string,
 					msg = fmt.Sprintf("Pushed \u2014 %s", commands.PushPreviewSummary(scanResult))
 				}
 			}
-		case "approve":
+		case ActionApprove:
 			result, approveErr := commands.Approve(claudeDir, syncDir)
 			err = approveErr
 			if result != nil {
 				msg = formatApproveResult(result)
 			}
-		case "reject":
+		case ActionReject:
 			err = commands.Reject(syncDir)
 			if err == nil {
 				msg = "Pending changes rejected"
 			}
-		case "conflicts":
+		case ActionConflicts:
 			// For now, just report -- real conflict resolution needs a sub-view
 			msg = "Conflict resolution not yet available in TUI"
-		case "plugin-update":
+		case ActionPluginUpdate:
 			if len(args) > 0 {
 				msg = fmt.Sprintf("Plugin update for %s not yet available in TUI", args[0])
 			} else {
 				msg = "Plugin update not yet available in TUI"
 			}
-		case "import-mcp":
+		case ActionImportMCP:
 			// TODO: wire to real MCP import in later task
 			msg = "MCP import not yet available in TUI"
+		case ActionSubscribe:
+			msg = "Subscribe not yet available in TUI — use 'claude-sync subscribe <url>'"
 		case ActionRemovePlugin:
 			msg = "Plugin removal not yet available in TUI — use 'claude-sync config update'"
 		case ActionForkPlugin:

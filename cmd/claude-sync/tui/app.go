@@ -329,12 +329,12 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // openSubView handles navigation to a sub-view based on action ID.
 func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 	switch actionID {
-	case "switch-profile":
+	case ActionProfileList:
 		picker := NewProfilePicker(m.state, m.width, m.height)
 		picker.SetPaths(m.claudeDir, m.syncDir)
 		m.subView = picker
 		m.activeView = viewSubView
-	case "browse-plugins":
+	case ActionBrowsePlugins:
 		browser := NewPluginBrowser(m.state, m.width, m.height)
 		m.subView = browser
 		m.activeView = viewSubView
@@ -350,7 +350,7 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 	case "view-plugins":
 		m.subView = NewActivePluginsView(m.state, m.width, m.height)
 		m.activeView = viewSubView
-	case "edit-config":
+	case ActionConfigUpdate:
 		m.LaunchConfigEditor = true
 		return m, tea.Quit
 	}
