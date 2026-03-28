@@ -185,7 +185,7 @@ func TestAppModel_ViewMain_ShowsSummaryAndActions(t *testing.T) {
 	// Summary section
 	assert.Contains(t, view, "User config")
 	assert.Contains(t, view, "user/repo")
-	assert.Contains(t, view, "connected")
+	assert.Contains(t, view, "3 behind")
 	// Recommendations
 	assert.Contains(t, view, "Needs attention")
 	// Intents

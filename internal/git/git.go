@@ -278,8 +278,14 @@ func ResolveUpstreamURL(localRepoPath string) (string, error) {
 }
 
 // ShallowClone clones a repository with depth 1 into dst.
+// If ref is empty, the remote's default branch is cloned.
 func ShallowClone(url, dst, ref string) error {
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, url, dst)
+	args := []string{"clone", "--depth", "1"}
+	if ref != "" {
+		args = append(args, "--branch", ref)
+	}
+	args = append(args, url, dst)
+	cmd := exec.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("shallow clone: %s", strings.TrimSpace(string(out)))

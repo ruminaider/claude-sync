@@ -16,7 +16,27 @@ func TestRenderSummary_ShowsConfigRepo(t *testing.T) {
 	}
 	view := renderSummary(state, "0.7.0")
 	assert.Contains(t, view, "ruminaider/claude-sync-config")
-	assert.Contains(t, view, "connected")
+	assert.Contains(t, view, "synced")
+}
+
+func TestRenderSummary_SyncUnknown(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		ConfigRepo:    "ruminaider/claude-sync-config",
+		CommitsBehind: -1,
+	}
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "sync unknown")
+}
+
+func TestRenderSummary_CommitsBehind(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		ConfigRepo:    "ruminaider/claude-sync-config",
+		CommitsBehind: 5,
+	}
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "5 behind")
 }
 
 func TestRenderSummary_NoConfigRepo(t *testing.T) {

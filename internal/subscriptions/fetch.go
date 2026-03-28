@@ -32,10 +32,7 @@ func FetchAll(syncDir string, subs map[string]config.SubscriptionEntry, state Su
 // performs a shallow clone. Otherwise, fetches and resets.
 func FetchOne(syncDir, name string, sub config.SubscriptionEntry, state SubscriptionState) FetchResult {
 	dir := SubDir(syncDir, name)
-	ref := sub.Ref
-	if ref == "" {
-		ref = "main"
-	}
+	ref := sub.Ref // empty ref clones the remote's default branch
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		// First fetch — shallow clone.
