@@ -103,8 +103,6 @@ func executeAction(index int, actionID string, args []string,
 		case ActionImportMCP:
 			// TODO: wire to real MCP import in later task
 			msg = "MCP import not yet available in TUI"
-		case ActionSubscribe:
-			msg = "Subscribe not yet available in TUI — use 'claude-sync subscribe <url>'"
 		case ActionRemovePlugin:
 			msg = "Plugin removal not yet available in TUI — use 'claude-sync config update'"
 		case ActionForkPlugin:

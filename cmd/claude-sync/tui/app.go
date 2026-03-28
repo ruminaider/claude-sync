@@ -350,6 +350,11 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 	case "view-plugins":
 		m.subView = NewActivePluginsView(m.state, m.width, m.height)
 		m.activeView = viewSubView
+	case ActionSubscribe:
+		sf := NewSubscribeFlow(m.width, m.height)
+		sf.syncDir = m.syncDir
+		m.subView = sf
+		m.activeView = viewSubView
 	case ActionConfigUpdate:
 		m.LaunchConfigEditor = true
 		return m, tea.Quit
