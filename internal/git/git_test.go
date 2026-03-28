@@ -200,3 +200,216 @@ func TestAddAndCommit(t *testing.T) {
 	clean, _ := git.IsClean(dir)
 	assert.True(t, clean)
 }
+
+// initRepoWithUpstream creates a "bare" upstream repo and a clone that tracks it.
+// Returns (cloneDir, upstreamDir).
+func initRepoWithUpstream(t *testing.T) (string, string) {
+	t.Helper()
+
+	// Create a repo to act as the upstream (bare).
+	upstream := filepath.Join(t.TempDir(), "upstream.git")
+	mustExec(t, "git", "init", "--bare", upstream)
+
+	// Clone it so we get a tracking branch.
+	clone := filepath.Join(t.TempDir(), "clone")
+	mustExec(t, "git", "clone", upstream, clone)
+	mustExec(t, "git", "-C", clone, "config", "user.email", "test@test.com")
+	mustExec(t, "git", "-C", clone, "config", "user.name", "Test")
+
+	// Need at least one commit so HEAD exists.
+	os.WriteFile(filepath.Join(clone, "init.txt"), []byte("init"), 0644)
+	mustExec(t, "git", "-C", clone, "add", ".")
+	mustExec(t, "git", "-C", clone, "commit", "-m", "initial")
+	mustExec(t, "git", "-C", clone, "push")
+
+	return clone, upstream
+}
+
+func TestCommitsBehind(t *testing.T) {
+	t.Run("non-git directory", func(t *testing.T) {
+		dir := t.TempDir()
+		assert.Equal(t, -1, git.CommitsBehind(dir))
+	})
+
+	t.Run("at same commit as upstream", func(t *testing.T) {
+		clone, _ := initRepoWithUpstream(t)
+		assert.Equal(t, 0, git.CommitsBehind(clone))
+	})
+
+	t.Run("behind upstream", func(t *testing.T) {
+		clone, upstream := initRepoWithUpstream(t)
+
+		// Push two more commits from a second clone so upstream moves ahead.
+		second := filepath.Join(t.TempDir(), "second")
+		mustExec(t, "git", "clone", upstream, second)
+		mustExec(t, "git", "-C", second, "config", "user.email", "test@test.com")
+		mustExec(t, "git", "-C", second, "config", "user.name", "Test")
+
+		os.WriteFile(filepath.Join(second, "a.txt"), []byte("a"), 0644)
+		mustExec(t, "git", "-C", second, "add", ".")
+		mustExec(t, "git", "-C", second, "commit", "-m", "commit a")
+
+		os.WriteFile(filepath.Join(second, "b.txt"), []byte("b"), 0644)
+		mustExec(t, "git", "-C", second, "add", ".")
+		mustExec(t, "git", "-C", second, "commit", "-m", "commit b")
+		mustExec(t, "git", "-C", second, "push")
+
+		// Fetch in original clone so it sees the new upstream commits.
+		mustExec(t, "git", "-C", clone, "fetch")
+
+		assert.Equal(t, 2, git.CommitsBehind(clone))
+	})
+}
+
+func TestCommitsAhead(t *testing.T) {
+	t.Run("non-git directory", func(t *testing.T) {
+		dir := t.TempDir()
+		assert.Equal(t, -1, git.CommitsAhead(dir))
+	})
+
+	t.Run("at same commit as upstream", func(t *testing.T) {
+		clone, _ := initRepoWithUpstream(t)
+		assert.Equal(t, 0, git.CommitsAhead(clone))
+	})
+
+	t.Run("ahead of upstream", func(t *testing.T) {
+		clone, _ := initRepoWithUpstream(t)
+
+		// Create local commits without pushing.
+		os.WriteFile(filepath.Join(clone, "local1.txt"), []byte("local1"), 0644)
+		mustExec(t, "git", "-C", clone, "add", ".")
+		mustExec(t, "git", "-C", clone, "commit", "-m", "local commit 1")
+
+		os.WriteFile(filepath.Join(clone, "local2.txt"), []byte("local2"), 0644)
+		mustExec(t, "git", "-C", clone, "add", ".")
+		mustExec(t, "git", "-C", clone, "commit", "-m", "local commit 2")
+
+		os.WriteFile(filepath.Join(clone, "local3.txt"), []byte("local3"), 0644)
+		mustExec(t, "git", "-C", clone, "add", ".")
+		mustExec(t, "git", "-C", clone, "commit", "-m", "local commit 3")
+
+		assert.Equal(t, 3, git.CommitsAhead(clone))
+	})
+}
+
+func TestDiffNameOnly(t *testing.T) {
+	t.Run("invalid refs", func(t *testing.T) {
+		dir := initTestRepo(t)
+		_, err := git.DiffNameOnly(dir, "nonexistent-ref-a", "nonexistent-ref-b")
+		assert.Error(t, err)
+	})
+
+	t.Run("identical refs", func(t *testing.T) {
+		dir := initTestRepo(t)
+		os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
+		mustExec(t, "git", "-C", dir, "add", ".")
+		mustExec(t, "git", "-C", dir, "commit", "-m", "initial")
+
+		files, err := git.DiffNameOnly(dir, "HEAD", "HEAD")
+		require.NoError(t, err)
+		assert.Nil(t, files)
+	})
+
+	t.Run("known diff", func(t *testing.T) {
+		dir := initTestRepo(t)
+		os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644)
+		mustExec(t, "git", "-C", dir, "add", ".")
+		mustExec(t, "git", "-C", dir, "commit", "-m", "initial")
+
+		sha1, err := git.RevParse(dir, "HEAD")
+		require.NoError(t, err)
+
+		os.WriteFile(filepath.Join(dir, "added.txt"), []byte("new file"), 0644)
+		os.WriteFile(filepath.Join(dir, "test.txt"), []byte("modified"), 0644)
+		mustExec(t, "git", "-C", dir, "add", ".")
+		mustExec(t, "git", "-C", dir, "commit", "-m", "second")
+
+		sha2, err := git.RevParse(dir, "HEAD")
+		require.NoError(t, err)
+
+		files, err := git.DiffNameOnly(dir, sha1, sha2)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"added.txt", "test.txt"}, files)
+	})
+
+	t.Run("filters empty strings", func(t *testing.T) {
+		// Verify that the implementation does not include empty strings.
+		// When git output has trailing newlines, Split produces empty entries.
+		// The function should filter them out. We verify this indirectly by
+		// checking that a real diff produces no empty entries.
+		dir := initTestRepo(t)
+		os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644)
+		mustExec(t, "git", "-C", dir, "add", ".")
+		mustExec(t, "git", "-C", dir, "commit", "-m", "first")
+
+		sha1, err := git.RevParse(dir, "HEAD")
+		require.NoError(t, err)
+
+		os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0644)
+		mustExec(t, "git", "-C", dir, "add", ".")
+		mustExec(t, "git", "-C", dir, "commit", "-m", "second")
+
+		sha2, err := git.RevParse(dir, "HEAD")
+		require.NoError(t, err)
+
+		files, err := git.DiffNameOnly(dir, sha1, sha2)
+		require.NoError(t, err)
+		for _, f := range files {
+			assert.NotEmpty(t, f, "DiffNameOnly should not return empty strings")
+		}
+	})
+}
+
+func TestMergeFFOnly(t *testing.T) {
+	t.Run("fast-forward succeeds", func(t *testing.T) {
+		clone, upstream := initRepoWithUpstream(t)
+
+		// Push a commit from a second clone so upstream moves ahead.
+		second := filepath.Join(t.TempDir(), "second")
+		mustExec(t, "git", "clone", upstream, second)
+		mustExec(t, "git", "-C", second, "config", "user.email", "test@test.com")
+		mustExec(t, "git", "-C", second, "config", "user.name", "Test")
+
+		os.WriteFile(filepath.Join(second, "new.txt"), []byte("new"), 0644)
+		mustExec(t, "git", "-C", second, "add", ".")
+		mustExec(t, "git", "-C", second, "commit", "-m", "new commit")
+		mustExec(t, "git", "-C", second, "push")
+
+		// Fetch in original clone, then fast-forward merge.
+		mustExec(t, "git", "-C", clone, "fetch")
+
+		err := git.MergeFFOnly(clone)
+		require.NoError(t, err)
+
+		// Verify the file from the upstream commit is now present.
+		data, err := os.ReadFile(filepath.Join(clone, "new.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "new", string(data))
+	})
+
+	t.Run("non-fast-forward fails", func(t *testing.T) {
+		clone, upstream := initRepoWithUpstream(t)
+
+		// Push a commit from a second clone so upstream diverges.
+		second := filepath.Join(t.TempDir(), "second")
+		mustExec(t, "git", "clone", upstream, second)
+		mustExec(t, "git", "-C", second, "config", "user.email", "test@test.com")
+		mustExec(t, "git", "-C", second, "config", "user.name", "Test")
+
+		os.WriteFile(filepath.Join(second, "upstream.txt"), []byte("upstream"), 0644)
+		mustExec(t, "git", "-C", second, "add", ".")
+		mustExec(t, "git", "-C", second, "commit", "-m", "upstream commit")
+		mustExec(t, "git", "-C", second, "push")
+
+		// Create a local divergent commit in original clone.
+		os.WriteFile(filepath.Join(clone, "local.txt"), []byte("local"), 0644)
+		mustExec(t, "git", "-C", clone, "add", ".")
+		mustExec(t, "git", "-C", clone, "commit", "-m", "local commit")
+
+		// Fetch so clone sees the upstream commit, creating divergence.
+		mustExec(t, "git", "-C", clone, "fetch")
+
+		err := git.MergeFFOnly(clone)
+		assert.Error(t, err)
+	})
+}
