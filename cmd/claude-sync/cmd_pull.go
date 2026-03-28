@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/paths"
 	"github.com/ruminaider/claude-sync/internal/plugins"
 	"github.com/ruminaider/claude-sync/internal/profiles"
@@ -39,6 +40,37 @@ var pullCmd = &cobra.Command{
 				ProjectDir: projectDir,
 			})
 		} else {
+			// Fetch once up front so both preview and pull share the same refs.
+			if git.HasRemote(syncDir, "origin") {
+				if fetchErr := git.Fetch(syncDir); fetchErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: fetch failed (%v); preview may be stale\n", fetchErr)
+				}
+			}
+
+			// Preview incoming changes before applying.
+			if !quietFlag {
+				preview, previewErr := commands.PullPreview(syncDir)
+				if previewErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not preview changes: %v\n", previewErr)
+				} else if preview.NothingToChange {
+					fmt.Println(commands.FormatPullPreview(preview))
+					// Still run pull to apply local-only changes (settings, plugins, etc.)
+				} else {
+					fmt.Println(commands.FormatPullPreview(preview))
+					fmt.Println()
+					confirm, promptErr := confirmPrompt("Apply these changes?")
+					if promptErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: prompt failed: %v\n", promptErr)
+						fmt.Println("Pull cancelled.")
+						return nil
+					}
+					if !confirm {
+						fmt.Println("Pull cancelled.")
+						return nil
+					}
+				}
+			}
+
 			if !quietFlag {
 				fmt.Println("Pulling latest config...")
 			}
@@ -47,6 +79,7 @@ var pullCmd = &cobra.Command{
 				SyncDir:   syncDir,
 				Quiet:     quietFlag,
 				Force:     forceFlag,
+				SkipFetch: true, // already fetched above
 				DuplicateResolver: func(dupes []plugins.Duplicate) error {
 					for _, d := range dupes {
 						forkSrc, mktSrc, isFork := isForkDuplicate(d)

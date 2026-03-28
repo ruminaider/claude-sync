@@ -2,14 +2,13 @@ package commands
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/config"
+	csgit "github.com/ruminaider/claude-sync/internal/git"
 	"github.com/ruminaider/claude-sync/internal/marketplace"
 	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/ruminaider/claude-sync/internal/project"
@@ -61,6 +60,10 @@ type MenuState struct {
 	// Dashboard fields
 	ConfigRepo     string       // remote URL or repo shortname
 	CommitsBehind  int          // how many commits behind remote
+	CommitsAhead   int          // how many local commits not yet pushed
+	PluginCount    int          // total unique plugins (deduplicated across upstream/pinned/forked)
+	PendingCount   int          // number of individual pending approval changes
+	Role           string       // "owner" or "subscriber"
 	Plugins        []PluginInfo // all plugins with status
 	Projects       []ProjectInfo
 	ProjectDir         string // current $PWD (always set)
@@ -130,7 +133,7 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 	state.ConfigRepo = detectConfigRepo(syncDir)
 
 	// Commits behind: check local tracking info
-	state.CommitsBehind = detectCommitsBehind(syncDir)
+	state.CommitsBehind = csgit.CommitsBehind(syncDir)
 
 	// Detect untracked plugins (installed locally but not in config)
 	installedPlugins, readErr := claudecode.ReadInstalledPlugins(claudeDir)
@@ -164,6 +167,21 @@ func detectMenuStateWithPwd(claudeDir, syncDir, pwd string) MenuState {
 
 	// ClaudeMD count: count .md files in claude-md/ directory
 	state.ClaudeMDCount = countClaudeMDFragments(syncDir)
+
+	state.CommitsAhead = csgit.CommitsAhead(syncDir)
+
+	if cfg != nil {
+		state.PluginCount = len(cfg.AllPluginKeys())
+	}
+
+	state.PendingCount = countPendingChanges(pending)
+
+	// Role: "subscriber" if config has subscriptions, "owner" otherwise
+	if cfg != nil && len(cfg.Subscriptions) > 0 {
+		state.Role = "subscriber"
+	} else {
+		state.Role = "owner"
+	}
 
 	return state
 }
@@ -221,12 +239,10 @@ func splitPluginKey(key string) (name, mkt string) {
 
 // detectConfigRepo reads the git remote URL from syncDir and returns a short form.
 func detectConfigRepo(syncDir string) string {
-	cmd := exec.Command("git", "-C", syncDir, "remote", "get-url", "origin")
-	out, err := cmd.Output()
+	url, err := csgit.RemoteURL(syncDir, "origin")
 	if err != nil {
 		return ""
 	}
-	url := strings.TrimSpace(string(out))
 	// Try to parse as GitHub URL for short form
 	if short := marketplace.ParseGitHubRepoURL(url); short != "" {
 		return short
@@ -235,20 +251,15 @@ func detectConfigRepo(syncDir string) string {
 	return url
 }
 
-// detectCommitsBehind checks how many commits the local branch is behind its upstream.
-// detectCommitsBehind checks how many commits the local branch is behind its upstream.
-// Returns -1 if the status cannot be determined (no git repo, no upstream, etc.).
-func detectCommitsBehind(syncDir string) int {
-	cmd := exec.Command("git", "-C", syncDir, "rev-list", "HEAD..@{upstream}", "--count")
-	out, err := cmd.Output()
-	if err != nil {
-		return -1
+// countPendingChanges returns the total number of individual pending approval items.
+func countPendingChanges(p approval.PendingChanges) int {
+	count := 0
+	if p.Permissions != nil {
+		count += len(p.Permissions.Allow) + len(p.Permissions.Deny)
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return -1
-	}
-	return n
+	count += len(p.MCP)
+	count += len(p.Hooks)
+	return count
 }
 
 // countClaudeMDFragments counts .md files in the claude-md/ directory.

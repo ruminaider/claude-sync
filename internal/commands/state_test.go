@@ -1,11 +1,13 @@
 package commands
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/project"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -458,3 +460,150 @@ plugins:
 	assert.Len(t, state.Plugins, 1)
 	assert.Empty(t, state.UntrackedPlugins)
 }
+
+func TestDetectMenuState_NewFields_ZeroWhenNotInitialized(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := filepath.Join(t.TempDir(), "sync")
+	// syncDir does not exist — not initialized
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	assert.False(t, state.ConfigExists)
+	assert.Equal(t, 0, state.CommitsAhead)
+	assert.Equal(t, 0, state.PluginCount)
+	assert.Equal(t, 0, state.PendingCount)
+	assert.Empty(t, state.Role)
+}
+
+func TestDetectMenuState_NewFields_Populated(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+
+	// Config with plugins (upstream + forked, where pinned overlaps with upstream)
+	cfgYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - auto-compact@claude-plugins-official
+    - memory@claude-plugins-official
+  forked:
+    - my-fork
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(cfgYAML), 0644))
+
+	// Pending changes with multiple items — use WritePending for correct serialization
+	pending := approval.PendingChanges{
+		PendingSince: "2026-02-26",
+		Commit:       "abc123",
+		Permissions: &approval.PendingPermissions{
+			Allow: []string{"Bash", "Read"},
+		},
+		MCP: map[string]json.RawMessage{
+			"slack": json.RawMessage(`{"command":"mcp-slack"}`),
+		},
+	}
+	require.NoError(t, approval.WritePending(syncDir, pending))
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	// PluginCount: 2 upstream + 1 forked = 3 unique plugins
+	assert.Equal(t, 3, state.PluginCount)
+
+	// PendingCount: 2 permission allow rules + 1 MCP entry = 3
+	assert.Equal(t, 3, state.PendingCount)
+
+	// CommitsAhead: no git repo, so -1
+	assert.Equal(t, -1, state.CommitsAhead)
+
+	// Role: no subscriptions, defaults to "owner"
+	assert.Equal(t, "owner", state.Role)
+}
+
+func TestDetectMenuState_Role_Subscriber(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+
+	// Config with subscriptions
+	cfgYAML := `version: "1.0.0"
+subscriptions:
+  team-backend:
+    url: https://github.com/org/team-backend-config.git
+    categories:
+      mcp: all
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(cfgYAML), 0644))
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	assert.Equal(t, "subscriber", state.Role)
+}
+
+func TestDetectMenuState_CommitsAhead(t *testing.T) {
+	claudeDir := t.TempDir()
+
+	// Create a bare remote repo
+	remote := t.TempDir()
+	require.NoError(t, exec.Command("git", "init", "--bare", remote).Run())
+
+	// Clone it to syncDir
+	syncDir := filepath.Join(t.TempDir(), "sync")
+	require.NoError(t, exec.Command("git", "clone", remote, syncDir).Run())
+
+	// Configure git user for commits
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.email", "test@test.com").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "config", "user.name", "Test").Run())
+
+	// Create config.yaml and push
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte("version: \"1.0.0\"\n"), 0644))
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "init").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "push", "origin", "HEAD").Run())
+
+	// Make a local commit that hasn't been pushed
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "local.txt"), []byte("unpushed"), 0644))
+	require.NoError(t, exec.Command("git", "-C", syncDir, "add", ".").Run())
+	require.NoError(t, exec.Command("git", "-C", syncDir, "commit", "-m", "local-only").Run())
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	assert.Equal(t, 1, state.CommitsAhead)
+}
+
+func TestDetectMenuState_PluginCount_Deduplicated(t *testing.T) {
+	claudeDir := t.TempDir()
+	syncDir := t.TempDir()
+
+	// Pinned plugins overlap with upstream — should not double-count
+	cfgYAML := `version: "1.0.0"
+plugins:
+  upstream:
+    - auto-compact@claude-plugins-official
+    - memory@claude-plugins-official
+  pinned:
+    - auto-compact@claude-plugins-official: "v1.2.3"
+  forked:
+    - my-fork
+`
+	require.NoError(t, os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(cfgYAML), 0644))
+
+	origSearchDirs := DefaultProjectSearchDirs
+	DefaultProjectSearchDirs = func() []string { return nil }
+	defer func() { DefaultProjectSearchDirs = origSearchDirs }()
+
+	state := DetectMenuState(claudeDir, syncDir)
+
+	// auto-compact appears in both upstream and pinned, so 3 unique: auto-compact, memory, my-fork
+	assert.Equal(t, 3, state.PluginCount)
+}
+

@@ -242,6 +242,34 @@ var pushCmd = &cobra.Command{
 			}
 		}
 
+		// Show final summary and confirm before pushing.
+		effectiveScan := &commands.PushScanResult{
+			AddedPlugins:       selectedAdd,
+			RemovedPlugins:     selectedRemove,
+			ChangedPermissions: updatePerms,
+			ChangedClaudeMD:    scan.ChangedClaudeMD,
+			ChangedMCP:         updateMCP,
+			ChangedKeybindings: updateKB,
+			ChangedCommands:    updateCmds,
+			ChangedSkills:      updateSkills,
+			OrphanedCommands:   scan.OrphanedCommands,
+			OrphanedSkills:     scan.OrphanedSkills,
+			DirtyWorkingTree:   scan.DirtyWorkingTree,
+		}
+		fmt.Println()
+		fmt.Println(commands.PushPreviewSummary(effectiveScan))
+		fmt.Println()
+		confirmPush, promptErr := confirmPrompt("Push these changes?")
+		if promptErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: prompt failed: %v\n", promptErr)
+			fmt.Println("Push cancelled.")
+			return nil
+		}
+		if !confirmPush {
+			fmt.Println("Push cancelled.")
+			return nil
+		}
+
 		headBefore, _ := git.RevParse(syncDir, "HEAD")
 		err = commands.PushApply(commands.PushApplyOptions{
 			ClaudeDir:         claudeDir,

@@ -373,6 +373,30 @@ func TestExecuteAction_Reject_ErrorPath(t *testing.T) {
 	assert.Equal(t, "reject", result.actionID)
 }
 
+func TestExecuteAction_RemovePlugin(t *testing.T) {
+	cmd := executeAction(0, ActionRemovePlugin, nil, "/tmp/claude", "/tmp/sync")
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.True(t, result.success)
+	assert.Contains(t, result.message, "not yet available")
+}
+
+func TestExecuteAction_ForkPlugin(t *testing.T) {
+	cmd := executeAction(0, ActionForkPlugin, nil, "/tmp/claude", "/tmp/sync")
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.True(t, result.success)
+	assert.Contains(t, result.message, "not yet available")
+}
+
+func TestExecuteAction_PinPlugin(t *testing.T) {
+	cmd := executeAction(0, ActionPinPlugin, nil, "/tmp/claude", "/tmp/sync")
+	msg := cmd()
+	result := msg.(actionResultMsg)
+	assert.True(t, result.success)
+	assert.Contains(t, result.message, "not yet available")
+}
+
 func TestExecuteAction_ActionIDPreserved(t *testing.T) {
 	// Verify actionID is always set correctly on success and failure
 	tests := []struct {
@@ -386,6 +410,9 @@ func TestExecuteAction_ActionIDPreserved(t *testing.T) {
 		{"conflicts", nil},
 		{"plugin-update", []string{"test"}},
 		{"import-mcp", nil},
+		{ActionRemovePlugin, nil},
+		{ActionForkPlugin, nil},
+		{ActionPinPlugin, nil},
 		{"nonexistent", nil},
 	}
 	for _, tt := range tests {

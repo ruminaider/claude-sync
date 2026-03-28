@@ -121,7 +121,11 @@ func buildConfigDetailsContent(state commands.MenuState) string {
 
 	// --- Sync Status section ---
 	lines = append(lines, sectionLine(stSection, "Sync Status", 60))
-	lines = append(lines, stText.Render(fmt.Sprintf("Behind: %d commits", state.CommitsBehind)))
+	if state.CommitsBehind < 0 {
+		lines = append(lines, stDim.Render("Behind: unknown"))
+	} else {
+		lines = append(lines, stText.Render(fmt.Sprintf("Behind: %d commits", state.CommitsBehind)))
+	}
 	if state.HasPending {
 		lines = append(lines, stYellow.Render("Pending approvals: yes"))
 	} else {

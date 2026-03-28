@@ -3,6 +3,7 @@ package git
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -90,6 +91,13 @@ func Commit(dir, message string) error {
 // Pull runs git pull --ff-only.
 func Pull(dir string) error {
 	_, err := Run(dir, "pull", "--ff-only")
+	return err
+}
+
+// MergeFFOnly fast-forwards the current branch to its upstream tracking ref.
+// Use this instead of Pull when the caller has already fetched.
+func MergeFFOnly(dir string) error {
+	_, err := Run(dir, "merge", "--ff-only", "@{upstream}")
 	return err
 }
 
@@ -270,8 +278,14 @@ func ResolveUpstreamURL(localRepoPath string) (string, error) {
 }
 
 // ShallowClone clones a repository with depth 1 into dst.
+// If ref is empty, the remote's default branch is cloned.
 func ShallowClone(url, dst, ref string) error {
-	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", ref, url, dst)
+	args := []string{"clone", "--depth", "1"}
+	if ref != "" {
+		args = append(args, "--branch", ref)
+	}
+	args = append(args, url, dst)
+	cmd := exec.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("shallow clone: %s", strings.TrimSpace(string(out)))
@@ -306,4 +320,50 @@ func HasUnpushedCommits(dir string) bool {
 	}
 	out, err := Run(dir, "rev-list", "@{u}..HEAD")
 	return err == nil && out != ""
+}
+
+// CommitsBehind returns how many commits the local branch is behind its upstream.
+// Returns -1 if the count cannot be determined (no git repo, no upstream, etc.).
+func CommitsBehind(dir string) int {
+	out, err := Run(dir, "rev-list", "HEAD..@{upstream}", "--count")
+	if err != nil {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// DiffNameOnly returns the list of files changed between two refs.
+func DiffNameOnly(dir, refA, refB string) ([]string, error) {
+	out, err := Run(dir, "diff", "--name-only", refA, refB)
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var files []string
+	for _, f := range strings.Split(out, "\n") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
+// CommitsAhead returns how many local commits have not yet been pushed to the upstream.
+// Returns -1 if the count cannot be determined (no git repo, no upstream, etc.).
+func CommitsAhead(dir string) int {
+	out, err := Run(dir, "rev-list", "@{upstream}..HEAD", "--count")
+	if err != nil {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return -1
+	}
+	return n
 }

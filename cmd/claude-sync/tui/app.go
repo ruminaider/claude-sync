@@ -225,7 +225,6 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Get filtered lists for navigation
 	filteredRecs := filterRecommendations(m.recommendations, m.filterText)
 	filteredIntents := filterIntents(m.intents, m.filterText)
-	total := actionItemCount(filteredRecs, filteredIntents)
 
 	switch msg.String() {
 	case "/":
@@ -245,14 +244,20 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Esc from main screen quits (no dashboard to go back to)
 		m.quitting = true
 		return m, tea.Quit
+	case "r":
+		if m.state.HasPending {
+			m.executing = true
+			m.executingActionID = ActionApprove
+			return m, executeAction(m.actionCursor, ActionApprove, nil, m.claudeDir, m.syncDir)
+		} else if m.state.HasConflicts {
+			m.executing = true
+			m.executingActionID = ActionConflicts
+			return m, executeAction(m.actionCursor, ActionConflicts, nil, m.claudeDir, m.syncDir)
+		}
 	case "j", "down":
-		if m.actionCursor < total-1 {
-			m.actionCursor++
-		}
+		m.moveCursor(+1, filteredRecs, filteredIntents)
 	case "k", "up":
-		if m.actionCursor > 0 {
-			m.actionCursor--
-		}
+		m.moveCursor(-1, filteredRecs, filteredIntents)
 	case "enter":
 		if m.executing {
 			return m, nil // ignore while executing
@@ -310,18 +315,13 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Arrow key navigation within filter mode (j/k are typed as filter text)
+	filteredRecs := filterRecommendations(m.recommendations, m.filterText)
+	filteredIntents := filterIntents(m.intents, m.filterText)
 	switch msg.Type {
 	case tea.KeyDown:
-		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
-		filteredIntents := filterIntents(m.intents, m.filterText)
-		total := actionItemCount(filteredRecs, filteredIntents)
-		if m.actionCursor < total-1 {
-			m.actionCursor++
-		}
+		m.moveCursor(+1, filteredRecs, filteredIntents)
 	case tea.KeyUp:
-		if m.actionCursor > 0 {
-			m.actionCursor--
-		}
+		m.moveCursor(-1, filteredRecs, filteredIntents)
 	}
 	return m, nil
 }
@@ -329,12 +329,12 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // openSubView handles navigation to a sub-view based on action ID.
 func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 	switch actionID {
-	case "switch-profile":
+	case ActionProfileList:
 		picker := NewProfilePicker(m.state, m.width, m.height)
 		picker.SetPaths(m.claudeDir, m.syncDir)
 		m.subView = picker
 		m.activeView = viewSubView
-	case "browse-plugins":
+	case ActionBrowsePlugins:
 		browser := NewPluginBrowser(m.state, m.width, m.height)
 		m.subView = browser
 		m.activeView = viewSubView
@@ -350,7 +350,12 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 	case "view-plugins":
 		m.subView = NewActivePluginsView(m.state, m.width, m.height)
 		m.activeView = viewSubView
-	case "edit-config":
+	case ActionSubscribe:
+		sf := NewSubscribeFlow(m.width, m.height)
+		sf.syncDir = m.syncDir
+		m.subView = sf
+		m.activeView = viewSubView
+	case ActionConfigUpdate:
 		m.LaunchConfigEditor = true
 		return m, tea.Quit
 	}
@@ -395,6 +400,7 @@ func (m AppModel) viewMainHelp() string {
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("Actions"))
 	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("/")+"       Filter actions"))
+	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("r")+"       Review pending changes"))
 	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("?")+"       Show this help"))
 	lines = append(lines, stDim.Render("  "+lipgloss.NewStyle().Foreground(colorText).Render("q")+"       Quit"))
 	lines = append(lines, "")
@@ -428,4 +434,22 @@ func (m AppModel) viewSubView() string {
 		return m.subView.View()
 	}
 	return "Sub-view (press esc to go back)"
+}
+
+// moveCursor advances actionCursor by delta (+1 or -1), skipping intent
+// headers. If every remaining position in the direction of travel is a
+// header, the cursor stays put.
+func (m *AppModel) moveCursor(delta int, recs []recommendation, intents []intent) {
+	total := rawItemCount(recs, intents)
+	next := m.actionCursor
+	for {
+		next += delta
+		if next < 0 || next >= total {
+			return // hit boundary, don't move
+		}
+		if !isIntentHeader(recs, intents, next) {
+			m.actionCursor = next
+			return
+		}
+	}
 }

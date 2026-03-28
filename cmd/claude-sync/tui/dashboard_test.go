@@ -16,7 +16,27 @@ func TestRenderSummary_ShowsConfigRepo(t *testing.T) {
 	}
 	view := renderSummary(state, "0.7.0")
 	assert.Contains(t, view, "ruminaider/claude-sync-config")
-	assert.Contains(t, view, "connected")
+	assert.Contains(t, view, "synced")
+}
+
+func TestRenderSummary_SyncUnknown(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		ConfigRepo:    "ruminaider/claude-sync-config",
+		CommitsBehind: -1,
+	}
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "sync unknown")
+}
+
+func TestRenderSummary_CommitsBehind(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists:  true,
+		ConfigRepo:    "ruminaider/claude-sync-config",
+		CommitsBehind: 5,
+	}
+	view := renderSummary(state, "0.7.0")
+	assert.Contains(t, view, "5 behind")
 }
 
 func TestRenderSummary_NoConfigRepo(t *testing.T) {
@@ -122,8 +142,10 @@ func TestRenderMainScreen_ShowsSummaryAndActions(t *testing.T) {
 	// Summary
 	assert.Contains(t, view, "User config")
 	assert.Contains(t, view, "user/repo")
-	// Actions
-	assert.Contains(t, view, "I want to")
+	// Grouped sections
+	assert.Contains(t, view, "Sync")
+	assert.Contains(t, view, "Plugins")
+	assert.Contains(t, view, "Config")
 }
 
 func TestRenderMainScreen_NothingToRecommend(t *testing.T) {

@@ -9,18 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test helpers — separate from menu_test.go helpers to avoid conflicts
-// when menu_test.go is eventually deleted.
-func appSendKey(m tea.Model, key string) tea.Model {
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
-	return updated
-}
-
-func appSendSpecialKey(m tea.Model, key tea.KeyType) tea.Model {
-	updated, _ := m.Update(tea.KeyMsg{Type: key})
-	return updated
-}
-
 func TestAppModel_InitialState_IsMain(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
 	m := NewAppModel(state)
@@ -122,31 +110,48 @@ func TestAppModel_WindowResize_ForwardedToSubView(t *testing.T) {
 }
 
 func TestAppModel_ActionCursor(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
+	// With no recommendations, cursor starts at 0 which is a header (Sync).
+	// The first "j" should land on the first non-header intent.
+	state := commands.MenuState{
+		ConfigExists: true,
+		Profiles:     []string{"w"},
+		Plugins:      []commands.PluginInfo{{Name: "t", Status: "upstream"}},
+	}
 	m := NewAppModel(state)
+	require.Empty(t, m.recommendations, "expect no recommendations for this state")
 
 	var model tea.Model = m
 
-	// Move cursor down with j
-	model = appSendKey(model, "j")
+	// Intent layout: [0]=Sync(H), [1]=Pull, [2]=Push, [3]=Plugins(H), [4]=Browse, ...
+	// Move down from 0 => skips header at 0, lands on 1 (Pull)
+	model = testSendKey(model, "j")
 	app := model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 
-	// Move cursor down again
-	model = appSendKey(model, "j")
+	// Move down again => 2 (Push)
+	model = testSendKey(model, "j")
 	app = model.(AppModel)
 	assert.Equal(t, 2, app.actionCursor)
 
-	// Move cursor up with k
-	model = appSendKey(model, "k")
+	// Move down again => skips header at 3, lands on 4 (Browse)
+	model = testSendKey(model, "j")
+	app = model.(AppModel)
+	assert.Equal(t, 4, app.actionCursor)
+
+	// Move up from 4 => skips header at 3, lands on 2 (Push)
+	model = testSendKey(model, "k")
+	app = model.(AppModel)
+	assert.Equal(t, 2, app.actionCursor)
+
+	// Move up => 1 (Pull)
+	model = testSendKey(model, "k")
 	app = model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 
-	// Move up past zero should stay at zero
-	model = appSendKey(model, "k")
-	model = appSendKey(model, "k")
+	// Move up from 1 => 0 is a header, cursor stays at 1 (headers are skipped)
+	model = testSendKey(model, "k")
 	app = model.(AppModel)
-	assert.Equal(t, 0, app.actionCursor)
+	assert.Equal(t, 1, app.actionCursor)
 }
 
 func TestAppModel_SetVersion(t *testing.T) {
@@ -167,14 +172,16 @@ func TestAppModel_ViewMain_ShowsContent(t *testing.T) {
 	view := m.View()
 	assert.Contains(t, view, "claude-sync")
 	assert.Contains(t, view, "0.7.0")
-	assert.Contains(t, view, "I want to")
+	assert.Contains(t, view, "Sync")
+	assert.Contains(t, view, "Plugins")
+	assert.Contains(t, view, "Config")
 	assert.Contains(t, view, "quit")
 }
 
 func TestAppModel_ViewMain_ShowsSummaryAndActions(t *testing.T) {
 	state := commands.MenuState{
-		ConfigExists: true,
-		ConfigRepo:   "user/repo",
+		ConfigExists:  true,
+		ConfigRepo:    "user/repo",
 		CommitsBehind: 3,
 	}
 	m := NewAppModel(state)
@@ -185,11 +192,13 @@ func TestAppModel_ViewMain_ShowsSummaryAndActions(t *testing.T) {
 	// Summary section
 	assert.Contains(t, view, "User config")
 	assert.Contains(t, view, "user/repo")
-	assert.Contains(t, view, "connected")
+	assert.Contains(t, view, "3 behind")
 	// Recommendations
 	assert.Contains(t, view, "Needs attention")
-	// Intents
-	assert.Contains(t, view, "I want to")
+	// Grouped intent sections
+	assert.Contains(t, view, "Sync")
+	assert.Contains(t, view, "Plugins")
+	assert.Contains(t, view, "Config")
 }
 
 func TestAppModel_EditConfig_SetsLaunchFlag(t *testing.T) {
@@ -204,20 +213,20 @@ func TestAppModel_EditConfig_SetsLaunchFlag(t *testing.T) {
 
 	var model tea.Model = m
 
-	// Find the "edit-config" intent index
+	// Find the "edit-config" intent raw index (including headers)
 	editIdx := -1
 	for i, it := range m.intents {
-		if it.action.id == "edit-config" {
+		if it.action.id == ActionConfigUpdate {
 			editIdx = len(m.recommendations) + i
 			break
 		}
 	}
 	require.NotEqual(t, -1, editIdx, "edit-config intent not found")
 
-	// Move cursor to the edit-config intent
+	// Navigate to the edit-config intent using j (skips headers automatically)
 	app := model.(AppModel)
 	for app.actionCursor < editIdx {
-		model = appSendKey(model, "j")
+		model = testSendKey(model, "j")
 		app = model.(AppModel)
 	}
 	require.Equal(t, editIdx, app.actionCursor)
@@ -242,10 +251,10 @@ func TestAppModel_EditConfig_DoesNotSetQuitting(t *testing.T) {
 
 	var model tea.Model = m
 
-	// Find edit-config index
+	// Find edit-config raw index
 	editIdx := -1
 	for i, it := range m.intents {
-		if it.action.id == "edit-config" {
+		if it.action.id == ActionConfigUpdate {
 			editIdx = len(m.recommendations) + i
 			break
 		}
@@ -255,7 +264,7 @@ func TestAppModel_EditConfig_DoesNotSetQuitting(t *testing.T) {
 	// Navigate to edit-config
 	app := model.(AppModel)
 	for app.actionCursor < editIdx {
-		model = appSendKey(model, "j")
+		model = testSendKey(model, "j")
 		app = model.(AppModel)
 	}
 
@@ -358,118 +367,7 @@ func TestAppModel_FilterMode_QDoesNotQuit(t *testing.T) {
 	assert.Equal(t, "q", app.filterText) // q typed into filter
 }
 
-// --- Filter function tests ---
-
-func TestFilterRecommendations(t *testing.T) {
-	recs := []recommendation{
-		{title: "Config is behind", detail: "3 commits"},
-		{title: "Plugin update available"},
-	}
-	filtered := filterRecommendations(recs, "plugin")
-	assert.Len(t, filtered, 1)
-	assert.Contains(t, filtered[0].title, "Plugin")
-}
-
-func TestFilterRecommendations_MatchesDetail(t *testing.T) {
-	recs := []recommendation{
-		{title: "Config is behind", detail: "3 commits behind remote"},
-		{title: "Plugin update available"},
-	}
-	filtered := filterRecommendations(recs, "commits")
-	assert.Len(t, filtered, 1)
-	assert.Contains(t, filtered[0].detail, "commits")
-}
-
-func TestFilterRecommendations_MatchesActionLabel(t *testing.T) {
-	recs := []recommendation{
-		{title: "Config is behind", action: actionItem{label: "Pull and apply now"}},
-		{title: "Plugin update available", action: actionItem{label: "Update to v2"}},
-	}
-	filtered := filterRecommendations(recs, "pull")
-	assert.Len(t, filtered, 1)
-	assert.Contains(t, filtered[0].action.label, "Pull")
-}
-
-func TestFilterRecommendations_EmptyQuery(t *testing.T) {
-	recs := []recommendation{{title: "test1"}, {title: "test2"}}
-	assert.Len(t, filterRecommendations(recs, ""), 2)
-}
-
-func TestFilterRecommendations_CaseInsensitive(t *testing.T) {
-	recs := []recommendation{
-		{title: "Plugin Update Available"},
-	}
-	filtered := filterRecommendations(recs, "PLUGIN")
-	assert.Len(t, filtered, 1)
-}
-
-func TestFilterIntents(t *testing.T) {
-	intents := []intent{
-		{action: actionItem{label: "Add or discover new plugins"}},
-		{action: actionItem{label: "Switch settings profile"}},
-		{action: actionItem{label: "Push my local changes"}},
-	}
-	filtered := filterIntents(intents, "plug")
-	assert.Len(t, filtered, 1)
-	assert.Contains(t, filtered[0].action.label, "plugins")
-}
-
-func TestFilterIntents_EmptyQuery(t *testing.T) {
-	intents := []intent{{action: actionItem{label: "test1"}}, {action: actionItem{label: "test2"}}}
-	assert.Len(t, filterIntents(intents, ""), 2)
-}
-
-func TestFilterIntents_NoMatch(t *testing.T) {
-	intents := []intent{
-		{action: actionItem{label: "Add plugins"}},
-		{action: actionItem{label: "Push changes"}},
-	}
-	filtered := filterIntents(intents, "zzzzz")
-	assert.Len(t, filtered, 0)
-}
-
-// --- Help overlay tests ---
-
-func TestAppModel_HelpOverlay_QuestionMarkOpens(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	app := updated.(AppModel)
-	assert.True(t, app.showHelp)
-}
-
-func TestAppModel_HelpOverlay_AnyKeyCloses(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-	m.showHelp = true
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	app := updated.(AppModel)
-	assert.False(t, app.showHelp)
-}
-
-func TestAppModel_HelpOverlay_EscCloses(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-	m.showHelp = true
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	app := updated.(AppModel)
-	assert.False(t, app.showHelp)
-}
-
-func TestAppModel_HelpOverlay_QDoesNotQuit(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
-	m := NewAppModel(state)
-	m.showHelp = true
-
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	app := updated.(AppModel)
-	assert.False(t, app.quitting, "q should dismiss help, not quit")
-	assert.False(t, app.showHelp)
-	assert.Nil(t, cmd)
-}
+// Filter function and help overlay tests are in actions_test.go
 
 func TestAppModel_HelpOverlay_ViewContainsHelpText(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
@@ -533,15 +431,25 @@ func TestAppModel_FilterMode_EnterOnInlineAction_StartsExecution(t *testing.T) {
 }
 
 func TestAppModel_FilterMode_EnterOnNonInlineAction_OpensSubView(t *testing.T) {
-	state := commands.MenuState{ConfigExists: true}
+	// Use a state with plugins and profiles so "Browse" only matches
+	// the intent (not a recommendation about missing plugins).
+	state := commands.MenuState{
+		ConfigExists: true,
+		Profiles:     []string{"w"},
+		Plugins:      []commands.PluginInfo{{Name: "t", Status: "upstream"}},
+	}
 	m := NewAppModel(state)
 	m.width = 80
 	m.height = 40
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
 	m.filterMode = true
-	m.filterText = "View active" // matches "View active plugins" (non-inline, opens sub-view)
-	m.actionCursor = 0
+	m.filterText = "Browse" // matches "Browse & install plugins" (non-inline, opens sub-view)
+
+	// With no recs matching "Browse", filtered list is:
+	// [0] Plugins header, [1] Browse & install plugins
+	// Cursor 1 => Browse action
+	m.actionCursor = 1
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	app := updated.(AppModel)
@@ -682,9 +590,9 @@ func TestRenderFreshInstall_CursorOnJoin(t *testing.T) {
 	assert.Contains(t, view, ">")
 }
 
-// --- View plugins sub-view test ---
+// --- Browse plugins sub-view test ---
 
-func TestAppModel_ViewPlugins_OpensSubView(t *testing.T) {
+func TestAppModel_BrowsePlugins_OpensSubView(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 		Profiles:     []string{"work"},
@@ -696,21 +604,21 @@ func TestAppModel_ViewPlugins_OpensSubView(t *testing.T) {
 	m.width = 80
 	m.height = 40
 
-	// Find the "view-plugins" intent index
-	viewIdx := -1
+	// Find the "browse-plugins" intent index
+	browseIdx := -1
 	for i, it := range m.intents {
-		if it.action.id == "view-plugins" {
-			viewIdx = len(m.recommendations) + i
+		if it.action.id == ActionBrowsePlugins {
+			browseIdx = len(m.recommendations) + i
 			break
 		}
 	}
-	require.NotEqual(t, -1, viewIdx, "view-plugins intent not found")
+	require.NotEqual(t, -1, browseIdx, "browse-plugins intent not found")
 
 	var model tea.Model = m
 	// Navigate to it
 	app := model.(AppModel)
-	for app.actionCursor < viewIdx {
-		model = appSendKey(model, "j")
+	for app.actionCursor < browseIdx {
+		model = testSendKey(model, "j")
 		app = model.(AppModel)
 	}
 

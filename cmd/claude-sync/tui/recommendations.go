@@ -37,7 +37,7 @@ func buildRecommendations(state commands.MenuState) []recommendation {
 			title:  "Merge conflicts need resolution",
 			detail: "Config has conflicts that must be resolved before syncing",
 			action: actionItem{
-				id:     "conflicts",
+				id:     ActionConflicts,
 				label:  "Resolve conflicts",
 				inline: true,
 			},
@@ -50,7 +50,7 @@ func buildRecommendations(state commands.MenuState) []recommendation {
 			icon:  "⚠",
 			title: fmt.Sprintf("Config is %d commits behind", state.CommitsBehind),
 			action: actionItem{
-				id:     "pull",
+				id:     ActionPull,
 				label:  "Pull and apply now",
 				inline: true,
 			},
@@ -64,7 +64,7 @@ func buildRecommendations(state commands.MenuState) []recommendation {
 			title:  "Pending changes awaiting your review",
 			detail: "High-risk changes require explicit approval",
 			action: actionItem{
-				id:    "approve",
+				id:    ActionApprove,
 				label: "Review and decide",
 			},
 		})
@@ -78,7 +78,7 @@ func buildRecommendations(state commands.MenuState) []recommendation {
 				title:  fmt.Sprintf("%s has an update available", p.Name),
 				detail: fmt.Sprintf("Pinned at v%s, latest is v%s", p.PinVersion, p.LatestVersion),
 				action: actionItem{
-					id:     "plugin-update",
+					id:     ActionPluginUpdate,
 					label:  fmt.Sprintf("Update to v%s", p.LatestVersion),
 					inline: true,
 					args:   []string{p.Key},
@@ -107,7 +107,7 @@ func buildRecommendations(state commands.MenuState) []recommendation {
 			title:  "Add your first plugin",
 			detail: "Plugins extend Claude Code with new capabilities",
 			action: actionItem{
-				id:    "browse-plugins",
+				id:    ActionBrowsePlugins,
 				label: "Browse available plugins",
 			},
 		})

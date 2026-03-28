@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/git"
 )
 
 // actionResultMsg signals an inline action has completed.
@@ -38,13 +39,39 @@ func executeAction(index int, actionID string, args []string,
 		var err error
 
 		switch actionID {
-		case "pull":
-			result, pullErr := commands.Pull(claudeDir, syncDir, true)
+		case ActionPull:
+			// Fetch once so both preview and pull share the same refs.
+			var fetchWarning string
+			if git.HasRemote(syncDir, "origin") {
+				if fetchErr := git.Fetch(syncDir); fetchErr != nil {
+					fetchWarning = fmt.Sprintf("fetch failed (%v); results may be stale", fetchErr)
+				}
+			}
+			// Show preview summary of incoming changes before applying.
+			// Even when preview reports nothing to change, still run pull
+			// for local-only reconciliation (settings, plugins, etc.).
+			preview, previewErr := commands.PullPreview(syncDir)
+			result, pullErr := commands.PullWithOptions(commands.PullOptions{
+				ClaudeDir: claudeDir,
+				SyncDir:   syncDir,
+				Quiet:     true,
+				SkipFetch: true, // already fetched above
+			})
 			err = pullErr
 			if result != nil {
-				msg = formatPullResult(result)
+				pullMsg := formatPullResult(result)
+				// Prepend preview context when there were remote changes.
+				if previewErr != nil {
+					pullMsg = "Preview unavailable: " + previewErr.Error() + ". " + pullMsg
+				} else if !preview.NothingToChange {
+					pullMsg = fmt.Sprintf("Fetched %d commit(s) \u2014 %s", preview.CommitsBehind, pullMsg)
+				}
+				if fetchWarning != "" {
+					pullMsg = "Warning: " + fetchWarning + ". " + pullMsg
+				}
+				msg = pullMsg
 			}
-		case "push", "push-changes":
+		case ActionPush, ActionPushChanges:
 			scanResult, scanErr := commands.PushScan(claudeDir, syncDir)
 			if scanErr != nil {
 				err = scanErr
@@ -67,32 +94,38 @@ func executeAction(index int, actionID string, args []string,
 					DirtyWorkingTree:  scanResult.DirtyWorkingTree,
 				})
 				if err == nil {
-					msg = "Changes pushed successfully"
+					msg = fmt.Sprintf("Pushed \u2014 %s", commands.PushPreviewSummary(scanResult))
 				}
 			}
-		case "approve":
+		case ActionApprove:
 			result, approveErr := commands.Approve(claudeDir, syncDir)
 			err = approveErr
 			if result != nil {
 				msg = formatApproveResult(result)
 			}
-		case "reject":
+		case ActionReject:
 			err = commands.Reject(syncDir)
 			if err == nil {
 				msg = "Pending changes rejected"
 			}
-		case "conflicts":
+		case ActionConflicts:
 			// For now, just report -- real conflict resolution needs a sub-view
 			msg = "Conflict resolution not yet available in TUI"
-		case "plugin-update":
+		case ActionPluginUpdate:
 			if len(args) > 0 {
 				msg = fmt.Sprintf("Plugin update for %s not yet available in TUI", args[0])
 			} else {
 				msg = "Plugin update not yet available in TUI"
 			}
-		case "import-mcp":
+		case ActionImportMCP:
 			// TODO: wire to real MCP import in later task
 			msg = "MCP import not yet available in TUI"
+		case ActionRemovePlugin:
+			msg = "Plugin removal not yet available in TUI — use 'claude-sync config update'"
+		case ActionForkPlugin:
+			msg = "Fork not yet available in TUI — use 'claude-sync fork <plugin>'"
+		case ActionPinPlugin:
+			msg = "Pin not yet available in TUI — use 'claude-sync pin <plugin> <version>'"
 		case "__test_panic":
 			panic("test panic")
 		default:

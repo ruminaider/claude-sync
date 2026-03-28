@@ -9,72 +9,80 @@ import (
 )
 
 // intent represents a goal-oriented action the user can take.
+// Items with isHeader=true are non-selectable section dividers.
 type intent struct {
-	hint   string // shown on right: "work →" or "enter"
-	action actionItem
+	hint     string // shown on right: "⏎ pull" or "→"
+	action   actionItem
+	isHeader bool   // section divider (not selectable)
+	label    string // display label (used for headers)
 }
 
-// buildIntents returns the static list of intent-based actions.
-// The profile label is contextual based on whether a profile is active.
+// buildIntents returns the grouped list of intent-based actions.
+// The list mirrors the menu_items.go design: Sync, Plugins, Config sections.
 func buildIntents(state commands.MenuState) []intent {
-	profileLabel := "Activate a settings profile"
-	profileHint := "\u2192"
-	if state.ActiveProfile != "" {
-		profileLabel = "Switch settings profile"
-		profileHint = state.ActiveProfile + " \u2192"
-	}
-
 	return []intent{
-		{
-			hint:   "\u2192",
-			action: actionItem{id: "view-plugins", label: "View active plugins"},
-		},
-		{
-			hint:   "\u2192",
-			action: actionItem{id: "join-config", label: "Join a shared config"},
-		},
-		{
-			hint:   "\u2192",
-			action: actionItem{id: "browse-plugins", label: "Add or discover new plugins"},
-		},
-		{
-			hint:   profileHint,
-			action: actionItem{id: "switch-profile", label: profileLabel},
-		},
-		{
-			hint:   "enter",
-			action: actionItem{id: "push-changes", label: "Push my local changes", inline: true},
-		},
-		{
-			hint:   "\u2192",
-			action: actionItem{id: "edit-config", label: "Edit my full config"},
-		},
-		{
-			hint:   "enter",
-			action: actionItem{id: "import-mcp", label: "Import MCP servers", inline: true},
-		},
-		{
-			hint:   "\u2192",
-			action: actionItem{id: "view-config", label: "View full config details"},
-		},
+		{label: "Sync", isHeader: true},
+		{hint: "⏎ pull", action: actionItem{id: ActionPull, label: "Pull latest updates", inline: true}},
+		{hint: "⏎ push", action: actionItem{id: ActionPushChanges, label: "Push local changes", inline: true}},
+
+		{label: "Plugins", isHeader: true},
+		{action: actionItem{id: ActionBrowsePlugins, label: "Browse & install plugins"}},
+		{action: actionItem{id: ActionRemovePlugin, label: "Remove a plugin", inline: true}},
+		{action: actionItem{id: ActionForkPlugin, label: "Fork or customize a plugin", inline: true}},
+		{action: actionItem{id: ActionPinPlugin, label: "Pin a plugin version", inline: true}},
+
+		{label: "Config", isHeader: true},
+		{action: actionItem{id: ActionProfileList, label: "Switch profile"}},
+		{action: actionItem{id: ActionConfigUpdate, label: "Edit full config"}},
+		{action: actionItem{id: ActionSubscribe, label: "Subscribe to another config"}},
 	}
 }
 
-// actionItemCount returns the total number of selectable items across both sections.
-func actionItemCount(recs []recommendation, intents []intent) int {
+// rawItemCount returns the total number of positions (recs + all intents
+// including headers). The cursor ranges over [0, rawItemCount).
+func rawItemCount(recs []recommendation, intents []intent) int {
 	return len(recs) + len(intents)
 }
 
 // selectedAction returns the actionItem at the given cursor position.
+// Cursor positions 0..len(recs)-1 address recommendations.
+// Positions len(recs)..len(recs)+len(intents)-1 address intents directly
+// (including headers, but headers return nil since they have no action).
 func selectedAction(recs []recommendation, intents []intent, cursor int) *actionItem {
 	if cursor < len(recs) {
 		return &recs[cursor].action
 	}
 	intentIdx := cursor - len(recs)
-	if intentIdx < len(intents) {
+	if intentIdx >= 0 && intentIdx < len(intents) {
+		if intents[intentIdx].isHeader {
+			return nil // headers are not selectable
+		}
 		return &intents[intentIdx].action
 	}
 	return nil
+}
+
+// isIntentHeader returns true if the cursor position corresponds to a header
+// intent. Positions in the recommendation range always return false.
+func isIntentHeader(recs []recommendation, intents []intent, cursor int) bool {
+	if cursor < len(recs) {
+		return false
+	}
+	intentIdx := cursor - len(recs)
+	if intentIdx >= 0 && intentIdx < len(intents) {
+		return intents[intentIdx].isHeader
+	}
+	return false
+}
+
+// appendErrorGuidance appends contextual error guidance lines (why + suggested
+// action) when ErrorGuidance returns a match for the given action and error.
+func appendErrorGuidance(lines []string, actionID string, err error) []string {
+	if help := ErrorGuidance(actionID, err); help != nil {
+		lines = append(lines, stDim.Render("  "+help.Why))
+		lines = append(lines, stYellow.Render("  \u2192 "+help.Action))
+	}
+	return lines
 }
 
 // renderRecsSectionWithState renders the "Needs attention" / "Status" section with execution state.
@@ -110,6 +118,7 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 					errMsg = result.err.Error()
 				}
 				lines = append(lines, stRed.Render("\u2717 "+errMsg))
+				lines = appendErrorGuidance(lines, result.actionID, result.err)
 			}
 		} else if executing && executingActionID == rec.action.id {
 			// Show executing spinner
@@ -144,19 +153,28 @@ func renderRecsSectionWithState(recs []recommendation, cursor int, innerWidth in
 	return strings.Join(lines, "\n")
 }
 
-// renderIntentsSectionWithState renders the "I want to..." section with execution state.
+// renderIntentsSectionWithState renders the grouped intent sections with execution state.
+// Section headers replace the old "I want to..." heading.
 func renderIntentsSectionWithState(intents []intent, recCount, cursor int, innerWidth int,
 	executing bool, executingActionID string, results map[string]actionResultMsg) string {
 	var lines []string
-	lines = append(lines, sectionHeader("I want to..."))
 
 	for i, it := range intents {
+		// Render section headers as dividers
+		if it.isHeader {
+			// Add blank line before headers (except the very first intent)
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, sectionHeader(it.label))
+			continue
+		}
+
 		globalIdx := recCount + i
 		isSelected := cursor == globalIdx
 
 		// Check for execution state on this item
 		if result, hasResult := results[it.action.id]; hasResult {
-			// Show result
 			if result.success {
 				lines = append(lines, stGreen.Render("\u2713 "+result.message))
 			} else {
@@ -165,12 +183,12 @@ func renderIntentsSectionWithState(intents []intent, recCount, cursor int, inner
 					errMsg = result.err.Error()
 				}
 				lines = append(lines, stRed.Render("\u2717 "+errMsg))
+				lines = appendErrorGuidance(lines, result.actionID, result.err)
 			}
 			continue
 		}
 
 		if executing && executingActionID == it.action.id {
-			// Show executing spinner
 			lines = append(lines, stYellow.Render("\u27f3 "+it.action.label+"..."))
 			continue
 		}
@@ -215,7 +233,7 @@ func renderActionsWithState(recs []recommendation, intents []intent, cursor int,
 	// --- Needs attention section ---
 	sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingActionID, results))
 
-	// --- I want to... section ---
+	// --- Grouped intent sections ---
 	sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingActionID, results))
 
 	// --- Footer ---
@@ -247,15 +265,54 @@ func filterRecommendations(recs []recommendation, query string) []recommendation
 }
 
 // filterIntents filters intents by case-insensitive substring match on label.
+// Headers always pass through (they are structural, not filterable).
+// A header is kept only if at least one item in its section matches.
 func filterIntents(intents []intent, query string) []intent {
 	if query == "" {
 		return intents
 	}
 	query = strings.ToLower(query)
+
+	// First pass: identify which sections have matching items.
+	// A "section" starts at each header and runs until the next header.
+	type section struct {
+		headerIdx int // index of header in intents (-1 if no header before first items)
+		hasMatch  bool
+	}
+	var sections []section
+	currentSection := -1
+	for i, it := range intents {
+		if it.isHeader {
+			sections = append(sections, section{headerIdx: i})
+			currentSection = len(sections) - 1
+			continue
+		}
+		if strings.Contains(strings.ToLower(it.action.label), query) {
+			if currentSection >= 0 {
+				sections[currentSection].hasMatch = true
+			}
+		}
+	}
+
+	// Build a set of header indices that have matches.
+	keepHeader := map[int]bool{}
+	for _, s := range sections {
+		if s.hasMatch {
+			keepHeader[s.headerIdx] = true
+		}
+	}
+
+	// Second pass: emit kept headers and matching items.
 	var filtered []intent
-	for _, i := range intents {
-		if strings.Contains(strings.ToLower(i.action.label), query) {
-			filtered = append(filtered, i)
+	for i, it := range intents {
+		if it.isHeader {
+			if keepHeader[i] {
+				filtered = append(filtered, it)
+			}
+			continue
+		}
+		if strings.Contains(strings.ToLower(it.action.label), query) {
+			filtered = append(filtered, it)
 		}
 	}
 	return filtered

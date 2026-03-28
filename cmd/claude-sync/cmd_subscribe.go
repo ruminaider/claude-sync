@@ -50,7 +50,7 @@ The optional name argument sets the subscription name; defaults to the repo name
 		// Shallow clone to temp dir, then read config.
 		fmt.Printf("Fetching %s...\n", url)
 		subDir := subscriptions.SubDir(syncDir, name)
-		if err := gitpkg.ShallowClone(url, subDir, "main"); err != nil {
+		if err := gitpkg.ShallowClone(url, subDir, ""); err != nil {
 			return fmt.Errorf("cloning: %w", err)
 		}
 

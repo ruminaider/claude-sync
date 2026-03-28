@@ -19,8 +19,17 @@ func renderSummary(state commands.MenuState, version string) string {
 
 	// User config line
 	if state.ConfigRepo != "" {
+		var syncStatus string
+		switch {
+		case state.CommitsBehind < 0:
+			syncStatus = stDim.Render("? sync unknown")
+		case state.CommitsBehind > 0:
+			syncStatus = stYellow.Render(fmt.Sprintf("⚠ %d behind", state.CommitsBehind))
+		default:
+			syncStatus = tealStyle.Render("✓ synced")
+		}
 		lines = append(lines, labelStyle.Render("User config     ")+
-			valueStyle.Render(state.ConfigRepo)+"  "+tealStyle.Render("✓ connected"))
+			valueStyle.Render(state.ConfigRepo)+"  "+syncStatus)
 	} else {
 		lines = append(lines, labelStyle.Render("User config     ")+
 			stYellow.Render("not configured"))
@@ -105,7 +114,7 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 		// --- Needs attention / Status section ---
 		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingActionID, results))
 
-		// --- I want to... section ---
+		// --- Grouped intent sections (Sync, Plugins, Config) ---
 		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingActionID, results))
 	}
 
