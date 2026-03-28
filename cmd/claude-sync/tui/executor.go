@@ -48,10 +48,9 @@ func executeAction(index int, actionID string, args []string,
 				}
 			}
 			// Show preview summary of incoming changes before applying.
+			// Even when preview reports nothing to change, still run pull
+			// for local-only reconciliation (settings, plugins, etc.).
 			preview, previewErr := commands.PullPreview(syncDir)
-			if previewErr == nil && preview.NothingToChange {
-				// Still run pull for local-only reconciliation (settings, plugins, etc.)
-			}
 			result, pullErr := commands.PullWithOptions(commands.PullOptions{
 				ClaudeDir: claudeDir,
 				SyncDir:   syncDir,

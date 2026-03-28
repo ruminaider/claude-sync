@@ -156,21 +156,16 @@ func executeSubscribe(syncDir, repoURL string) tea.Cmd {
 			}
 		}()
 
-		// Validate that sync dir exists
-		if _, err := os.Stat(syncDir); os.IsNotExist(err) {
-			return subscribeResultMsg{
-				success: false,
-				message: "claude-sync not initialized",
-				err:     err,
-			}
-		}
-
 		// Check if URL is already subscribed
 		cfgData, err := os.ReadFile(filepath.Join(syncDir, "config.yaml"))
 		if err != nil {
+			msg := "Could not read config.yaml"
+			if os.IsNotExist(err) {
+				msg = "claude-sync not initialized"
+			}
 			return subscribeResultMsg{
 				success: false,
-				message: "Could not read config.yaml",
+				message: msg,
 				err:     err,
 			}
 		}
@@ -196,7 +191,7 @@ func executeSubscribe(syncDir, repoURL string) tea.Cmd {
 		defer os.RemoveAll(tempDir)
 
 		// Quick validation: shallow clone and check for config
-		if err := git.ShallowClone(repoURL, tempDir, "origin/HEAD"); err != nil {
+		if err := git.ShallowClone(repoURL, tempDir, ""); err != nil {
 			return subscribeResultMsg{
 				success: false,
 				message: "Could not access repo. Check URL and network.",

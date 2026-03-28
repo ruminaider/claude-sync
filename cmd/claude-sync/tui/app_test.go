@@ -160,15 +160,10 @@ func TestAppModel_ActionCursor(t *testing.T) {
 	app = model.(AppModel)
 	assert.Equal(t, 1, app.actionCursor)
 
-	// Move up from 1 => 0 is header, stays at 1
-	// (Actually the cursor decrements to 0, but 0 is a header. The skip loop
-	// runs while cursor>0, so it stops at 0. Let's check the actual behavior.)
+	// Move up from 1 => 0 is a header, cursor stays at 1 (headers are skipped)
 	model = appSendKey(model, "k")
 	app = model.(AppModel)
-	// cursor goes to 0, which is a header. Since 0 is the boundary, the skip
-	// loop condition (cursor>0) is false, so it stays at 0. This is acceptable
-	// since pressing enter on a header is a no-op.
-	assert.Equal(t, 0, app.actionCursor)
+	assert.Equal(t, 1, app.actionCursor)
 }
 
 func TestAppModel_SetVersion(t *testing.T) {

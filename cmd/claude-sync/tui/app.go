@@ -225,7 +225,6 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Get filtered lists for navigation
 	filteredRecs := filterRecommendations(m.recommendations, m.filterText)
 	filteredIntents := filterIntents(m.intents, m.filterText)
-	total := rawItemCount(filteredRecs, filteredIntents)
 
 	switch msg.String() {
 	case "/":
@@ -256,28 +255,9 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, executeAction(m.actionCursor, ActionConflicts, nil, m.claudeDir, m.syncDir)
 		}
 	case "j", "down":
-		if m.actionCursor < total-1 {
-			m.actionCursor++
-			// Skip headers
-			for m.actionCursor < total-1 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-				m.actionCursor++
-			}
-			// If we landed on a header at the very end, back up
-			if isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-				m.actionCursor--
-				for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-					m.actionCursor--
-				}
-			}
-		}
+		m.moveCursor(+1, filteredRecs, filteredIntents)
 	case "k", "up":
-		if m.actionCursor > 0 {
-			m.actionCursor--
-			// Skip headers
-			for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-				m.actionCursor--
-			}
-		}
+		m.moveCursor(-1, filteredRecs, filteredIntents)
 	case "enter":
 		if m.executing {
 			return m, nil // ignore while executing
@@ -335,32 +315,13 @@ func (m AppModel) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Arrow key navigation within filter mode (j/k are typed as filter text)
+	filteredRecs := filterRecommendations(m.recommendations, m.filterText)
+	filteredIntents := filterIntents(m.intents, m.filterText)
 	switch msg.Type {
 	case tea.KeyDown:
-		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
-		filteredIntents := filterIntents(m.intents, m.filterText)
-		total := rawItemCount(filteredRecs, filteredIntents)
-		if m.actionCursor < total-1 {
-			m.actionCursor++
-			for m.actionCursor < total-1 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-				m.actionCursor++
-			}
-			if isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-				m.actionCursor--
-				for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-					m.actionCursor--
-				}
-			}
-		}
+		m.moveCursor(+1, filteredRecs, filteredIntents)
 	case tea.KeyUp:
-		filteredRecs := filterRecommendations(m.recommendations, m.filterText)
-		filteredIntents := filterIntents(m.intents, m.filterText)
-		if m.actionCursor > 0 {
-			m.actionCursor--
-			for m.actionCursor > 0 && isIntentHeader(filteredRecs, filteredIntents, m.actionCursor) {
-				m.actionCursor--
-			}
-		}
+		m.moveCursor(-1, filteredRecs, filteredIntents)
 	}
 	return m, nil
 }
@@ -473,4 +434,22 @@ func (m AppModel) viewSubView() string {
 		return m.subView.View()
 	}
 	return "Sub-view (press esc to go back)"
+}
+
+// moveCursor advances actionCursor by delta (+1 or -1), skipping intent
+// headers. If every remaining position in the direction of travel is a
+// header, the cursor stays put.
+func (m *AppModel) moveCursor(delta int, recs []recommendation, intents []intent) {
+	total := rawItemCount(recs, intents)
+	next := m.actionCursor
+	for {
+		next += delta
+		if next < 0 || next >= total {
+			return // hit boundary, don't move
+		}
+		if !isIntentHeader(recs, intents, next) {
+			m.actionCursor = next
+			return
+		}
+	}
 }
