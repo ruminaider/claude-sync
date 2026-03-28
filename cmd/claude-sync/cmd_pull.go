@@ -39,6 +39,33 @@ var pullCmd = &cobra.Command{
 				ProjectDir: projectDir,
 			})
 		} else {
+			// Preview incoming changes before applying.
+			if !quietFlag {
+				preview, previewErr := commands.PullPreview(syncDir)
+				if previewErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not preview changes: %v\n", previewErr)
+				} else if preview.NothingToChange {
+					fmt.Println(commands.FormatPullPreview(preview))
+					// Still run pull to apply local-only changes (settings, plugins, etc.)
+				} else {
+					fmt.Println(commands.FormatPullPreview(preview))
+					fmt.Println()
+					var confirm bool
+					if promptErr := huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title("Apply these changes?").
+								Affirmative("Yes").
+								Negative("No").
+								Value(&confirm),
+						),
+					).Run(); promptErr != nil || !confirm {
+						fmt.Println("Pull cancelled.")
+						return nil
+					}
+				}
+			}
+
 			if !quietFlag {
 				fmt.Println("Pulling latest config...")
 			}

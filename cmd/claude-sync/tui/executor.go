@@ -39,10 +39,20 @@ func executeAction(index int, actionID string, args []string,
 
 		switch actionID {
 		case "pull":
+			// Show preview summary of incoming changes before applying.
+			preview, previewErr := commands.PullPreview(syncDir)
+			if previewErr == nil && preview.NothingToChange {
+				// Still run pull for local-only reconciliation (settings, plugins, etc.)
+			}
 			result, pullErr := commands.Pull(claudeDir, syncDir, true)
 			err = pullErr
 			if result != nil {
-				msg = formatPullResult(result)
+				pullMsg := formatPullResult(result)
+				// Prepend preview context when there were remote changes.
+				if previewErr == nil && !preview.NothingToChange {
+					pullMsg = fmt.Sprintf("Fetched %d commit(s) \u2014 %s", preview.CommitsBehind, pullMsg)
+				}
+				msg = pullMsg
 			}
 		case "push", "push-changes":
 			scanResult, scanErr := commands.PushScan(claudeDir, syncDir)
@@ -67,7 +77,7 @@ func executeAction(index int, actionID string, args []string,
 					DirtyWorkingTree:  scanResult.DirtyWorkingTree,
 				})
 				if err == nil {
-					msg = "Changes pushed successfully"
+					msg = fmt.Sprintf("Pushed \u2014 %s", commands.PushPreviewSummary(scanResult))
 				}
 			}
 		case "approve":
