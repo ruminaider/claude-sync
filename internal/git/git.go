@@ -337,11 +337,13 @@ func CommitsBehind(dir string) int {
 }
 
 // DiffNameOnly returns the list of files changed between two refs.
-// Returns nil (not an error) if either ref is invalid.
-func DiffNameOnly(dir, refA, refB string) []string {
+func DiffNameOnly(dir, refA, refB string) ([]string, error) {
 	out, err := Run(dir, "diff", "--name-only", refA, refB)
-	if err != nil || out == "" {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
 	}
 	var files []string
 	for _, f := range strings.Split(out, "\n") {
@@ -349,7 +351,7 @@ func DiffNameOnly(dir, refA, refB string) []string {
 			files = append(files, f)
 		}
 	}
-	return files
+	return files, nil
 }
 
 // CommitsAhead returns how many local commits have not yet been pushed to the upstream.

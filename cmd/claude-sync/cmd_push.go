@@ -260,7 +260,12 @@ var pushCmd = &cobra.Command{
 		fmt.Println(commands.PushPreviewSummary(effectiveScan))
 		fmt.Println()
 		confirmPush, promptErr := confirmPrompt("Push these changes?")
-		if promptErr != nil || !confirmPush {
+		if promptErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: prompt failed: %v\n", promptErr)
+			fmt.Println("Push cancelled.")
+			return nil
+		}
+		if !confirmPush {
 			fmt.Println("Push cancelled.")
 			return nil
 		}

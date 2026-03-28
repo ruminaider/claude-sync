@@ -37,8 +37,14 @@ func PullPreview(syncDir string) (*PullPreviewResult, error) {
 	}
 
 	// List files that differ between HEAD and upstream.
-	changedFiles := git.DiffNameOnly(syncDir, "HEAD", "@{upstream}")
-	result.ChangedFiles = changedFiles
+	changedFiles, diffErr := git.DiffNameOnly(syncDir, "HEAD", "@{upstream}")
+	if diffErr != nil {
+		// Still return a usable preview; the commit count is accurate but
+		// file-level detail is unavailable.
+		result.ChangedFiles = nil
+	} else {
+		result.ChangedFiles = changedFiles
+	}
 
 	// Categorize changes by file type.
 	for _, f := range changedFiles {

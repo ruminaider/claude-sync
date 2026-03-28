@@ -42,7 +42,9 @@ var pullCmd = &cobra.Command{
 		} else {
 			// Fetch once up front so both preview and pull share the same refs.
 			if git.HasRemote(syncDir, "origin") {
-				_ = git.Fetch(syncDir)
+				if fetchErr := git.Fetch(syncDir); fetchErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: fetch failed (%v); preview may be stale\n", fetchErr)
+				}
 			}
 
 			// Preview incoming changes before applying.
@@ -57,7 +59,12 @@ var pullCmd = &cobra.Command{
 					fmt.Println(commands.FormatPullPreview(preview))
 					fmt.Println()
 					confirm, promptErr := confirmPrompt("Apply these changes?")
-					if promptErr != nil || !confirm {
+					if promptErr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: prompt failed: %v\n", promptErr)
+						fmt.Println("Pull cancelled.")
+						return nil
+					}
+					if !confirm {
 						fmt.Println("Pull cancelled.")
 						return nil
 					}

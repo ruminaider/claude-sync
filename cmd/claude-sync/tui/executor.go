@@ -41,8 +41,11 @@ func executeAction(index int, actionID string, args []string,
 		switch actionID {
 		case ActionPull:
 			// Fetch once so both preview and pull share the same refs.
+			var fetchWarning string
 			if git.HasRemote(syncDir, "origin") {
-				_ = git.Fetch(syncDir)
+				if fetchErr := git.Fetch(syncDir); fetchErr != nil {
+					fetchWarning = fmt.Sprintf("fetch failed (%v); results may be stale", fetchErr)
+				}
 			}
 			// Show preview summary of incoming changes before applying.
 			preview, previewErr := commands.PullPreview(syncDir)
@@ -59,8 +62,13 @@ func executeAction(index int, actionID string, args []string,
 			if result != nil {
 				pullMsg := formatPullResult(result)
 				// Prepend preview context when there were remote changes.
-				if previewErr == nil && !preview.NothingToChange {
+				if previewErr != nil {
+					pullMsg = "Preview unavailable: " + previewErr.Error() + ". " + pullMsg
+				} else if !preview.NothingToChange {
 					pullMsg = fmt.Sprintf("Fetched %d commit(s) \u2014 %s", preview.CommitsBehind, pullMsg)
+				}
+				if fetchWarning != "" {
+					pullMsg = "Warning: " + fetchWarning + ". " + pullMsg
 				}
 				msg = pullMsg
 			}
