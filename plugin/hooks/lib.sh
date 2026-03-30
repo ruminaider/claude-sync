@@ -42,8 +42,13 @@ acquire_lock() {
     local max_wait=15       # 15 iterations × 0.2s = 3s
 
     while ! mkdir "$LOCKDIR" 2>/dev/null; do
-        # Break stale locks (older than 60s)
-        if find "$LOCKDIR" -maxdepth 0 -mmin +1 2>/dev/null | grep -q .; then
+        # Break stale locks: owner dead OR directory older than 60s
+        if [ -f "$LOCKDIR/pid" ]; then
+            if ! kill -0 "$(cat "$LOCKDIR/pid" 2>/dev/null)" 2>/dev/null; then
+                rm -rf "$LOCKDIR"
+                continue
+            fi
+        elif find "$LOCKDIR" -maxdepth 0 -mmin +1 2>/dev/null | grep -q .; then
             rm -rf "$LOCKDIR"
             continue
         fi
@@ -58,7 +63,9 @@ acquire_lock() {
 }
 
 release_lock() {
-    rm -rf "$LOCKDIR"
+    if [ -f "$LOCKDIR/pid" ] && [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
+        rm -rf "$LOCKDIR"
+    fi
 }
 
 # Session ID = grandparent PID (the claude process)
