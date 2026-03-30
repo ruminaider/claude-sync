@@ -24,6 +24,7 @@ resolve_claude_sync() {
 }
 
 # macOS-compatible timeout (no coreutils dependency)
+# Returns 124 on timeout (matching coreutils convention), else the command's exit code.
 run_with_timeout() {
     local secs=$1; shift
     "$@" &
@@ -32,6 +33,11 @@ run_with_timeout() {
     local watchdog=$!
     wait "$pid" 2>/dev/null
     local status=$?
+    if ! kill -0 "$watchdog" 2>/dev/null; then
+        # Watchdog already exited, meaning it fired (timeout)
+        wait "$watchdog" 2>/dev/null
+        return 124
+    fi
     kill "$watchdog" 2>/dev/null 2>&1; wait "$watchdog" 2>/dev/null
     return $status
 }

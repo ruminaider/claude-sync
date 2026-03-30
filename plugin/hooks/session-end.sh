@@ -23,18 +23,24 @@ SESSION_DIR="$SESSIONS_DIR/$SESSION_ID"
 push_ok=true
 if acquire_lock; then
     trap 'release_lock' EXIT
-    if ! run_with_timeout 5 "$CLAUDE_SYNC" push --auto --quiet; then
+    run_with_timeout 5 "$CLAUDE_SYNC" push --auto --quiet
+    push_status=$?
+    if [ $push_status -ne 0 ]; then
         push_ok=false
     fi
     release_lock
     trap - EXIT
 else
     push_ok=false
-    echo "claude-sync: lock wait exceeded (3s) during push — changes may not have synced. Run \`claude-sync push --auto\` to retry." >&2
+    echo "claude-sync: lock wait exceeded (3s) during push: changes may not have synced. Run \`claude-sync push --auto\` to retry." >&2
 fi
 
 if [ "$push_ok" = false ]; then
-    echo "claude-sync push failed or timed out — changes may not have synced to remote. Run \`claude-sync push --auto\` to retry." >&2
+    if [ "${push_status:-0}" -eq 124 ]; then
+        echo "claude-sync push timed out (5s): changes may not have synced to remote. Run \`claude-sync push --auto\` to retry." >&2
+    else
+        echo "claude-sync push failed: changes may not have synced to remote. Run \`claude-sync push --auto\` to retry." >&2
+    fi
 fi
 
 # --- Step 2: Clean up this session's dir (always, regardless of push result) ---
