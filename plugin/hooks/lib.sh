@@ -44,21 +44,37 @@ acquire_lock() {
     while ! mkdir "$LOCKDIR" 2>/dev/null; do
         # Break stale locks: owner dead OR directory older than 60s
         if [ -f "$LOCKDIR/pid" ]; then
-            if ! kill -0 "$(cat "$LOCKDIR/pid" 2>/dev/null)" 2>/dev/null; then
+            local lock_pid
+            lock_pid=$(cat "$LOCKDIR/pid" 2>/dev/null)
+            if [ -z "$lock_pid" ] || ! [[ "$lock_pid" =~ ^[0-9]+$ ]]; then
+                # Corrupted or empty PID file: break the lock
                 rm -rf "$LOCKDIR"
+                waited=$((waited + 1))
+                continue
+            fi
+            if ! kill -0 "$lock_pid" 2>/dev/null; then
+                rm -rf "$LOCKDIR"
+                waited=$((waited + 1))
                 continue
             fi
         elif find "$LOCKDIR" -maxdepth 0 -mmin +1 2>/dev/null | grep -q .; then
             rm -rf "$LOCKDIR"
+            waited=$((waited + 1))
             continue
         fi
         waited=$((waited + 1))
         if [ $waited -ge $max_wait ]; then
+            if [ -f "$LOCKDIR/pid" ]; then
+                echo "claude-sync: lock held by PID $(cat "$LOCKDIR/pid" 2>/dev/null || echo 'unknown')" >&2
+            fi
             return 1
         fi
         sleep 0.2
     done
-    echo $$ > "$LOCKDIR/pid"
+    if ! echo $$ > "$LOCKDIR/pid" 2>/dev/null; then
+        rm -rf "$LOCKDIR"
+        return 1
+    fi
     return 0
 }
 
