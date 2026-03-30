@@ -88,12 +88,14 @@ var pushCmd = &cobra.Command{
 		}
 
 		if !scan.HasChanges() {
-			return pushUnpushedOrNoop(syncDir, pushForceFlag)
+			return pushUnpushedOrNoop(syncDir, pushForceFlag, false)
 		}
 
 		// Fetch remote refs now that we know there are changes to push.
 		if git.HasRemote(syncDir, "origin") {
-			git.FetchPrune(syncDir)
+			if err := git.FetchPrune(syncDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not fetch remote refs: %v\nProceeding with local state.\n", err)
+			}
 		}
 
 		if pushAutoFlag {
@@ -178,7 +180,7 @@ var pushCmd = &cobra.Command{
 
 		hasPluginChanges := len(selectedAdd) > 0 || len(selectedRemove) > 0
 		if !hasPluginChanges && !hasNonPluginChanges {
-			return pushUnpushedOrNoop(syncDir, pushForceFlag)
+			return pushUnpushedOrNoop(syncDir, pushForceFlag, true)
 		}
 
 		// Summarize non-plugin changes being included.
@@ -311,12 +313,17 @@ var pushCmd = &cobra.Command{
 
 // pushUnpushedOrNoop pushes any existing unpushed commits, or prints a no-op
 // message. Used when there are no new config changes to commit.
-func pushUnpushedOrNoop(syncDir string, force bool) error {
+// When fetched is true, the caller has already fetched remote refs.
+func pushUnpushedOrNoop(syncDir string, force, fetched bool) error {
 	if !git.HasRemote(syncDir, "origin") {
 		fmt.Println("Nothing to push. Everything matches config.")
 		return nil
 	}
-	git.FetchPrune(syncDir)
+	if !fetched {
+		if err := git.FetchPrune(syncDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not fetch remote refs: %v\nProceeding with local state.\n", err)
+		}
+	}
 	if !git.HasUnpushedCommits(syncDir) {
 		fmt.Println("Nothing to push. Everything matches config.")
 		return nil
@@ -333,12 +340,10 @@ func pushUnpushedOrNoop(syncDir string, force bool) error {
 		} else {
 			pushErr = git.PushWithUpstream(syncDir, "origin", branch)
 		}
+	} else if force {
+		pushErr = git.ForcePush(syncDir)
 	} else {
-		if force {
-			pushErr = git.ForcePush(syncDir)
-		} else {
-			pushErr = git.Push(syncDir)
-		}
+		pushErr = git.Push(syncDir)
 	}
 	if pushErr != nil {
 		var nffErr *git.NonFastForwardError
