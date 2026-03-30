@@ -209,8 +209,9 @@ func Fetch(dir string) error {
 }
 
 // FetchPrune fetches and removes stale remote-tracking refs.
-func FetchPrune(dir string) {
-	Run(dir, "fetch", "--quiet", "--prune")
+func FetchPrune(dir string) error {
+	_, err := Run(dir, "fetch", "--quiet", "--prune")
+	return err
 }
 
 // RemoteAdd adds a remote.

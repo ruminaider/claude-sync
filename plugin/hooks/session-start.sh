@@ -33,25 +33,31 @@ fi
 pull_ok=true
 if acquire_lock; then
     trap 'release_lock' EXIT
-    if ! run_with_timeout 15 "$CLAUDE_SYNC" pull --auto; then
+    run_with_timeout 5 "$CLAUDE_SYNC" pull --auto
+    pull_status=$?
+    if [ $pull_status -ne 0 ]; then
         pull_ok=false
     fi
     release_lock
     trap - EXIT
 else
     pull_ok=false
-    echo "claude-sync: lock wait exceeded (15s) during pull — config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
+    echo "claude-sync: lock wait exceeded (3s) during pull: config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
 fi
 
 if [ "$pull_ok" = false ]; then
-    echo "claude-sync pull failed or timed out — config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
+    if [ "${pull_status:-0}" -eq 124 ]; then
+        echo "claude-sync pull timed out (5s): config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
+    else
+        echo "claude-sync pull failed: config may be stale. Run \`claude-sync pull --auto\` to retry." >&2
+    fi
 fi
 
 # --- Step 3: Set up per-session state ---
 SESSION_ID=$(get_session_id)
 
 if [ -z "$SESSION_ID" ]; then
-    echo "claude-sync: could not determine session ID — change detection disabled for this session." >&2
+    echo "claude-sync: could not determine session ID: change detection disabled for this session." >&2
     echo "{}"
     exit 0
 fi
