@@ -79,8 +79,13 @@ acquire_lock() {
 }
 
 release_lock() {
+    if [ ! -d "$LOCKDIR" ]; then
+        return
+    fi
     if [ -f "$LOCKDIR/pid" ] && [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
         rm -rf "$LOCKDIR"
+    else
+        echo "claude-sync: warning: could not verify lock ownership, lock not released" >&2
     fi
 }
 
