@@ -83,7 +83,7 @@ func TestAppModel_EnterOnInlineAction_StartsExecution(t *testing.T) {
 	assert.NotNil(t, cmd) // executeAction command was returned
 }
 
-func TestAppModel_EnterOnNonInlineAction_NoExecution(t *testing.T) {
+func TestAppModel_EnterOnNonInlineAction_OpensSubView(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
 		HasPending:   true,
@@ -92,13 +92,16 @@ func TestAppModel_EnterOnNonInlineAction_NoExecution(t *testing.T) {
 	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
-	// "Review and decide" is not inline (no inline flag)
+	m.syncDir = t.TempDir()
+	m.claudeDir = t.TempDir()
+	// "Review and decide" is not inline (opens sub-view)
 	m.actionCursor = 0
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	app := updated.(AppModel)
-	assert.False(t, app.executing) // should not be executing
-	assert.Nil(t, cmd)             // no command for non-inline
+	assert.False(t, app.executing) // should not be inline-executing
+	assert.Equal(t, viewSubView, app.activeView)
+	assert.NotNil(t, app.subView)
 }
 
 func TestAppModel_ResultReturnsRefreshCmd(t *testing.T) {
@@ -355,16 +358,6 @@ func TestExecuteAction_PushChanges_SameAsPush(t *testing.T) {
 	assert.Equal(t, "push-changes", result.actionID)
 }
 
-func TestExecuteAction_Approve_ErrorPath(t *testing.T) {
-	claudeDir := t.TempDir()
-	syncDir := t.TempDir()
-	cmd := executeAction(0, "approve", nil, claudeDir, syncDir)
-	msg := cmd()
-	result := msg.(actionResultMsg)
-	// No pending changes → error or empty success
-	assert.Equal(t, "approve", result.actionID)
-}
-
 func TestExecuteAction_RemovePlugin(t *testing.T) {
 	cmd := executeAction(0, ActionRemovePlugin, nil, "/tmp/claude", "/tmp/sync")
 	msg := cmd()
@@ -397,7 +390,6 @@ func TestExecuteAction_ActionIDPreserved(t *testing.T) {
 	}{
 		{"pull", nil},
 		{"push", nil},
-		{"approve", nil},
 		{"conflicts", nil},
 		{"plugin-update", []string{"test"}},
 		{"import-mcp", nil},

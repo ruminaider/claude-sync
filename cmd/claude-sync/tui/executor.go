@@ -97,12 +97,6 @@ func executeAction(index int, actionID string, args []string,
 					msg = fmt.Sprintf("Pushed \u2014 %s", commands.PushPreviewSummary(scanResult))
 				}
 			}
-		case ActionApprove:
-			result, approveErr := commands.Approve(claudeDir, syncDir)
-			err = approveErr
-			if result != nil {
-				msg = formatApproveResult(result)
-			}
 		case ActionConflicts:
 			// For now, just report -- real conflict resolution needs a sub-view
 			msg = "Conflict resolution not yet available in TUI"
