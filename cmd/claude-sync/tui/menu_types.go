@@ -14,7 +14,6 @@ const (
 	ActionConfigUpdate  = "edit-config"
 	ActionSubscribe     = "subscribe"
 	ActionApprove       = "approve"
-	ActionReject        = "reject"
 	ActionConflicts     = "conflicts"
 	ActionImportMCP     = "import-mcp"
 )
@@ -34,7 +33,6 @@ func AllActionIDs() []string {
 		ActionConfigUpdate,
 		ActionSubscribe,
 		ActionApprove,
-		ActionReject,
 		ActionConflicts,
 		ActionImportMCP,
 	}

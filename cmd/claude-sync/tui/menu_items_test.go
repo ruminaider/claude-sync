@@ -121,7 +121,6 @@ func TestAllActionIDs_ContainsExpected(t *testing.T) {
 		ActionConfigUpdate,
 		ActionSubscribe,
 		ActionApprove,
-		ActionReject,
 		ActionConflicts,
 		ActionImportMCP,
 	}

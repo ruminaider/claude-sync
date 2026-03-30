@@ -40,7 +40,6 @@ func init() {
 	rootCmd.AddCommand(unforkCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(approveCmd)
-	rootCmd.AddCommand(rejectCmd)
 	rootCmd.AddCommand(autoCommitCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(conflictsCmd)

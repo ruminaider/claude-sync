@@ -365,14 +365,6 @@ func TestExecuteAction_Approve_ErrorPath(t *testing.T) {
 	assert.Equal(t, "approve", result.actionID)
 }
 
-func TestExecuteAction_Reject_ErrorPath(t *testing.T) {
-	syncDir := t.TempDir()
-	cmd := executeAction(0, "reject", nil, "", syncDir)
-	msg := cmd()
-	result := msg.(actionResultMsg)
-	assert.Equal(t, "reject", result.actionID)
-}
-
 func TestExecuteAction_RemovePlugin(t *testing.T) {
 	cmd := executeAction(0, ActionRemovePlugin, nil, "/tmp/claude", "/tmp/sync")
 	msg := cmd()
@@ -406,7 +398,6 @@ func TestExecuteAction_ActionIDPreserved(t *testing.T) {
 		{"pull", nil},
 		{"push", nil},
 		{"approve", nil},
-		{"reject", nil},
 		{"conflicts", nil},
 		{"plugin-update", []string{"test"}},
 		{"import-mcp", nil},
