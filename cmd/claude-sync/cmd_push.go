@@ -34,11 +34,6 @@ var pushCmd = &cobra.Command{
 			return err
 		}
 
-		// Fetch remote refs so unpushed-commit detection is accurate.
-		if git.HasRemote(syncDir, "origin") {
-			git.FetchPrune(syncDir)
-		}
-
 		fmt.Println("Scanning local state...")
 		scan, err := commands.PushScan(claudeDir, syncDir)
 		if err != nil {
@@ -94,6 +89,11 @@ var pushCmd = &cobra.Command{
 
 		if !scan.HasChanges() {
 			return pushUnpushedOrNoop(syncDir, pushForceFlag)
+		}
+
+		// Fetch remote refs now that we know there are changes to push.
+		if git.HasRemote(syncDir, "origin") {
+			git.FetchPrune(syncDir)
 		}
 
 		if pushAutoFlag {
@@ -312,37 +312,42 @@ var pushCmd = &cobra.Command{
 // pushUnpushedOrNoop pushes any existing unpushed commits, or prints a no-op
 // message. Used when there are no new config changes to commit.
 func pushUnpushedOrNoop(syncDir string, force bool) error {
-	if git.HasRemote(syncDir, "origin") && git.HasUnpushedCommits(syncDir) {
-		fmt.Println("No new changes. Pushing existing commits...")
-		var pushErr error
-		if !git.HasUpstream(syncDir) {
-			branch, err := git.CurrentBranch(syncDir)
-			if err != nil {
-				return fmt.Errorf("detecting branch: %w", err)
-			}
-			if force {
-				pushErr = git.ForcePushWithUpstream(syncDir, "origin", branch)
-			} else {
-				pushErr = git.PushWithUpstream(syncDir, "origin", branch)
-			}
-		} else {
-			if force {
-				pushErr = git.ForcePush(syncDir)
-			} else {
-				pushErr = git.Push(syncDir)
-			}
-		}
-		if pushErr != nil {
-			var nffErr *git.NonFastForwardError
-			if errors.As(pushErr, &nffErr) {
-				return handlePushRejection(syncDir)
-			}
-			return fmt.Errorf("pushing: %w", pushErr)
-		}
-		fmt.Println("Pushed to remote.")
+	if !git.HasRemote(syncDir, "origin") {
+		fmt.Println("Nothing to push. Everything matches config.")
 		return nil
 	}
-	fmt.Println("Nothing to push. Everything matches config.")
+	git.FetchPrune(syncDir)
+	if !git.HasUnpushedCommits(syncDir) {
+		fmt.Println("Nothing to push. Everything matches config.")
+		return nil
+	}
+	fmt.Println("No new changes. Pushing existing commits...")
+	var pushErr error
+	if !git.HasUpstream(syncDir) {
+		branch, err := git.CurrentBranch(syncDir)
+		if err != nil {
+			return fmt.Errorf("detecting branch: %w", err)
+		}
+		if force {
+			pushErr = git.ForcePushWithUpstream(syncDir, "origin", branch)
+		} else {
+			pushErr = git.PushWithUpstream(syncDir, "origin", branch)
+		}
+	} else {
+		if force {
+			pushErr = git.ForcePush(syncDir)
+		} else {
+			pushErr = git.Push(syncDir)
+		}
+	}
+	if pushErr != nil {
+		var nffErr *git.NonFastForwardError
+		if errors.As(pushErr, &nffErr) {
+			return handlePushRejection(syncDir)
+		}
+		return fmt.Errorf("pushing: %w", pushErr)
+	}
+	fmt.Println("Pushed to remote.")
 	return nil
 }
 
