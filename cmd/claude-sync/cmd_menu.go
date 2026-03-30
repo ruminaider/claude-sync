@@ -3,12 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/term"
 	"github.com/ruminaider/claude-sync/cmd/claude-sync/tui"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/paths"
+	"github.com/ruminaider/claude-sync/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
@@ -39,8 +42,29 @@ func runMainMenu(cmd *cobra.Command, args []string) error {
 
 		// Check if we need to launch the config editor
 		if app.LaunchConfigEditor {
-			// Run config editor (same as "config update" flow)
-			if err := runConfigFlow(true, nil, nil); err != nil {
+			// Load existing config and profiles so the editor shows
+			// current state instead of behaving like a fresh create.
+			var existingConfig *config.Config
+			var existingProfiles map[string]profiles.Profile
+
+			syncDir := paths.SyncDir()
+			if data, err := os.ReadFile(filepath.Join(syncDir, "config.yaml")); err == nil {
+				if cfg, err := config.Parse(data); err == nil {
+					existingConfig = &cfg
+				}
+			}
+			if names, err := profiles.ListProfiles(syncDir); err == nil {
+				for _, name := range names {
+					if p, err := profiles.ReadProfile(syncDir, name); err == nil {
+						if existingProfiles == nil {
+							existingProfiles = make(map[string]profiles.Profile)
+						}
+						existingProfiles[name] = p
+					}
+				}
+			}
+
+			if err := runConfigFlow(true, existingConfig, existingProfiles); err != nil {
 				fmt.Fprintf(os.Stderr, "\n  \u2717 %v\n", err)
 				if help := tui.ErrorGuidance(tui.ActionConfigUpdate, err); help != nil {
 					fmt.Fprintf(os.Stderr, "    %s\n", help.Why)
