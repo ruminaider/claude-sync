@@ -169,7 +169,7 @@ func displayV2Status(result *commands.StatusResult) error {
 }
 
 func displayPendingChanges(result *commands.StatusResult) {
-	fmt.Println("PENDING (run 'claude-sync approve' to apply, 'claude-sync reject' to discard)")
+	fmt.Println("PENDING (run 'claude-sync approve' to apply)")
 	if result.PendingChanges.Permissions != nil {
 		if len(result.PendingChanges.Permissions.Allow) > 0 {
 			fmt.Printf("  %s Permissions allow: %s\n", warningSign, strings.Join(result.PendingChanges.Permissions.Allow, ", "))

@@ -146,6 +146,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+	case approveResultMsg:
+		// Route to sub-view
+		if m.subView != nil {
+			var cmd tea.Cmd
+			m.subView, cmd = m.subView.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Global keys (work in any view unless filter/help is active)
 		if msg.String() == "ctrl+c" {
@@ -246,9 +254,7 @@ func (m AppModel) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "r":
 		if m.state.HasPending {
-			m.executing = true
-			m.executingActionID = ActionApprove
-			return m, executeAction(m.actionCursor, ActionApprove, nil, m.claudeDir, m.syncDir)
+			return m.openSubView(ActionApprove)
 		} else if m.state.HasConflicts {
 			m.executing = true
 			m.executingActionID = ActionConflicts
@@ -358,6 +364,9 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 	case ActionConfigUpdate:
 		m.LaunchConfigEditor = true
 		return m, tea.Quit
+	case ActionApprove:
+		m.subView = NewApproveView(m.width, m.height, m.claudeDir, m.syncDir)
+		m.activeView = viewSubView
 	}
 	if m.subView != nil {
 		return m, m.subView.Init()

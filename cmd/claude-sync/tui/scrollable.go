@@ -22,7 +22,8 @@ func recalcScroll(content string, height, scroll int) (newScroll, maxScroll int)
 }
 
 // renderScrollable renders pre-built content with scroll windowing inside a content box.
-func renderScrollable(content string, width, height, scroll int) string {
+// An optional footer overrides the default "j/k scroll  esc back" hint line.
+func renderScrollable(content string, width, height, scroll int, footer ...string) string {
 	maxWidth, _ := clampWidth(width)
 
 	allLines := strings.Split(content, "\n")
@@ -42,10 +43,15 @@ func renderScrollable(content string, width, height, scroll int) string {
 
 	visibleLines := allLines[start:end]
 
+	hint := "j/k scroll  esc back"
+	if len(footer) > 0 {
+		hint = footer[0]
+	}
+
 	var output []string
 	output = append(output, strings.Join(visibleLines, "\n"))
 	output = append(output, "")
-	output = append(output, stDim.Render("j/k scroll  esc back"))
+	output = append(output, stDim.Render(hint))
 
 	boxContent := strings.Join(output, "\n")
 	return contentBox(maxWidth, colorSurface1).Render(boxContent)
