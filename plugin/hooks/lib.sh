@@ -36,10 +36,10 @@ run_with_timeout() {
     return $status
 }
 
-# mkdir-based lock with stale detection (60s) and blocking wait (15s)
+# mkdir-based lock with stale detection (60s) and blocking wait (3s)
 acquire_lock() {
     local waited=0
-    local max_wait=15
+    local max_wait=15       # 15 iterations × 0.2s = 3s
 
     while ! mkdir "$LOCKDIR" 2>/dev/null; do
         # Break stale locks (older than 60s)
@@ -51,8 +51,9 @@ acquire_lock() {
         if [ $waited -ge $max_wait ]; then
             return 1
         fi
-        sleep 1
+        sleep 0.2
     done
+    echo $$ > "$LOCKDIR/pid"
     return 0
 }
 

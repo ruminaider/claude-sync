@@ -30,7 +30,7 @@ if acquire_lock; then
     trap - EXIT
 else
     push_ok=false
-    echo "claude-sync: lock wait exceeded (15s) during push — changes may not have synced. Run \`claude-sync push --auto\` to retry." >&2
+    echo "claude-sync: lock wait exceeded (3s) during push — changes may not have synced. Run \`claude-sync push --auto\` to retry." >&2
 fi
 
 if [ "$push_ok" = false ]; then
