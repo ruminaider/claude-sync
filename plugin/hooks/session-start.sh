@@ -33,7 +33,7 @@ fi
 pull_ok=true
 if acquire_lock; then
     trap 'release_lock' EXIT
-    if ! run_with_timeout 15 "$CLAUDE_SYNC" pull --auto; then
+    if ! run_with_timeout 5 "$CLAUDE_SYNC" pull --auto; then
         pull_ok=false
     fi
     release_lock
