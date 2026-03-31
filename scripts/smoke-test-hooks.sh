@@ -80,7 +80,9 @@ setup_sandbox() {
     git -C "$sync_dir" add . >/dev/null 2>&1
     git -C "$sync_dir" commit -m "init" >/dev/null 2>&1
     git -C "$sync_dir" remote add origin "$remote_dir" >/dev/null 2>&1
-    git -C "$sync_dir" push -u origin master >/dev/null 2>&1
+    local branch
+    branch=$(git -C "$sync_dir" branch --show-current)
+    git -C "$sync_dir" push -u origin "$branch" >/dev/null 2>&1
 
     # Create fake CLAUDE.md
     mkdir -p "$SANDBOX/.claude"
@@ -191,7 +193,11 @@ test_lock_contention() {
 test_dead_pid_lock() {
     local lockdir="$HOME/.claude-sync/.lock"
     mkdir -p "$lockdir"
-    echo "99999" > "$lockdir/pid"
+    # Use a just-exited PID that is guaranteed dead
+    bash -c 'exit 0' &
+    local dead_pid=$!
+    wait "$dead_pid" 2>/dev/null
+    echo "$dead_pid" > "$lockdir/pid"
 
     local start end
     start=$(time_ms)
