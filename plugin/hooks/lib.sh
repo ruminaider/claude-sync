@@ -24,8 +24,13 @@ debug_log() {
     echo "[claude-sync debug $(debug_time_ms)] $*" >&2
 }
 
-# Resolve claude-sync binary: bundled (plugin/bin/) then PATH fallback
+# Resolve claude-sync binary: CLAUDE_SYNC_BIN override, then bundled (plugin/bin/), then PATH fallback
 resolve_claude_sync() {
+    # Allow tests and automation to override the binary path
+    if [ -n "${CLAUDE_SYNC_BIN:-}" ] && [ -x "$CLAUDE_SYNC_BIN" ]; then
+        echo "$CLAUDE_SYNC_BIN"
+        return
+    fi
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     local arch os
@@ -46,9 +51,9 @@ run_with_timeout() {
     local secs=$1; shift
     local _rwtstart
     [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ] && _rwtstart=$(debug_time_ms)
-    "$@" &
-    local pid=$!
-    ( sleep "$secs" && kill "$pid" 2>/dev/null ) &
+    # Run the command in a new process group so the watchdog can kill all its descendants.
+    set -m 2>/dev/null; "$@" & local pid=$!; set +m 2>/dev/null
+    ( sleep "$secs" && kill -- -"$pid" 2>/dev/null; kill "$pid" 2>/dev/null ) &
     local watchdog=$!
     wait "$pid" 2>/dev/null
     local status=$?
@@ -138,7 +143,12 @@ release_lock() {
     fi
 }
 
-# Session ID = grandparent PID (the claude process)
+# Session ID = grandparent PID (the claude process).
+# Override with CLAUDE_SYNC_SESSION_ID for testing.
 get_session_id() {
+    if [ -n "${CLAUDE_SYNC_SESSION_ID:-}" ]; then
+        echo "$CLAUDE_SYNC_SESSION_ID"
+        return
+    fi
     ps -o ppid= -p $PPID 2>/dev/null | tr -d ' '
 }

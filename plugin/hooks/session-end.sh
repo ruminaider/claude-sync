@@ -24,8 +24,8 @@ SESSION_DIR="$SESSIONS_DIR/$SESSION_ID"
 push_ok=true
 if acquire_lock; then
     trap 'release_lock' EXIT
-    run_with_timeout 5 "$CLAUDE_SYNC" push --auto --quiet
-    push_status=$?
+    run_with_timeout 5 "$CLAUDE_SYNC" push --auto --quiet || push_status=$?
+    push_status=${push_status:-0}
     if [ $push_status -ne 0 ]; then
         push_ok=false
     fi

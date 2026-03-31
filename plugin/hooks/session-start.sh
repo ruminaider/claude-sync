@@ -34,8 +34,8 @@ fi
 pull_ok=true
 if acquire_lock; then
     trap 'release_lock' EXIT
-    run_with_timeout 5 "$CLAUDE_SYNC" pull --auto
-    pull_status=$?
+    run_with_timeout 5 "$CLAUDE_SYNC" pull --auto || pull_status=$?
+    pull_status=${pull_status:-0}
     if [ $pull_status -ne 0 ]; then
         pull_ok=false
     fi
@@ -84,7 +84,7 @@ if [ -n "$project_root" ] && [ -n "$sync_dir_real" ] && \
 fi
 
 if [ -n "$project_root" ] && [ ! -f "$project_root/.claude/.claude-sync.yaml" ]; then
-    profiles=$(ls "$HOME/.claude-sync/profiles/" 2>/dev/null | sed 's/\.yaml$//' | tr '\n' ', ' | sed 's/,$//')
+    profiles=$(ls "$HOME/.claude-sync/profiles/" 2>/dev/null | sed 's/\.yaml$//' | tr '\n' ', ' | sed 's/,$//' || true)
     MSG="ACTION REQUIRED: This project ($project_root) is not managed by claude-sync. Hooks and permissions may be missing. Before doing any work, ask the user to run: claude-sync project init --profile <name>. Available profiles: ${profiles:-none}. To skip: claude-sync project init --decline."
 
     # Output both structured JSON (for Claude's context) and plain text (for display)

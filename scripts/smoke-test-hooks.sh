@@ -89,11 +89,18 @@ setup_sandbox() {
     # Create sessions dir
     mkdir -p "$sync_dir/sessions"
 
-    # Make stub discoverable: create a wrapper that lib.sh's resolve_claude_sync can find
+    # Make stub discoverable: create a wrapper that lib.sh's resolve_claude_sync can find.
+    # CLAUDE_SYNC_BIN takes priority over the bundled binary in plugin/bin/.
     mkdir -p "$SANDBOX/.local/bin"
     cp "$STUB_BIN" "$SANDBOX/.local/bin/claude-sync"
     chmod +x "$SANDBOX/.local/bin/claude-sync"
     export PATH="$SANDBOX/.local/bin:$PATH"
+    export CLAUDE_SYNC_BIN="$SANDBOX/.local/bin/claude-sync"
+
+    # Fix session ID so all hook invocations share the same session dir.
+    # Each run_hook call spawns fresh bash processes, so PPID-based IDs differ.
+    # A fixed ID makes session-start and stop-change-check use the same dir.
+    export CLAUDE_SYNC_SESSION_ID="smoke-test-$$"
 }
 
 cleanup_sandbox() {
