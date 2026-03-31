@@ -63,6 +63,8 @@ run_with_timeout() {
 acquire_lock() {
     local waited=0
     local max_wait=15       # 15 iterations × 0.2s = 3s
+    local _lock_start
+    [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ] && _lock_start=$(debug_time_ms)
 
     while ! mkdir "$LOCKDIR" 2>/dev/null; do
         # Break stale locks: owner dead OR directory older than 60s
@@ -76,11 +78,13 @@ acquire_lock() {
                 continue
             fi
             if ! kill -0 "$lock_pid" 2>/dev/null; then
+                debug_log "acquire_lock: stale lock (dead PID $lock_pid), breaking"
                 rm -rf "$LOCKDIR"
                 waited=$((waited + 1))
                 continue
             fi
         elif find "$LOCKDIR" -maxdepth 0 -mmin +1 2>/dev/null | grep -q .; then
+            debug_log "acquire_lock: stale lock (>60s old), breaking"
             rm -rf "$LOCKDIR"
             waited=$((waited + 1))
             continue
@@ -90,13 +94,20 @@ acquire_lock() {
             if [ -f "$LOCKDIR/pid" ]; then
                 echo "claude-sync: lock held by PID $(cat "$LOCKDIR/pid" 2>/dev/null || echo 'unknown')" >&2
             fi
+            debug_log "acquire_lock: timeout after $((waited)) iterations"
             return 1
         fi
         sleep 0.2
     done
     if ! echo $$ > "$LOCKDIR/pid" 2>/dev/null; then
         rm -rf "$LOCKDIR"
+        debug_log "acquire_lock: failed to write PID file, cleaned up"
         return 1
+    fi
+    if [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ]; then
+        local _lock_end
+        _lock_end=$(debug_time_ms)
+        debug_log "acquire_lock: acquired in $((_lock_end - _lock_start))ms"
     fi
     return 0
 }
