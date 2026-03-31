@@ -7,6 +7,23 @@ SESSIONS_DIR="$SYNC_DIR/sessions"
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 LOCKDIR="$SYNC_DIR/.lock"
 
+# Debug logging: set CLAUDE_SYNC_DEBUG=1 to enable
+debug_time_ms() {
+    local ms
+    ms=$(date +%s%3N 2>/dev/null)
+    if [[ "$ms" == *N ]]; then
+        # %N unsupported (stock macOS date): fall back to second precision
+        echo "$(date +%s)000"
+    else
+        echo "$ms"
+    fi
+}
+
+debug_log() {
+    [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ] || return 0
+    echo "[claude-sync debug $(debug_time_ms)] $*" >&2
+}
+
 # Resolve claude-sync binary: bundled (plugin/bin/) then PATH fallback
 resolve_claude_sync() {
     local script_dir
