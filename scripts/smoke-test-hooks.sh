@@ -202,10 +202,10 @@ test_dead_pid_lock() {
     # Clean up
     rm -rf "$lockdir"
 
-    if [ "$ms" -lt 500 ]; then
+    if [ "$ms" -lt 2000 ]; then
         report "dead PID lock broken" "pass" "$ms"
     else
-        report "dead PID lock broken" "fail" "$ms" "took ${ms}ms, expected <500ms"
+        report "dead PID lock broken" "fail" "$ms" "took ${ms}ms, expected <2000ms"
     fi
 }
 

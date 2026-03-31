@@ -53,7 +53,7 @@ run_with_timeout() {
     [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ] && _rwtstart=$(debug_time_ms)
     # Run the command in a new process group so the watchdog can kill all its descendants.
     set -m 2>/dev/null; "$@" & local pid=$!; set +m 2>/dev/null
-    ( sleep "$secs" && kill -- -"$pid" 2>/dev/null; kill "$pid" 2>/dev/null ) &
+    ( sleep "$secs" && kill -- -"$pid" 2>/dev/null; kill "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$pid" 2>/dev/null
     local status=$?
