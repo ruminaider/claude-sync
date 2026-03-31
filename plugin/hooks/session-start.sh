@@ -5,6 +5,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/lib.sh"
+_hook_start=$(debug_time_ms)
 
 # If claude-sync is not set up, exit silently
 if [ ! -d "$SYNC_DIR" ]; then
@@ -98,5 +99,8 @@ EOF
     exit 0
 fi
 
+if [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ]; then
+    debug_log "session-start.sh: total $(( $(debug_time_ms) - _hook_start ))ms"
+fi
 echo "{}"
 exit 0
