@@ -44,6 +44,8 @@ resolve_claude_sync() {
 # Returns 124 on timeout (matching coreutils convention), else the command's exit code.
 run_with_timeout() {
     local secs=$1; shift
+    local _rwtstart
+    [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ] && _rwtstart=$(debug_time_ms)
     "$@" &
     local pid=$!
     ( sleep "$secs" && kill "$pid" 2>/dev/null ) &
@@ -53,9 +55,19 @@ run_with_timeout() {
     if ! kill -0 "$watchdog" 2>/dev/null; then
         # Watchdog already exited, meaning it fired (timeout)
         wait "$watchdog" 2>/dev/null
+        if [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ]; then
+            local _rwtend
+            _rwtend=$(debug_time_ms)
+            debug_log "run_with_timeout: $* timed out after $((_rwtend - _rwtstart))ms (exit 124)"
+        fi
         return 124
     fi
     kill "$watchdog" 2>/dev/null 2>&1; wait "$watchdog" 2>/dev/null
+    if [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ]; then
+        local _rwtend
+        _rwtend=$(debug_time_ms)
+        debug_log "run_with_timeout: $* completed in $((_rwtend - _rwtstart))ms (exit $status)"
+    fi
     return $status
 }
 
@@ -114,12 +126,15 @@ acquire_lock() {
 
 release_lock() {
     if [ ! -d "$LOCKDIR" ]; then
+        debug_log "release_lock: lock dir absent, nothing to release"
         return
     fi
     if [ -f "$LOCKDIR/pid" ] && [ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
         rm -rf "$LOCKDIR"
+        debug_log "release_lock: released (PID matched)"
     else
         echo "claude-sync: warning: could not verify lock ownership, lock not released" >&2
+        debug_log "release_lock: PID mismatch or missing, NOT released"
     fi
 }
 
