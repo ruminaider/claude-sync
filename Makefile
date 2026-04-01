@@ -2,7 +2,7 @@ VERSION ?= 0.10.0
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 BINARY := claude-sync
 
-.PHONY: build test test-integration clean install cross-compile copy-plugin
+.PHONY: build test test-integration clean install cross-compile copy-plugin smoke-hooks smoke-hooks-live
 
 copy-plugin:
 	rm -rf internal/bundled/plugin
@@ -44,6 +44,12 @@ cross-compile: copy-plugin
 	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-darwin-amd64 ./cmd/claude-sync
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-linux-arm64 ./cmd/claude-sync
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o plugin/bin/$(BINARY)-linux-amd64 ./cmd/claude-sync
+
+smoke-hooks: build
+	bash scripts/smoke-test-hooks.sh
+
+smoke-hooks-live: build
+	bash scripts/smoke-test-hooks.sh --live
 
 clean:
 	rm -f $(BINARY)

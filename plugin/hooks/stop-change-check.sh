@@ -3,6 +3,7 @@
 # Pure file operations only: does NOT call claude-sync (zero memory/CPU risk)
 
 source "$(dirname "$0")/lib.sh"
+_hook_start=$(debug_time_ms)
 
 SESSION_ID=$(get_session_id)
 
@@ -40,4 +41,7 @@ touch "$ASKED_MARKER"
 cat >&2 <<EOF
 {"decision":"block","reason":"Your Claude config files (CLAUDE.md) have changed since the last sync. Before stopping, ask the user: 'Your Claude config has changed. Would you like to sync these changes with claude-sync?' If they say yes, run: claude-sync auto-commit --if-changed && md5 -q ~/.claude/CLAUDE.md > ~/.claude-sync/sessions/${SESSION_ID}/hash. If they say no, acknowledge and stop normally."}
 EOF
+if [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ]; then
+    debug_log "stop-change-check.sh: total $(( $(debug_time_ms) - _hook_start ))ms"
+fi
 exit 2

@@ -5,6 +5,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/lib.sh"
+_hook_start=$(debug_time_ms)
 
 # If claude-sync is not set up, exit silently
 if [ ! -d "$SYNC_DIR" ]; then
@@ -23,8 +24,8 @@ SESSION_DIR="$SESSIONS_DIR/$SESSION_ID"
 push_ok=true
 if acquire_lock; then
     trap 'release_lock' EXIT
-    run_with_timeout 5 "$CLAUDE_SYNC" push --auto --quiet
-    push_status=$?
+    run_with_timeout 5 "$CLAUDE_SYNC" push --auto --quiet || push_status=$?
+    push_status=${push_status:-0}
     if [ $push_status -ne 0 ]; then
         push_ok=false
     fi
@@ -48,4 +49,7 @@ if [ -n "$SESSION_ID" ] && [ -d "$SESSION_DIR" ]; then
     rm -rf "$SESSION_DIR"
 fi
 
+if [ "${CLAUDE_SYNC_DEBUG:-}" = "1" ]; then
+    debug_log "session-end.sh: total $(( $(debug_time_ms) - _hook_start ))ms"
+fi
 exit 0
