@@ -53,21 +53,22 @@ type PluginBrowser struct {
 	syncDir string
 
 	// Execution state
-	executing     bool
-	resultDone    bool
-	resultSuccess bool
-	resultMsg     string
+	executing  bool
+	resultDone bool
+	resultOk   bool
+	resultMsg  string
 }
 
 // NewPluginBrowser creates a PluginBrowser from the current menu state.
 // Items are organized by marketplace section, with installed plugins pre-checked.
-func NewPluginBrowser(state commands.MenuState, width, height int) PluginBrowser {
+func NewPluginBrowser(state commands.MenuState, syncDir string, width, height int) PluginBrowser {
 	items := buildPluginBrowserItems(state.Plugins)
 
 	m := PluginBrowser{
-		items:  items,
-		width:  width,
-		height: height,
+		items:   items,
+		syncDir: syncDir,
+		width:   width,
+		height:  height,
 	}
 
 	// Position cursor on the first non-header item
@@ -156,14 +157,14 @@ func (m PluginBrowser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pluginBrowserResultMsg:
 		m.executing = false
 		m.resultDone = true
-		m.resultSuccess = msg.success
+		m.resultOk = msg.success
 		m.resultMsg = resolveResultMsg(msg.success, msg.message, msg.err)
 		return m, nil
 	case tea.KeyMsg:
 		// After result is shown, any key dismisses
 		if m.resultDone {
 			return m, func() tea.Msg {
-				return subViewCloseMsg{refreshState: true}
+				return subViewCloseMsg{refreshState: m.resultOk}
 			}
 		}
 		// While executing, ignore input
@@ -353,7 +354,7 @@ func (m PluginBrowser) View() string {
 
 	// Result state
 	if m.resultDone {
-		lines = renderResultLines(lines, m.resultSuccess, m.resultMsg)
+		lines = renderResultLines(lines, m.resultOk, m.resultMsg)
 		content := strings.Join(lines, "\n")
 		boxStyle := contentBox(maxWidth, colorSurface1)
 		return boxStyle.Render(content)
@@ -471,11 +472,22 @@ func (m PluginBrowser) View() string {
 
 // applyPluginSelections modifies config.yaml to add or exclude plugins, then commits.
 func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
+	if syncDir == "" {
+		return func() tea.Msg {
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Sync directory is not configured",
+				err:     fmt.Errorf("syncDir is empty"),
+			}
+		}
+	}
+
 	return func() (result tea.Msg) {
 		defer func() {
 			if r := recover(); r != nil {
 				result = pluginBrowserResultMsg{
 					success: false,
+					message: fmt.Sprintf("Internal error: %v", r),
 					err:     fmt.Errorf("panic: %v", r),
 				}
 			}
@@ -484,12 +496,20 @@ func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
 		cfgPath := filepath.Join(syncDir, "config.yaml")
 		cfgData, err := os.ReadFile(cfgPath)
 		if err != nil {
-			return pluginBrowserResultMsg{success: false, err: err}
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not read config.yaml",
+				err:     err,
+			}
 		}
 
 		cfg, err := config.Parse(cfgData)
 		if err != nil {
-			return pluginBrowserResultMsg{success: false, err: err}
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not parse config.yaml",
+				err:     err,
+			}
 		}
 
 		// Add newly selected plugins to Upstream, remove them from Excluded
@@ -506,15 +526,29 @@ func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
 
 		newData, err := config.Marshal(cfg)
 		if err != nil {
-			return pluginBrowserResultMsg{success: false, err: err}
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not serialize config",
+				err:     err,
+			}
 		}
 
 		if err := os.WriteFile(cfgPath, newData, 0644); err != nil {
-			return pluginBrowserResultMsg{success: false, err: err}
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not write config.yaml",
+				err:     err,
+			}
 		}
 
+		// From here, the file is modified on disk. Rollback on failure.
 		if err := git.Add(syncDir, "config.yaml"); err != nil {
-			return pluginBrowserResultMsg{success: false, err: err}
+			os.WriteFile(cfgPath, cfgData, 0644) // restore original
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not stage config.yaml",
+				err:     err,
+			}
 		}
 
 		var parts []string
@@ -527,7 +561,12 @@ func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
 		summary := strings.Join(parts, ", ")
 
 		if err := git.Commit(syncDir, "Update plugins: "+summary); err != nil {
-			return pluginBrowserResultMsg{success: false, err: err}
+			os.WriteFile(cfgPath, cfgData, 0644) // restore original
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not commit changes",
+				err:     err,
+			}
 		}
 
 		return pluginBrowserResultMsg{success: true, message: "Updated plugins: " + summary}

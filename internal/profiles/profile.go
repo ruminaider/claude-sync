@@ -591,8 +591,6 @@ func MergePermissions(base config.Permissions, profile Profile) config.Permissio
 	}
 }
 
-// appendUnique appends items from add to base, skipping duplicates.
-
 // MergeClaudeMD starts with base includes, adds profile.ClaudeMD.Add (no
 // duplicates), then removes profile.ClaudeMD.Remove. Same pattern as
 // MergePlugins.

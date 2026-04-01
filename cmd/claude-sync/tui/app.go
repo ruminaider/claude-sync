@@ -357,9 +357,7 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 		m.subView = picker
 		m.activeView = viewSubView
 	case ActionBrowsePlugins:
-		browser := NewPluginBrowser(m.state, m.width, m.height)
-		browser.syncDir = m.syncDir
-		m.subView = browser
+		m.subView = NewPluginBrowser(m.state, m.syncDir, m.width, m.height)
 		m.activeView = viewSubView
 	case "join-config":
 		jf := NewJoinFlow(m.width, m.height)
