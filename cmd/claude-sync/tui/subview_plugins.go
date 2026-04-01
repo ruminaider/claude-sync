@@ -12,6 +12,7 @@ import (
 	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/sliceutil"
 )
 
 // pluginBrowserItem represents a single row in the plugin browser (either a header or a plugin).
@@ -493,14 +494,14 @@ func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
 
 		// Add newly selected plugins to Upstream, remove them from Excluded
 		if len(toAdd) > 0 {
-			cfg.Upstream = appendUnique(cfg.Upstream, toAdd)
-			cfg.Excluded = removeStrings(cfg.Excluded, toAdd)
+			cfg.Upstream = sliceutil.AppendUnique(cfg.Upstream, toAdd)
+			cfg.Excluded = sliceutil.RemoveAll(cfg.Excluded, toAdd)
 		}
 
 		// Add deselected plugins to Excluded, remove them from Upstream
 		if len(toRemove) > 0 {
-			cfg.Excluded = appendUnique(cfg.Excluded, toRemove)
-			cfg.Upstream = removeStrings(cfg.Upstream, toRemove)
+			cfg.Excluded = sliceutil.AppendUnique(cfg.Excluded, toRemove)
+			cfg.Upstream = sliceutil.RemoveAll(cfg.Upstream, toRemove)
 		}
 
 		newData, err := config.Marshal(cfg)
@@ -516,52 +517,19 @@ func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
 			return pluginBrowserResultMsg{success: false, err: err}
 		}
 
-		parts := []string{}
+		var parts []string
 		if len(toAdd) > 0 {
 			parts = append(parts, fmt.Sprintf("added %d", len(toAdd)))
 		}
 		if len(toRemove) > 0 {
 			parts = append(parts, fmt.Sprintf("excluded %d", len(toRemove)))
 		}
-		commitMsg := fmt.Sprintf("Update plugins: %s", strings.Join(parts, ", "))
+		summary := strings.Join(parts, ", ")
 
-		if err := git.Commit(syncDir, commitMsg); err != nil {
+		if err := git.Commit(syncDir, "Update plugins: "+summary); err != nil {
 			return pluginBrowserResultMsg{success: false, err: err}
 		}
 
-		msg := fmt.Sprintf("Updated plugins: %s", strings.Join(parts, ", "))
-		return pluginBrowserResultMsg{success: true, message: msg}
+		return pluginBrowserResultMsg{success: true, message: "Updated plugins: " + summary}
 	}
-}
-
-// appendUnique appends items from add to base without duplicates.
-func appendUnique(base, add []string) []string {
-	seen := make(map[string]bool, len(base))
-	for _, s := range base {
-		seen[s] = true
-	}
-	result := make([]string, len(base))
-	copy(result, base)
-	for _, s := range add {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// removeStrings returns base with all items in remove filtered out.
-func removeStrings(base, remove []string) []string {
-	drop := make(map[string]bool, len(remove))
-	for _, s := range remove {
-		drop[s] = true
-	}
-	var result []string
-	for _, s := range base {
-		if !drop[s] {
-			result = append(result, s)
-		}
-	}
-	return result
 }

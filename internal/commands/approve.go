@@ -6,6 +6,7 @@ import (
 
 	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
+	"github.com/ruminaider/claude-sync/internal/sliceutil"
 )
 
 // ApproveResult holds the result of applying pending changes.
@@ -45,8 +46,8 @@ func Approve(claudeDir, syncDir string) (*ApproveResult, error) {
 		}
 
 		// Additive merge.
-		mergedAllow := appendUniqueApprove(existingPerms.Allow, pending.Permissions.Allow)
-		mergedDeny := appendUniqueApprove(existingPerms.Deny, pending.Permissions.Deny)
+		mergedAllow := sliceutil.AppendUnique(existingPerms.Allow, pending.Permissions.Allow)
+		mergedDeny := sliceutil.AppendUnique(existingPerms.Deny, pending.Permissions.Deny)
 
 		permData, err := json.Marshal(map[string]any{
 			"allow": mergedAllow,
@@ -113,19 +114,3 @@ func Approve(claudeDir, syncDir string) (*ApproveResult, error) {
 	return result, nil
 }
 
-// appendUniqueApprove appends items from add to base without duplicates.
-func appendUniqueApprove(base, add []string) []string {
-	seen := make(map[string]bool, len(base))
-	for _, s := range base {
-		seen[s] = true
-	}
-	result := make([]string, len(base))
-	copy(result, base)
-	for _, s := range add {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-	return result
-}
