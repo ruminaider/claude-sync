@@ -122,6 +122,9 @@ setup_live() {
         exit 1
     fi
     export CLAUDE_SYNC_DEBUG=1
+    # Fix session ID so all hook invocations share the same session dir.
+    # run_hook spawns fresh bash processes, so PPID-based IDs differ per call.
+    export CLAUDE_SYNC_SESSION_ID="smoke-test-$$"
 }
 
 # --- Test cases ---
@@ -154,13 +157,12 @@ test_session_end_happy() {
     end=$(time_ms)
     local ms=$((end - start))
 
-    # Verify session dir was cleaned up
-    local session_count
-    session_count=$(find "$HOME/.claude-sync/sessions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$session_count" -eq 0 ]; then
+    # Verify our session dir was cleaned up (other active sessions may still have dirs)
+    local our_session_dir="$HOME/.claude-sync/sessions/$CLAUDE_SYNC_SESSION_ID"
+    if [ ! -d "$our_session_dir" ]; then
         report "session-end happy path" "pass" "$ms"
     else
-        report "session-end happy path" "fail" "$ms" "session dir not cleaned up ($session_count remain)"
+        report "session-end happy path" "fail" "$ms" "session dir $CLAUDE_SYNC_SESSION_ID not cleaned up"
     fi
 }
 
