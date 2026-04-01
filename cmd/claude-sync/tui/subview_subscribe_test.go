@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -236,6 +237,35 @@ func TestSubscribeFlow_WindowResize(t *testing.T) {
 	assert.Equal(t, 120, flow.width)
 	assert.Equal(t, 50, flow.height)
 	assert.Nil(t, cmd)
+}
+
+// --- AppModel routing test ---
+
+func TestAppModel_RoutesSubscribeResultMsg(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	app := NewAppModel(state)
+	app.width = 80
+	app.height = 40
+
+	// Open subscribe flow as subview
+	sf := NewSubscribeFlow(80, 40)
+	sf.executing = true
+	app.subView = sf
+	app.activeView = viewSubView
+
+	// Route a subscribeResultMsg through AppModel
+	updated, _ := app.Update(subscribeResultMsg{
+		success: true,
+		message: "Subscribed to user/config-repo",
+	})
+	appModel := updated.(AppModel)
+
+	// The subview should have received the result
+	flow := appModel.subView.(*SubscribeFlow)
+	assert.True(t, flow.resultDone, "subscribeResultMsg should reach the subview")
+	assert.True(t, flow.resultOk)
+	assert.False(t, flow.executing, "executing should be cleared")
+	assert.Contains(t, flow.resultMsg, "Subscribed to user/config-repo")
 }
 
 // resolveResultMsg tests live in result_state_test.go.

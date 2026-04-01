@@ -162,6 +162,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+	case subscribeResultMsg:
+		// Route to sub-view
+		if m.subView != nil {
+			var cmd tea.Cmd
+			m.subView, cmd = m.subView.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Global keys (work in any view unless filter/help is active)
 		if msg.String() == "ctrl+c" {
