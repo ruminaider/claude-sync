@@ -35,14 +35,14 @@ type UpdateResult struct {
 	ForkedPlugins   []ForkedStatus
 }
 
-// HasUpdates returns true if any category is non-empty.
-func (r *UpdateResult) HasUpdates() bool {
+// hasUpdates returns true if any category is non-empty.
+func (r *UpdateResult) hasUpdates() bool {
 	return len(r.UpstreamPlugins) > 0 || len(r.PinnedPlugins) > 0 || len(r.ForkedPlugins) > 0
 }
 
-// UpdateCheck reads the v2 config and installed_plugins.json, then categorizes
+// updateCheck reads the v2 config and installed_plugins.json, then categorizes
 // all plugins with their installed versions.
-func UpdateCheck(claudeDir, syncDir string) (*UpdateResult, error) {
+func updateCheck(claudeDir, syncDir string) (*UpdateResult, error) {
 	if _, err := os.Stat(syncDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("claude-sync not initialized. Run 'claude-sync init' or 'claude-sync join <url>'")
 	}
@@ -98,10 +98,10 @@ func UpdateCheck(claudeDir, syncDir string) (*UpdateResult, error) {
 	return result, nil
 }
 
-// UpdateApply reinstalls the given upstream/pinned plugin keys.
+// updateApply reinstalls the given upstream/pinned plugin keys.
 // It registers the local marketplace if forked plugins exist in the config.
 // Returns slices of successfully installed and failed plugin keys.
-func UpdateApply(claudeDir, syncDir string, pluginKeys []string, quiet bool) (installed, failed []string) {
+func updateApply(claudeDir, syncDir string, pluginKeys []string, quiet bool) (installed, failed []string) {
 	for _, key := range pluginKeys {
 		if !quiet {
 			fmt.Printf("  Reinstalling %s...\n", key)
@@ -132,9 +132,9 @@ func UpdateApply(claudeDir, syncDir string, pluginKeys []string, quiet bool) (in
 	return installed, failed
 }
 
-// UpdateForkedPlugins reinstalls forked plugins using the local marketplace key format.
+// updateForkedPlugins reinstalls forked plugins using the local marketplace key format.
 // Returns slices of successfully installed and failed plugin names.
-func UpdateForkedPlugins(claudeDir, syncDir string, forkNames []string, quiet bool) (installed, failed []string) {
+func updateForkedPlugins(claudeDir, syncDir string, forkNames []string, quiet bool) (installed, failed []string) {
 	if len(forkNames) > 0 {
 		if err := plugins.RegisterLocalMarketplace(claudeDir, syncDir); err != nil {
 			if !quiet {

@@ -339,14 +339,14 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 	// Full plugin refresh (absorbed from update command).
 	// This covers upstream and forked plugins that stale detection may miss.
 	if opts.SyncDir != "" {
-		updateResult, updateErr := UpdateCheck(claudeDir, opts.SyncDir)
-		if updateErr == nil && updateResult.HasUpdates() {
+		updateResult, updateErr := updateCheck(claudeDir, opts.SyncDir)
+		if updateErr == nil && updateResult.hasUpdates() {
 			upstreamKeys := make([]string, 0, len(updateResult.UpstreamPlugins))
 			for _, p := range updateResult.UpstreamPlugins {
 				upstreamKeys = append(upstreamKeys, p.Key)
 			}
 			if len(upstreamKeys) > 0 {
-				installed, failed := UpdateApply(claudeDir, opts.SyncDir, upstreamKeys, quiet)
+				installed, failed := updateApply(claudeDir, opts.SyncDir, upstreamKeys, quiet)
 				result.Updated = append(result.Updated, installed...)
 				result.UpdateFailed = append(result.UpdateFailed, failed...)
 			}
@@ -355,7 +355,7 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 				for _, f := range updateResult.ForkedPlugins {
 					forkNames = append(forkNames, f.Name)
 				}
-				installed, failed := UpdateForkedPlugins(claudeDir, opts.SyncDir, forkNames, quiet)
+				installed, failed := updateForkedPlugins(claudeDir, opts.SyncDir, forkNames, quiet)
 				result.Updated = append(result.Updated, installed...)
 				result.UpdateFailed = append(result.UpdateFailed, failed...)
 			}
