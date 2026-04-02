@@ -446,18 +446,35 @@ func (m PluginBrowser) View() string {
 
 		lines = append(lines, "")
 
-		// Footer info
-		allInstalled := true
+		// Footer info: dynamic selection counts
+		var installed, toAdd, toRemove int
 		for _, item := range m.items {
-			if !item.isHeader && !item.installed {
-				allInstalled = false
-				break
+			if item.isHeader {
+				continue
+			}
+			if item.installed && item.selected {
+				installed++
+			} else if !item.installed && item.selected {
+				toAdd++
+			} else if item.installed && !item.selected {
+				toRemove++
 			}
 		}
-		if allInstalled && len(m.items) > 0 {
-			lines = append(lines, stDim.Render("All plugins are currently installed."))
+		var counts []string
+		if installed > 0 {
+			counts = append(counts, fmt.Sprintf("%d installed", installed))
 		}
-		lines = append(lines, stDim.Render("Subscribe to more via 'Join a shared config'."))
+		if toAdd > 0 {
+			counts = append(counts, fmt.Sprintf("%d to add", toAdd))
+		}
+		if toRemove > 0 {
+			counts = append(counts, fmt.Sprintf("%d to remove", toRemove))
+		}
+		if len(counts) > 0 {
+			lines = append(lines, stDim.Render(strings.Join(counts, ", ")))
+		} else {
+			lines = append(lines, stDim.Render("No plugins selected."))
+		}
 
 		lines = append(lines, "")
 		lines = append(lines, stDim.Render("space toggle  enter confirm  / filter  esc back"))

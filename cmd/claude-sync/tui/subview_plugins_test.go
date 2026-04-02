@@ -413,6 +413,32 @@ func TestPluginBrowser_ShowsStatusLabel(t *testing.T) {
 	assert.Contains(t, view, "forked")
 }
 
+func TestPluginBrowser_FooterShowsDynamicCounts(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
+			{Name: "hookify", Key: "hookify@mkt", Marketplace: "mkt", Status: "upstream"},
+		},
+	}
+	m := NewPluginBrowser(state, "", 70, 30)
+
+	// Initial state: both installed and selected
+	view := m.View()
+	assert.Contains(t, view, "2 installed")
+
+	// Deselect one plugin (toggle off beads)
+	for m.items[m.cursor].isHeader {
+		m.cursor++
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	m = updated.(PluginBrowser)
+
+	view = m.View()
+	assert.Contains(t, view, "1 installed")
+	assert.Contains(t, view, "1 to remove")
+}
+
 // --- Integration tests for applyPluginSelections ---
 
 // initTestGitRepo creates a temp dir with a git repo containing a config.yaml.
