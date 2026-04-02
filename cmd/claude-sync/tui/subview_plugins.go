@@ -475,6 +475,7 @@ func (m PluginBrowser) View() string {
 		} else {
 			lines = append(lines, stDim.Render("No plugins selected."))
 		}
+		lines = append(lines, stDim.Render("Subscribe to more via 'Join a shared config'."))
 
 		lines = append(lines, "")
 		lines = append(lines, stDim.Render("space toggle  enter confirm  / filter  esc back"))
