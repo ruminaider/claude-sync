@@ -38,6 +38,7 @@ var pullCmd = &cobra.Command{
 				Auto:       true,
 				Force:      forceFlag,
 				ProjectDir: projectDir,
+				Version:    version,
 			})
 		} else {
 			// Fetch once up front so both preview and pull share the same refs.
@@ -80,6 +81,7 @@ var pullCmd = &cobra.Command{
 				Quiet:     quietFlag,
 				Force:     forceFlag,
 				SkipFetch: true, // already fetched above
+				Version:   version,
 				DuplicateResolver: func(dupes []plugins.Duplicate) error {
 					for _, d := range dupes {
 						forkSrc, mktSrc, isFork := isForkDuplicate(d)
@@ -172,6 +174,10 @@ var pullCmd = &cobra.Command{
 				for _, c := range result.PendingHighRisk {
 					fmt.Fprintf(os.Stderr, "  - %s\n", c.Description)
 				}
+			}
+			// Output version check for session-start hook to parse.
+			if result.UpdateAvailable {
+				fmt.Fprintf(os.Stderr, "UPDATE_AVAILABLE:%s:%s\n", result.CurrentVersion, result.LatestVersion)
 			}
 			return nil
 		}
