@@ -32,6 +32,13 @@ var (
 	colorMaroon   = lipgloss.Color(flavor.Maroon().Hex)
 )
 
+// Catppuccin Latte colors (used for update banner contrast on Mocha background)
+var (
+	colorLatteMauve    = lipgloss.Color("#8839ef")
+	colorLatteLavender = lipgloss.Color("#7287fd")
+	colorLattePeach    = lipgloss.Color("#fe640b")
+)
+
 // ProfileTheme holds the accent color for a profile tab.
 type ProfileTheme struct {
 	Accent lipgloss.Color // bright accent (e.g. Blue)
