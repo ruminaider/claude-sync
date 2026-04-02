@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/sliceutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -585,29 +586,9 @@ func MergeHooks(base map[string]json.RawMessage, profile Profile) map[string]jso
 // without duplicates.
 func MergePermissions(base config.Permissions, profile Profile) config.Permissions {
 	return config.Permissions{
-		Allow: appendUnique(base.Allow, profile.Permissions.AddAllow),
-		Deny:  appendUnique(base.Deny, profile.Permissions.AddDeny),
+		Allow: sliceutil.AppendUnique(base.Allow, profile.Permissions.AddAllow),
+		Deny:  sliceutil.AppendUnique(base.Deny, profile.Permissions.AddDeny),
 	}
-}
-
-// appendUnique appends items from add to base, skipping duplicates.
-func appendUnique(base, add []string) []string {
-	if len(add) == 0 {
-		return base
-	}
-	seen := make(map[string]bool, len(base))
-	for _, s := range base {
-		seen[s] = true
-	}
-	result := make([]string, len(base))
-	copy(result, base)
-	for _, s := range add {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-	return result
 }
 
 // MergeClaudeMD starts with base includes, adds profile.ClaudeMD.Add (no

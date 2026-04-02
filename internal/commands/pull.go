@@ -13,6 +13,7 @@ import (
 
 	"github.com/ruminaider/claude-sync/internal/approval"
 	"github.com/ruminaider/claude-sync/internal/bundled"
+	"github.com/ruminaider/claude-sync/internal/sliceutil"
 	"github.com/ruminaider/claude-sync/internal/claudecode"
 	"github.com/ruminaider/claude-sync/internal/claudemd"
 	"github.com/ruminaider/claude-sync/internal/config"
@@ -956,8 +957,8 @@ func applyPermissions(claudeDir string, perms config.Permissions) error {
 		json.Unmarshal(permRaw, &existingPerms)
 	}
 
-	mergedAllow := appendUniqueStrings(existingPerms.Allow, perms.Allow)
-	mergedDeny := appendUniqueStrings(existingPerms.Deny, perms.Deny)
+	mergedAllow := sliceutil.AppendUnique(existingPerms.Allow, perms.Allow)
+	mergedDeny := sliceutil.AppendUnique(existingPerms.Deny, perms.Deny)
 
 	permData, err := json.Marshal(map[string]any{
 		"allow": mergedAllow,
@@ -1082,22 +1083,6 @@ func restoreCommandsSkills(claudeDir, syncDir string, commandKeys, skillKeys []s
 	return
 }
 
-// appendUniqueStrings appends items from add to base without duplicates.
-func appendUniqueStrings(base, add []string) []string {
-	seen := make(map[string]bool, len(base))
-	for _, s := range base {
-		seen[s] = true
-	}
-	result := make([]string, len(base))
-	copy(result, base)
-	for _, s := range add {
-		if !seen[s] {
-			seen[s] = true
-			result = append(result, s)
-		}
-	}
-	return result
-}
 
 // detectStalePlugins returns synced plugin keys whose cache is out of date.
 // For directory-based marketplaces, it compares content hashes of the source

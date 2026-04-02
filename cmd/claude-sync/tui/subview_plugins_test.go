@@ -1,10 +1,15 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +22,7 @@ func TestPluginBrowser_ShowsInstalledPlugins(t *testing.T) {
 			{Name: "superpowers", Key: "sp@official", Status: "pinned", PinVersion: "1.2.3", Marketplace: "official"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	view := m.View()
 	assert.Contains(t, view, "beads")
 	assert.Contains(t, view, "superpowers")
@@ -32,7 +37,7 @@ func TestPluginBrowser_GroupsByMarketplace(t *testing.T) {
 			{Name: "superpowers", Key: "sp@mkt2", Marketplace: "mkt2"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	view := m.View()
 	assert.Contains(t, view, "mkt1")
 	assert.Contains(t, view, "mkt2")
@@ -46,7 +51,7 @@ func TestPluginBrowser_CursorSkipsHeaders(t *testing.T) {
 			{Name: "sp", Key: "sp@mkt2", Marketplace: "mkt2"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	// First selectable item should be beads (skip mkt1 header)
 	assert.False(t, m.items[m.cursor].isHeader)
 }
@@ -58,7 +63,7 @@ func TestPluginBrowser_SpaceToggles(t *testing.T) {
 			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	// Find first non-header item
 	for m.items[m.cursor].isHeader {
 		m.cursor++
@@ -71,7 +76,7 @@ func TestPluginBrowser_SpaceToggles(t *testing.T) {
 
 func TestPluginBrowser_EscCancels(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	browser := updated.(PluginBrowser)
 	assert.True(t, browser.cancelled)
@@ -90,7 +95,7 @@ func TestPluginBrowser_FilterMode(t *testing.T) {
 			{Name: "superpowers", Key: "sp@mkt", Marketplace: "mkt"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	// Enter filter mode
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
 	m = updated.(PluginBrowser)
@@ -113,7 +118,7 @@ func TestPluginBrowser_InstalledPluginsPreChecked(t *testing.T) {
 			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	for _, item := range m.items {
 		if !item.isHeader && item.name == "beads" {
 			assert.True(t, item.installed)
@@ -124,7 +129,7 @@ func TestPluginBrowser_InstalledPluginsPreChecked(t *testing.T) {
 
 func TestPluginBrowser_NoPlugins(t *testing.T) {
 	state := commands.MenuState{ConfigExists: true}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	view := m.View()
 	assert.Contains(t, view, "No plugins")
 }
@@ -138,7 +143,7 @@ func TestPluginBrowser_NavigationJK(t *testing.T) {
 			{Name: "sp", Key: "sp@mkt2", Marketplace: "mkt2"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 
 	// cursor should start on first non-header (beads)
 	require.False(t, m.items[m.cursor].isHeader)
@@ -174,7 +179,7 @@ func TestPluginBrowser_EnterConfirms(t *testing.T) {
 			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	browser := updated.(PluginBrowser)
 	assert.True(t, browser.confirmed)
@@ -185,6 +190,149 @@ func TestPluginBrowser_EnterConfirms(t *testing.T) {
 	assert.False(t, closeMsg.refreshState) // no changes, so no refresh
 }
 
+func TestPluginBrowser_EnterWithChanges_TriggersExecution(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
+			{Name: "hookify", Key: "hookify@mkt", Marketplace: "mkt", Status: "upstream"},
+		},
+	}
+	m := NewPluginBrowser(state, "", 70, 30)
+
+	// Deselect first plugin (toggle off an installed plugin)
+	for m.items[m.cursor].isHeader {
+		m.cursor++
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	m = updated.(PluginBrowser)
+	assert.False(t, m.items[m.cursor].selected)
+
+	// Press Enter: should trigger execution, not immediate close
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	browser := updated.(PluginBrowser)
+	assert.True(t, browser.confirmed)
+	assert.True(t, browser.executing)
+	assert.Equal(t, []string{"beads@mkt"}, browser.removedSelections)
+	require.NotNil(t, cmd)
+
+	// The command should NOT return subViewCloseMsg (it returns pluginBrowserResultMsg)
+	// We can't run it without a real git repo, but we can verify the model state
+}
+
+func TestPluginBrowser_IgnoresInputWhileExecuting(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
+		},
+	}
+	m := NewPluginBrowser(state, "", 70, 30)
+	m.executing = true
+
+	// Key input should be ignored while executing
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	browser := updated.(PluginBrowser)
+	assert.False(t, browser.cancelled) // should NOT have cancelled
+	assert.Nil(t, cmd)
+}
+
+func TestPluginBrowser_ResultMsg_SetsState(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewPluginBrowser(state, "", 70, 30)
+
+	updated, cmd := m.Update(pluginBrowserResultMsg{
+		success: true,
+		message: "Updated plugins: added 1",
+	})
+	browser := updated.(PluginBrowser)
+	assert.True(t, browser.resultDone)
+	assert.True(t, browser.resultOk)
+	assert.Equal(t, "Updated plugins: added 1", browser.resultMsg)
+	assert.Nil(t, cmd)
+}
+
+func TestPluginBrowser_ResultMsg_Error(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewPluginBrowser(state, "", 70, 30)
+
+	updated, _ := m.Update(pluginBrowserResultMsg{
+		success: false,
+		err:     fmt.Errorf("config.yaml not found"),
+	})
+	browser := updated.(PluginBrowser)
+	assert.True(t, browser.resultDone)
+	assert.False(t, browser.resultOk)
+	assert.Equal(t, "config.yaml not found", browser.resultMsg)
+}
+
+func TestPluginBrowser_AfterResult_AnyKeyCloses(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewPluginBrowser(state, "", 70, 30)
+	m.resultDone = true
+	m.resultOk = true
+	m.resultMsg = "Done"
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	closeMsg, ok := msg.(subViewCloseMsg)
+	assert.True(t, ok)
+	assert.True(t, closeMsg.refreshState)
+}
+
+func TestPluginBrowser_ViewShowsResult(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewPluginBrowser(state, "", 70, 30)
+	m.resultDone = true
+	m.resultOk = true
+	m.resultMsg = "Updated plugins: added 2"
+
+	view := m.View()
+	assert.Contains(t, view, "Updated plugins: added 2")
+	assert.Contains(t, view, "Press any key")
+}
+
+func TestPluginBrowser_ViewShowsExecuting(t *testing.T) {
+	state := commands.MenuState{ConfigExists: true}
+	m := NewPluginBrowser(state, "", 70, 30)
+	m.executing = true
+
+	view := m.View()
+	assert.Contains(t, view, "Applying plugin changes")
+}
+
+func TestAppModel_RoutesPluginBrowserResultMsg(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Key: "beads@mkt", Status: "upstream", Marketplace: "mkt"},
+		},
+	}
+	app := NewAppModel(state)
+	app.width = 80
+	app.height = 40
+
+	// Open plugin browser as subview
+	browser := NewPluginBrowser(state, "", 80, 40)
+	browser.executing = true
+	app.subView = browser
+	app.activeView = viewSubView
+
+	// Route a pluginBrowserResultMsg to the subview
+	updated, _ := app.Update(pluginBrowserResultMsg{
+		success: true,
+		message: "Updated plugins: excluded 1",
+	})
+	appModel := updated.(AppModel)
+
+	// The subview should have received the result
+	pb := appModel.subView.(PluginBrowser)
+	assert.True(t, pb.resultDone)
+	assert.True(t, pb.resultOk)
+	assert.Equal(t, "Updated plugins: excluded 1", pb.resultMsg)
+}
+
 func TestPluginBrowser_FilterModeEscClears(t *testing.T) {
 	state := commands.MenuState{
 		ConfigExists: true,
@@ -192,7 +340,7 @@ func TestPluginBrowser_FilterModeEscClears(t *testing.T) {
 			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 
 	// Enter filter mode
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
@@ -220,7 +368,7 @@ func TestPluginBrowser_FilterBackspaceDeletesChar(t *testing.T) {
 			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 
 	// Enter filter mode and type "abc"
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
@@ -244,7 +392,7 @@ func TestPluginBrowser_ShowsVersionForPinned(t *testing.T) {
 			{Name: "superpowers", Key: "sp@official", Status: "pinned", PinVersion: "1.2.3", Marketplace: "official"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	view := m.View()
 	assert.Contains(t, view, "v1.2.3")
 }
@@ -258,11 +406,185 @@ func TestPluginBrowser_ShowsStatusLabel(t *testing.T) {
 			{Name: "fork", Key: "fork@local", Status: "forked", Marketplace: "local"},
 		},
 	}
-	m := NewPluginBrowser(state, 70, 30)
+	m := NewPluginBrowser(state, "", 70, 30)
 	view := m.View()
 	assert.Contains(t, view, "upstream")
 	assert.Contains(t, view, "pinned")
 	assert.Contains(t, view, "forked")
+}
+
+func TestPluginBrowser_FooterShowsDynamicCounts(t *testing.T) {
+	state := commands.MenuState{
+		ConfigExists: true,
+		Plugins: []commands.PluginInfo{
+			{Name: "beads", Key: "beads@mkt", Marketplace: "mkt", Status: "upstream"},
+			{Name: "hookify", Key: "hookify@mkt", Marketplace: "mkt", Status: "upstream"},
+		},
+	}
+	m := NewPluginBrowser(state, "", 70, 30)
+
+	// Initial state: both installed and selected
+	view := m.View()
+	assert.Contains(t, view, "2 installed")
+
+	// Deselect one plugin (toggle off beads)
+	for m.items[m.cursor].isHeader {
+		m.cursor++
+	}
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	m = updated.(PluginBrowser)
+
+	view = m.View()
+	assert.Contains(t, view, "1 installed")
+	assert.Contains(t, view, "1 to remove")
+}
+
+// --- Integration tests for applyPluginSelections ---
+
+// initTestGitRepo creates a temp dir with a git repo containing a config.yaml.
+func initTestGitRepo(t *testing.T, cfgContent string) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		require.NoError(t, cmd.Run())
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgContent), 0644))
+
+	gitAdd := exec.Command("git", "add", "config.yaml")
+	gitAdd.Dir = dir
+	require.NoError(t, gitAdd.Run())
+
+	gitCommit := exec.Command("git", "commit", "-m", "initial")
+	gitCommit.Dir = dir
+	require.NoError(t, gitCommit.Run())
+
+	return dir
+}
+
+func TestApplyPluginSelections_ExcludesPlugin(t *testing.T) {
+	cfgYAML := `version: "2"
+plugins:
+  upstream:
+    - beads@mkt
+    - hookify@mkt
+`
+	dir := initTestGitRepo(t, cfgYAML)
+
+	cmd := applyPluginSelections(dir, nil, []string{"beads@mkt"})
+	result := cmd()
+	msg, ok := result.(pluginBrowserResultMsg)
+	require.True(t, ok)
+	assert.True(t, msg.success, "expected success but got: %v", msg.err)
+
+	// Read back config and verify
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(data)
+	require.NoError(t, err)
+	assert.NotContains(t, cfg.Upstream, "beads@mkt", "beads should be removed from upstream")
+	assert.Contains(t, cfg.Excluded, "beads@mkt", "beads should be in excluded")
+	assert.Contains(t, cfg.Upstream, "hookify@mkt", "hookify should remain in upstream")
+
+	// Verify a git commit was created
+	logCmd := exec.Command("git", "log", "--oneline", "-1")
+	logCmd.Dir = dir
+	logOut, err := logCmd.Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(logOut), "Update plugins: excluded 1")
+}
+
+func TestApplyPluginSelections_AddsPlugin(t *testing.T) {
+	cfgYAML := `version: "2"
+plugins:
+  upstream:
+    - hookify@mkt
+  excluded:
+    - beads@mkt
+`
+	dir := initTestGitRepo(t, cfgYAML)
+
+	cmd := applyPluginSelections(dir, []string{"beads@mkt"}, nil)
+	result := cmd()
+	msg, ok := result.(pluginBrowserResultMsg)
+	require.True(t, ok)
+	assert.True(t, msg.success, "expected success but got: %v", msg.err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(data)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Upstream, "beads@mkt", "beads should be added to upstream")
+	assert.NotContains(t, cfg.Excluded, "beads@mkt", "beads should be removed from excluded")
+
+	// Verify a git commit was created
+	logCmd := exec.Command("git", "log", "--oneline", "-1")
+	logCmd.Dir = dir
+	logOut, err := logCmd.Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(logOut), "Update plugins: added 1")
+}
+
+func TestApplyPluginSelections_AddAndRemoveSimultaneously(t *testing.T) {
+	cfgYAML := `version: "2"
+plugins:
+  upstream:
+    - old@mkt
+  excluded:
+    - new@mkt
+`
+	dir := initTestGitRepo(t, cfgYAML)
+
+	cmd := applyPluginSelections(dir, []string{"new@mkt"}, []string{"old@mkt"})
+	result := cmd()
+	msg, ok := result.(pluginBrowserResultMsg)
+	require.True(t, ok)
+	assert.True(t, msg.success, "expected success but got: %v", msg.err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	require.NoError(t, err)
+	cfg, err := config.Parse(data)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Upstream, "new@mkt", "new should be added to upstream")
+	assert.NotContains(t, cfg.Excluded, "new@mkt", "new should be removed from excluded")
+	assert.Contains(t, cfg.Excluded, "old@mkt", "old should be in excluded")
+	assert.NotContains(t, cfg.Upstream, "old@mkt", "old should be removed from upstream")
+
+	// Verify commit message includes both operations
+	logCmd := exec.Command("git", "log", "--oneline", "-1")
+	logCmd.Dir = dir
+	logOut, err := logCmd.Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(logOut), "added 1, excluded 1")
+}
+
+func TestApplyPluginSelections_InvalidConfig(t *testing.T) {
+	dir := t.TempDir()
+	// No config.yaml at all
+	cmd := applyPluginSelections(dir, []string{"foo@bar"}, nil)
+	result := cmd()
+	msg, ok := result.(pluginBrowserResultMsg)
+	require.True(t, ok)
+	assert.False(t, msg.success)
+	assert.NotNil(t, msg.err)
+	assert.Equal(t, "Could not read config.yaml", msg.message)
+}
+
+func TestApplyPluginSelections_EmptySyncDir(t *testing.T) {
+	cmd := applyPluginSelections("", []string{"foo@bar"}, nil)
+	result := cmd()
+	msg, ok := result.(pluginBrowserResultMsg)
+	require.True(t, ok)
+	assert.False(t, msg.success)
+	assert.Equal(t, "Sync directory is not configured", msg.message)
 }
 
 // --- AppModel integration test ---
@@ -277,6 +599,7 @@ func TestAppModel_BrowsePluginsIntent_OpensPluginBrowser(t *testing.T) {
 	m := NewAppModel(state)
 	m.width = 80
 	m.height = 40
+	m.syncDir = "/test/sync/dir"
 	m.activeView = viewMain
 	m.recommendations = buildRecommendations(m.state)
 	m.intents = buildIntents(m.state)
@@ -296,10 +619,14 @@ func TestAppModel_BrowsePluginsIntent_OpensPluginBrowser(t *testing.T) {
 	app := updated.(AppModel)
 
 	assert.Equal(t, viewSubView, app.activeView)
-	assert.NotNil(t, app.subView)
+	require.NotNil(t, app.subView)
 
 	// The sub-view should render plugin browser content
 	view := app.subView.View()
 	assert.Contains(t, view, "Add or discover new plugins")
 	assert.Contains(t, view, "beads")
+
+	// Verify syncDir was propagated through the constructor
+	pb := app.subView.(PluginBrowser)
+	assert.Equal(t, "/test/sync/dir", pb.syncDir)
 }

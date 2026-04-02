@@ -2,12 +2,17 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ruminaider/claude-sync/internal/commands"
+	"github.com/ruminaider/claude-sync/internal/config"
+	"github.com/ruminaider/claude-sync/internal/git"
+	"github.com/ruminaider/claude-sync/internal/sliceutil"
 )
 
 // pluginBrowserItem represents a single row in the plugin browser (either a header or a plugin).
@@ -23,6 +28,13 @@ type pluginBrowserItem struct {
 	isHeader    bool   // marketplace section header (not selectable)
 }
 
+// pluginBrowserResultMsg carries the outcome of applying plugin selections.
+type pluginBrowserResultMsg struct {
+	success bool
+	message string
+	err     error
+}
+
 // PluginBrowser is a sub-view for browsing and selecting plugins.
 type PluginBrowser struct {
 	items      []pluginBrowserItem
@@ -33,19 +45,30 @@ type PluginBrowser struct {
 	filterText string
 	filterMode bool
 	// After confirmation
-	confirmed     bool
-	newSelections []string // keys of newly selected plugins
+	confirmed         bool
+	newSelections     []string // keys of newly selected plugins
+	removedSelections []string // keys of deselected installed plugins
+
+	// Paths for execution
+	syncDir string
+
+	// Execution state
+	executing  bool
+	resultDone bool
+	resultOk   bool
+	resultMsg  string
 }
 
 // NewPluginBrowser creates a PluginBrowser from the current menu state.
 // Items are organized by marketplace section, with installed plugins pre-checked.
-func NewPluginBrowser(state commands.MenuState, width, height int) PluginBrowser {
+func NewPluginBrowser(state commands.MenuState, syncDir string, width, height int) PluginBrowser {
 	items := buildPluginBrowserItems(state.Plugins)
 
 	m := PluginBrowser{
-		items:  items,
-		width:  width,
-		height: height,
+		items:   items,
+		syncDir: syncDir,
+		width:   width,
+		height:  height,
 	}
 
 	// Position cursor on the first non-header item
@@ -131,7 +154,23 @@ func (m PluginBrowser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case pluginBrowserResultMsg:
+		m.executing = false
+		m.resultDone = true
+		m.resultOk = msg.success
+		m.resultMsg = resolveResultMsg(msg.success, msg.message, msg.err)
+		return m, nil
 	case tea.KeyMsg:
+		// After result is shown, any key dismisses
+		if m.resultDone {
+			return m, func() tea.Msg {
+				return subViewCloseMsg{refreshState: m.resultOk}
+			}
+		}
+		// While executing, ignore input
+		if m.executing {
+			return m, nil
+		}
 		if m.filterMode {
 			return m.updateFilterMode(msg)
 		}
@@ -160,22 +199,29 @@ func (m PluginBrowser) updateNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		m.confirmed = true
 		// Check if selections changed from initial installed state
-		hasChanges := false
 		var newSelections []string
+		var removedSelections []string
 		for _, item := range m.items {
 			if item.isHeader {
 				continue
 			}
-			if item.selected != item.installed {
-				hasChanges = true
-			}
 			if item.selected && !item.installed {
 				newSelections = append(newSelections, item.key)
 			}
+			if !item.selected && item.installed {
+				removedSelections = append(removedSelections, item.key)
+			}
 		}
 		m.newSelections = newSelections
+		m.removedSelections = removedSelections
+
+		if len(newSelections) > 0 || len(removedSelections) > 0 {
+			m.executing = true
+			return m, applyPluginSelections(m.syncDir, newSelections, removedSelections)
+		}
+		// No changes, close immediately
 		return m, func() tea.Msg {
-			return subViewCloseMsg{refreshState: hasChanges}
+			return subViewCloseMsg{refreshState: false}
 		}
 	}
 	return m, nil
@@ -306,6 +352,22 @@ func (m PluginBrowser) View() string {
 	lines = append(lines, headerStyle.Render("Add or discover new plugins"))
 	lines = append(lines, "")
 
+	// Result state
+	if m.resultDone {
+		lines = renderResultLines(lines, m.resultOk, m.resultMsg)
+		content := strings.Join(lines, "\n")
+		boxStyle := contentBox(maxWidth, colorSurface1)
+		return boxStyle.Render(content)
+	}
+
+	// Executing state
+	if m.executing {
+		lines = append(lines, stYellow.Render("\u27f3 Applying plugin changes..."))
+		content := strings.Join(lines, "\n")
+		boxStyle := contentBox(maxWidth, colorSurface1)
+		return boxStyle.Render(content)
+	}
+
 	// Filter line
 	if m.filterMode {
 		lines = append(lines, stBlue.Render("/ "+m.filterText+"\u2588"))
@@ -384,16 +446,34 @@ func (m PluginBrowser) View() string {
 
 		lines = append(lines, "")
 
-		// Footer info
-		allInstalled := true
+		// Footer info: dynamic selection counts
+		var installed, toAdd, toRemove int
 		for _, item := range m.items {
-			if !item.isHeader && !item.installed {
-				allInstalled = false
-				break
+			if item.isHeader {
+				continue
+			}
+			if item.installed && item.selected {
+				installed++
+			} else if !item.installed && item.selected {
+				toAdd++
+			} else if item.installed && !item.selected {
+				toRemove++
 			}
 		}
-		if allInstalled && len(m.items) > 0 {
-			lines = append(lines, stDim.Render("All plugins are currently installed."))
+		var counts []string
+		if installed > 0 {
+			counts = append(counts, fmt.Sprintf("%d installed", installed))
+		}
+		if toAdd > 0 {
+			counts = append(counts, fmt.Sprintf("%d to add", toAdd))
+		}
+		if toRemove > 0 {
+			counts = append(counts, fmt.Sprintf("%d to remove", toRemove))
+		}
+		if len(counts) > 0 {
+			lines = append(lines, stDim.Render(strings.Join(counts, ", ")))
+		} else {
+			lines = append(lines, stDim.Render("No plugins selected."))
 		}
 		lines = append(lines, stDim.Render("Subscribe to more via 'Join a shared config'."))
 
@@ -406,4 +486,107 @@ func (m PluginBrowser) View() string {
 	boxStyle := contentBox(maxWidth, colorSurface1)
 
 	return boxStyle.Render(content)
+}
+
+// applyPluginSelections modifies config.yaml to add or exclude plugins, then commits.
+func applyPluginSelections(syncDir string, toAdd, toRemove []string) tea.Cmd {
+	if syncDir == "" {
+		return func() tea.Msg {
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Sync directory is not configured",
+				err:     fmt.Errorf("syncDir is empty"),
+			}
+		}
+	}
+
+	return func() (result tea.Msg) {
+		defer func() {
+			if r := recover(); r != nil {
+				result = pluginBrowserResultMsg{
+					success: false,
+					message: fmt.Sprintf("Internal error: %v", r),
+					err:     fmt.Errorf("panic: %v", r),
+				}
+			}
+		}()
+
+		cfgPath := filepath.Join(syncDir, "config.yaml")
+		cfgData, err := os.ReadFile(cfgPath)
+		if err != nil {
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not read config.yaml",
+				err:     err,
+			}
+		}
+
+		cfg, err := config.Parse(cfgData)
+		if err != nil {
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not parse config.yaml",
+				err:     err,
+			}
+		}
+
+		// Add newly selected plugins to Upstream, remove them from Excluded
+		if len(toAdd) > 0 {
+			cfg.Upstream = sliceutil.AppendUnique(cfg.Upstream, toAdd)
+			cfg.Excluded = sliceutil.RemoveAll(cfg.Excluded, toAdd)
+		}
+
+		// Add deselected plugins to Excluded, remove them from Upstream
+		if len(toRemove) > 0 {
+			cfg.Excluded = sliceutil.AppendUnique(cfg.Excluded, toRemove)
+			cfg.Upstream = sliceutil.RemoveAll(cfg.Upstream, toRemove)
+		}
+
+		newData, err := config.Marshal(cfg)
+		if err != nil {
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not serialize config",
+				err:     err,
+			}
+		}
+
+		if err := os.WriteFile(cfgPath, newData, 0644); err != nil {
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not write config.yaml",
+				err:     err,
+			}
+		}
+
+		// From here, the file is modified on disk. Rollback on failure.
+		if err := git.Add(syncDir, "config.yaml"); err != nil {
+			os.WriteFile(cfgPath, cfgData, 0644) // restore original
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not stage config.yaml",
+				err:     err,
+			}
+		}
+
+		var parts []string
+		if len(toAdd) > 0 {
+			parts = append(parts, fmt.Sprintf("added %d", len(toAdd)))
+		}
+		if len(toRemove) > 0 {
+			parts = append(parts, fmt.Sprintf("excluded %d", len(toRemove)))
+		}
+		summary := strings.Join(parts, ", ")
+
+		if err := git.Commit(syncDir, "Update plugins: "+summary); err != nil {
+			os.WriteFile(cfgPath, cfgData, 0644) // restore original
+			return pluginBrowserResultMsg{
+				success: false,
+				message: "Could not commit changes",
+				err:     err,
+			}
+		}
+
+		return pluginBrowserResultMsg{success: true, message: "Updated plugins: " + summary}
+	}
 }

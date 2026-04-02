@@ -154,6 +154,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+	case pluginBrowserResultMsg:
+		// Route to sub-view
+		if m.subView != nil {
+			var cmd tea.Cmd
+			m.subView, cmd = m.subView.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	case subscribeResultMsg:
+		// Route to sub-view
+		if m.subView != nil {
+			var cmd tea.Cmd
+			m.subView, cmd = m.subView.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Global keys (work in any view unless filter/help is active)
 		if msg.String() == "ctrl+c" {
@@ -341,8 +357,7 @@ func (m AppModel) openSubView(actionID string) (tea.Model, tea.Cmd) {
 		m.subView = picker
 		m.activeView = viewSubView
 	case ActionBrowsePlugins:
-		browser := NewPluginBrowser(m.state, m.width, m.height)
-		m.subView = browser
+		m.subView = NewPluginBrowser(m.state, m.syncDir, m.width, m.height)
 		m.activeView = viewSubView
 	case "join-config":
 		jf := NewJoinFlow(m.width, m.height)
