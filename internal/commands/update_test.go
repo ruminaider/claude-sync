@@ -1,11 +1,10 @@
-package commands_test
+package commands
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/ruminaider/claude-sync/internal/commands"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,7 +51,7 @@ plugins:
 func TestUpdateCheck(t *testing.T) {
 	claudeDir, syncDir := setupUpdateTestEnv(t)
 
-	result, err := commands.UpdateCheck(claudeDir, syncDir)
+	result, err := updateCheck(claudeDir, syncDir)
 	require.NoError(t, err)
 
 	// Verify upstream plugins are categorized correctly
@@ -76,7 +75,7 @@ func TestUpdateCheck(t *testing.T) {
 }
 
 func TestUpdateCheck_NoSyncDir(t *testing.T) {
-	_, err := commands.UpdateCheck("/tmp/test-claude", "/nonexistent")
+	_, err := updateCheck("/tmp/test-claude", "/nonexistent")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not initialized")
 }
@@ -103,7 +102,7 @@ plugins:
 `
 	os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644)
 
-	result, err := commands.UpdateCheck(claudeDir, syncDir)
+	result, err := updateCheck(claudeDir, syncDir)
 	require.NoError(t, err)
 
 	assert.Len(t, result.UpstreamPlugins, 1)
@@ -131,7 +130,7 @@ plugins:
 `
 	os.WriteFile(filepath.Join(syncDir, "config.yaml"), []byte(configYAML), 0644)
 
-	result, err := commands.UpdateCheck(claudeDir, syncDir)
+	result, err := updateCheck(claudeDir, syncDir)
 	require.NoError(t, err)
 
 	assert.Len(t, result.UpstreamPlugins, 1)
@@ -140,38 +139,38 @@ plugins:
 
 func TestUpdateResultHasUpdates(t *testing.T) {
 	// Empty result has no updates
-	empty := &commands.UpdateResult{}
-	assert.False(t, empty.HasUpdates())
+	empty := &UpdateResult{}
+	assert.False(t, empty.hasUpdates())
 
 	// With upstream plugins
-	withUpstream := &commands.UpdateResult{
-		UpstreamPlugins: []commands.UpstreamStatus{
+	withUpstream := &UpdateResult{
+		UpstreamPlugins: []UpstreamStatus{
 			{Key: "test@marketplace", InstalledVersion: "1.0"},
 		},
 	}
-	assert.True(t, withUpstream.HasUpdates())
+	assert.True(t, withUpstream.hasUpdates())
 
 	// With pinned plugins only
-	withPinned := &commands.UpdateResult{
-		PinnedPlugins: []commands.PinnedStatus{
+	withPinned := &UpdateResult{
+		PinnedPlugins: []PinnedStatus{
 			{Key: "test@marketplace", PinnedVersion: "1.0", InstalledVersion: "1.0"},
 		},
 	}
-	assert.True(t, withPinned.HasUpdates())
+	assert.True(t, withPinned.hasUpdates())
 
 	// With forked plugins only
-	withForked := &commands.UpdateResult{
-		ForkedPlugins: []commands.ForkedStatus{
+	withForked := &UpdateResult{
+		ForkedPlugins: []ForkedStatus{
 			{Name: "my-fork"},
 		},
 	}
-	assert.True(t, withForked.HasUpdates())
+	assert.True(t, withForked.hasUpdates())
 
 	// With all categories empty explicitly
-	allEmpty := &commands.UpdateResult{
-		UpstreamPlugins: []commands.UpstreamStatus{},
-		PinnedPlugins:   []commands.PinnedStatus{},
-		ForkedPlugins:   []commands.ForkedStatus{},
+	allEmpty := &UpdateResult{
+		UpstreamPlugins: []UpstreamStatus{},
+		PinnedPlugins:   []PinnedStatus{},
+		ForkedPlugins:   []ForkedStatus{},
 	}
-	assert.False(t, allEmpty.HasUpdates())
+	assert.False(t, allEmpty.hasUpdates())
 }

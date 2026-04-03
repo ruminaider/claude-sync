@@ -3,7 +3,7 @@ name: sync
 description: Manage claude-sync configuration
 arguments:
   - name: action
-    description: "Action: status, pull, apply"
+    description: "Action: status, pull"
     required: false
     type: string
 ---
@@ -26,12 +26,8 @@ Parse the JSON output and present a human-readable summary showing:
 
 ### /sync pull
 Pull latest configuration from remote. Run: `claude-sync pull`
+This also refreshes plugins (upstream and forked) and checks for binary updates.
 Report what was installed, updated, or failed.
-
-### /sync apply
-Apply pending plugin updates. Run: `claude-sync update`
-This reinstalls upstream plugins to get latest versions and syncs forked plugins.
-Report results including any failures.
 
 ## Instructions
 

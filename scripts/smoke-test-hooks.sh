@@ -272,6 +272,37 @@ test_stop_change_check() {
     fi
 }
 
+test_update_available() {
+    # Swap in a fake claude-sync that outputs the update signal
+    local real_stub="$HOME/.local/bin/claude-sync"
+    cat > "$real_stub" <<'FAKECS'
+#!/bin/bash
+if [[ "$*" == *"pull --auto"* ]]; then
+    echo "UPDATE_AVAILABLE:0.11.0:0.12.0" >&2
+    exit 0
+fi
+echo "0.11.0"
+FAKECS
+    chmod +x "$real_stub"
+
+    local start end
+    start=$(time_ms)
+    local output
+    output=$(run_hook "$HOOKS_DIR/session-start.sh" 2>&1) || true
+    end=$(time_ms)
+    local ms=$((end - start))
+
+    # Restore normal stub
+    cp "$STUB_BIN" "$real_stub"
+    chmod +x "$real_stub"
+
+    if echo "$output" | grep -q "claude-sync update available: 0.11.0 -> 0.12.0"; then
+        report "update available notification" "pass" "$ms"
+    else
+        report "update available notification" "fail" "$ms" "expected update notification in output: $output"
+    fi
+}
+
 # --- Main ---
 
 echo "smoke-hooks: $MODE mode"
@@ -288,6 +319,7 @@ test_session_start_happy
 test_session_end_happy
 test_lock_contention
 test_dead_pid_lock
+test_update_available
 
 # Only run timeout test in sandbox (it takes 5+ seconds and needs stub control)
 if [ "$MODE" = "sandbox" ]; then

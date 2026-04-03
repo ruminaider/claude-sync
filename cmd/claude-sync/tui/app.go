@@ -54,6 +54,9 @@ type AppModel struct {
 
 	// Exit signals for the caller
 	LaunchConfigEditor bool // true = caller should run config editor, then re-launch AppModel
+
+	updateAvailable bool
+	latestVersion   string
 }
 
 // NewAppModel creates an AppModel from detected state, starting on the main screen.
@@ -84,6 +87,12 @@ func (m *AppModel) SetClaudeDir(dir string) {
 // SetSyncDir sets the sync repository directory path.
 func (m *AppModel) SetSyncDir(dir string) {
 	m.syncDir = dir
+}
+
+// SetUpdateInfo sets the update availability state for the banner.
+func (m *AppModel) SetUpdateInfo(available bool, latest string) {
+	m.updateAvailable = available
+	m.latestVersion = latest
 }
 
 // stateRefreshMsg carries a re-detected MenuState from an async refresh.
@@ -404,7 +413,8 @@ func (m AppModel) viewMain() string {
 	return renderMainScreen(m.state, recs, intents,
 		m.actionCursor, m.width, m.height, m.version,
 		m.executing, m.executingActionID, m.executionResults,
-		m.filterMode, m.filterText)
+		m.filterMode, m.filterText,
+		m.updateAvailable, m.latestVersion)
 }
 
 func (m AppModel) viewMainHelp() string {

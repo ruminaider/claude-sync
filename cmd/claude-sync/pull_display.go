@@ -119,4 +119,9 @@ func printPullResult(result *commands.PullResult) {
 		fmt.Println("\nThis project has settings.local.json but isn't managed by claude-sync.")
 		fmt.Println("Run 'claude-sync project init' to sync hooks and permissions.")
 	}
+
+	if result.UpdateAvailable {
+		fmt.Printf("\nA newer version of claude-sync is available: v%s -> v%s\n", result.CurrentVersion, result.LatestVersion)
+		fmt.Println("Run: claude-sync update")
+	}
 }

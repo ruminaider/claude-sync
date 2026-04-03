@@ -32,6 +32,9 @@ func runMainMenu(cmd *cobra.Command, args []string) error {
 		model.SetClaudeDir(paths.ClaudeDir())
 		model.SetSyncDir(paths.SyncDir())
 
+		vc := commands.CheckForUpdate(paths.SyncDir(), version)
+		model.SetUpdateInfo(vc.UpdateAvailable, vc.LatestVersion)
+
 		p := tea.NewProgram(model, tea.WithAltScreen())
 		finalModel, err := p.Run()
 		if err != nil {

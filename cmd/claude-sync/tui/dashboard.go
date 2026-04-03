@@ -76,12 +76,32 @@ func renderSummary(state commands.MenuState, version string) string {
 	return strings.Join(lines, "\n")
 }
 
+func renderUpdateBanner(currentVersion, latestVersion string, width int) string {
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorLatteMauve).
+		Padding(1, 2).
+		Width(width - 4)
+
+	labelStyle := lipgloss.NewStyle().Foreground(colorLatteMauve).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(colorLatteLavender)
+	cmdStyle := lipgloss.NewStyle().Foreground(colorLattePeach).Bold(true)
+
+	title := labelStyle.Render("UPDATE AVAILABLE")
+	line1 := textStyle.Render(fmt.Sprintf("Update available: %s → %s", currentVersion, latestVersion))
+	line2 := textStyle.Render("Run ") + cmdStyle.Render("claude-sync update") + textStyle.Render(" to update")
+
+	content := title + "\n\n" + line1 + "\n" + line2
+	return borderStyle.Render(content)
+}
+
 // renderMainScreen renders the unified main screen with summary at top,
 // recommendations, and intents — all in one view.
 func renderMainScreen(state commands.MenuState, recs []recommendation, intents []intent,
 	cursor int, width, height int, version string,
 	executing bool, executingActionID string, results map[string]actionResultMsg,
-	filterMode bool, filterText string) string {
+	filterMode bool, filterText string,
+	updateAvailable bool, latestVersion string) string {
 
 	maxWidth, innerWidth := clampWidth(width)
 
@@ -92,6 +112,10 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 
 	// --- Header ---
 	sections = append(sections, titleStyle.Render("claude-sync")+" "+dimStyle.Render("v"+version))
+
+	if updateAvailable {
+		sections = append(sections, renderUpdateBanner(version, latestVersion, maxWidth))
+	}
 
 	// --- Summary ---
 	sections = append(sections, renderSummary(state, version))
