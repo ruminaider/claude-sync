@@ -18,6 +18,9 @@ func TestIsNewer(t *testing.T) {
 		{"0.11.0", "0.11.0", false},
 		{"0.10.0", "0.11.0", false},
 		{"0.11.0", "0.12.0", false},
+		{"garbage", "0.11.0", false},
+		{"0.11.0", "garbage", false},
+		{"abc.def.ghi", "0.11.0", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.latest+"_vs_"+tt.current, func(t *testing.T) {

@@ -410,11 +410,22 @@ func (m AppModel) viewMain() string {
 	recs := filterRecommendations(m.recommendations, m.filterText)
 	intents := filterIntents(m.intents, m.filterText)
 
-	return renderMainScreen(m.state, recs, intents,
-		m.actionCursor, m.width, m.height, m.version,
-		m.executing, m.executingActionID, m.executionResults,
-		m.filterMode, m.filterText,
-		m.updateAvailable, m.latestVersion)
+	return renderMainScreen(MainScreenParams{
+		State:             m.state,
+		Recs:              recs,
+		Intents:           intents,
+		Cursor:            m.actionCursor,
+		Width:             m.width,
+		Height:            m.height,
+		Version:           m.version,
+		Executing:         m.executing,
+		ExecutingActionID: m.executingActionID,
+		Results:           m.executionResults,
+		FilterMode:        m.filterMode,
+		FilterText:        m.filterText,
+		UpdateAvailable:   m.updateAvailable,
+		LatestVersion:     m.latestVersion,
+	})
 }
 
 func (m AppModel) viewMainHelp() string {
