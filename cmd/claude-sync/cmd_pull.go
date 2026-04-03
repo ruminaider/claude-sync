@@ -175,7 +175,8 @@ var pullCmd = &cobra.Command{
 					fmt.Fprintf(os.Stderr, "  - %s\n", c.Description)
 				}
 			}
-			// Output version check for session-start hook to parse.
+			// Protocol: "UPDATE_AVAILABLE:current:latest" on stderr.
+			// Parsed by plugin/hooks/session-start.sh; keep in sync.
 			if result.UpdateAvailable {
 				fmt.Fprintf(os.Stderr, "UPDATE_AVAILABLE:%s:%s\n", result.CurrentVersion, result.LatestVersion)
 			}

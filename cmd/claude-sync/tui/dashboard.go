@@ -95,15 +95,29 @@ func renderUpdateBanner(currentVersion, latestVersion string, width int) string 
 	return borderStyle.Render(content)
 }
 
-// renderMainScreen renders the unified main screen with summary at top,
-// recommendations, and intents — all in one view.
-func renderMainScreen(state commands.MenuState, recs []recommendation, intents []intent,
-	cursor int, width, height int, version string,
-	executing bool, executingActionID string, results map[string]actionResultMsg,
-	filterMode bool, filterText string,
-	updateAvailable bool, latestVersion string) string {
+// MainScreenParams groups the arguments for renderMainScreen to avoid
+// positional-parameter sprawl (previously 14 args with 4 bare bools).
+type MainScreenParams struct {
+	State             commands.MenuState
+	Recs              []recommendation
+	Intents           []intent
+	Cursor            int
+	Width, Height     int
+	Version           string
+	Executing         bool
+	ExecutingActionID string
+	Results           map[string]actionResultMsg
+	FilterMode        bool
+	FilterText        string
+	UpdateAvailable   bool
+	LatestVersion     string
+}
 
-	maxWidth, innerWidth := clampWidth(width)
+// renderMainScreen renders the unified main screen with summary at top,
+// recommendations, and intents in one view.
+func renderMainScreen(p MainScreenParams) string {
+
+	maxWidth, innerWidth := clampWidth(p.Width)
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
 	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay0)
@@ -111,35 +125,35 @@ func renderMainScreen(state commands.MenuState, recs []recommendation, intents [
 	var sections []string
 
 	// --- Header ---
-	sections = append(sections, titleStyle.Render("claude-sync")+" "+dimStyle.Render("v"+version))
+	sections = append(sections, titleStyle.Render("claude-sync")+" "+dimStyle.Render("v"+p.Version))
 
-	if updateAvailable {
-		sections = append(sections, renderUpdateBanner(version, latestVersion, maxWidth))
+	if p.UpdateAvailable {
+		sections = append(sections, renderUpdateBanner(p.Version, p.LatestVersion, maxWidth))
 	}
 
 	// --- Summary ---
-	sections = append(sections, renderSummary(state, version))
+	sections = append(sections, renderSummary(p.State, p.Version))
 
 	// --- Filter bar (when active) ---
-	if filterMode || filterText != "" {
+	if p.FilterMode || p.FilterText != "" {
 		filterStyle := lipgloss.NewStyle().Foreground(colorBlue)
 		cursorChar := ""
-		if filterMode {
+		if p.FilterMode {
 			cursorChar = "\u2588" // block cursor
 		}
-		sections = append(sections, filterStyle.Render("/ "+filterText+cursorChar))
+		sections = append(sections, filterStyle.Render("/ "+p.FilterText+cursorChar))
 	}
 
 	// --- No results message ---
-	if len(recs) == 0 && len(intents) == 0 && filterText != "" {
+	if len(p.Recs) == 0 && len(p.Intents) == 0 && p.FilterText != "" {
 		noMatchStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
 		sections = append(sections, noMatchStyle.Render("No matching actions"))
 	} else {
 		// --- Needs attention / Status section ---
-		sections = append(sections, renderRecsSectionWithState(recs, cursor, innerWidth, executing, executingActionID, results))
+		sections = append(sections, renderRecsSectionWithState(p.Recs, p.Cursor, innerWidth, p.Executing, p.ExecutingActionID, p.Results))
 
 		// --- Grouped intent sections (Sync, Plugins, Config) ---
-		sections = append(sections, renderIntentsSectionWithState(intents, len(recs), cursor, innerWidth, executing, executingActionID, results))
+		sections = append(sections, renderIntentsSectionWithState(p.Intents, len(p.Recs), p.Cursor, innerWidth, p.Executing, p.ExecutingActionID, p.Results))
 	}
 
 	// --- Footer ---

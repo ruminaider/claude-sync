@@ -46,7 +46,7 @@ if acquire_lock; then
     pull_ok=false
   fi
 
-  # Check for update notification in pull stderr.
+  # Protocol emitted by cmd/claude-sync/cmd_pull.go; keep in sync.
   UPDATE_LINE=$(echo "$PULL_ERR" | grep "^UPDATE_AVAILABLE:" || true)
   if [ -n "$UPDATE_LINE" ]; then
     CURRENT_VER=$(echo "$UPDATE_LINE" | cut -d: -f2)

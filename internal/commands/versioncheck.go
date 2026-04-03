@@ -17,20 +17,27 @@ const githubReleasesURL = "https://api.github.com/repos/ruminaider/claude-sync/r
 
 // isNewer returns true if latest is a newer semver than current.
 // Both must be in "major.minor.patch" format (no "v" prefix).
+// Returns false if either version string is malformed.
 func isNewer(latest, current string) bool {
-	parse := func(v string) (int, int, int) {
+	parse := func(v string) (int, int, int, bool) {
 		v = strings.TrimPrefix(v, "v")
 		parts := strings.SplitN(v, ".", 3)
 		if len(parts) != 3 {
-			return 0, 0, 0
+			return 0, 0, 0, false
 		}
-		major, _ := strconv.Atoi(parts[0])
-		minor, _ := strconv.Atoi(parts[1])
-		patch, _ := strconv.Atoi(parts[2])
-		return major, minor, patch
+		major, err1 := strconv.Atoi(parts[0])
+		minor, err2 := strconv.Atoi(parts[1])
+		patch, err3 := strconv.Atoi(parts[2])
+		if err1 != nil || err2 != nil || err3 != nil {
+			return 0, 0, 0, false
+		}
+		return major, minor, patch, true
 	}
-	lMaj, lMin, lPat := parse(latest)
-	cMaj, cMin, cPat := parse(current)
+	lMaj, lMin, lPat, lok := parse(latest)
+	cMaj, cMin, cPat, cok := parse(current)
+	if !lok || !cok {
+		return false
+	}
 	if lMaj != cMaj {
 		return lMaj > cMaj
 	}

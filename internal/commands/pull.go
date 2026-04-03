@@ -54,10 +54,7 @@ type PullResult struct {
 	PendingHighRisk            []approval.Change
 	Updated                    []string // plugins refreshed due to version mismatch
 	UpdateFailed               []string // plugins that failed to refresh
-	// Version check results
-	UpdateAvailable            bool     // true if a newer claude-sync binary exists
-	LatestVersion              string   // latest available version (empty if check failed)
-	CurrentVersion             string   // currently installed version
+	VersionCheckResult                  // embedded: UpdateAvailable, LatestVersion, CurrentVersion
 	UndefinedMarketplaces      map[string][]string // marketplace name -> plugin names referencing it
 	ProjectSettingsApplied     bool
 	ProjectUnmanagedDetected   bool     // CWD has settings.local.json but no .claude-sync.yaml
@@ -328,38 +325,19 @@ func PullWithOptions(opts PullOptions) (*PullResult, error) {
 		result.Updated, result.UpdateFailed = refreshStalePlugins(claudeDir, stale, installed, quiet)
 	}
 
-	// Check for claude-sync binary updates.
 	if opts.Version != "" && opts.SyncDir != "" {
-		vc := CheckForUpdate(opts.SyncDir, opts.Version)
-		result.UpdateAvailable = vc.UpdateAvailable
-		result.LatestVersion = vc.LatestVersion
-		result.CurrentVersion = vc.CurrentVersion
+		result.VersionCheckResult = CheckForUpdate(opts.SyncDir, opts.Version)
 	}
 
-	// Full plugin refresh (absorbed from update command).
-	// This covers upstream and forked plugins that stale detection may miss.
+	// Full plugin refresh, skipping plugins already refreshed by stale detection.
 	if opts.SyncDir != "" {
-		updateResult, updateErr := updateCheck(claudeDir, opts.SyncDir)
-		if updateErr == nil && updateResult.hasUpdates() {
-			upstreamKeys := make([]string, 0, len(updateResult.UpstreamPlugins))
-			for _, p := range updateResult.UpstreamPlugins {
-				upstreamKeys = append(upstreamKeys, p.Key)
-			}
-			if len(upstreamKeys) > 0 {
-				installed, failed := updateApply(claudeDir, opts.SyncDir, upstreamKeys, quiet)
-				result.Updated = append(result.Updated, installed...)
-				result.UpdateFailed = append(result.UpdateFailed, failed...)
-			}
-			if len(updateResult.ForkedPlugins) > 0 {
-				forkNames := make([]string, 0, len(updateResult.ForkedPlugins))
-				for _, f := range updateResult.ForkedPlugins {
-					forkNames = append(forkNames, f.Name)
-				}
-				installed, failed := updateForkedPlugins(claudeDir, opts.SyncDir, forkNames, quiet)
-				result.Updated = append(result.Updated, installed...)
-				result.UpdateFailed = append(result.UpdateFailed, failed...)
-			}
+		skipKeys := make(map[string]bool, len(result.Updated))
+		for _, key := range result.Updated {
+			skipKeys[key] = true
 		}
+		refreshed, refreshFailed := runFullPluginRefresh(claudeDir, opts.SyncDir, quiet, skipKeys)
+		result.Updated = append(result.Updated, refreshed...)
+		result.UpdateFailed = append(result.UpdateFailed, refreshFailed...)
 	}
 
 	// Self-heal enabledPlugins lost during failed install cycles.

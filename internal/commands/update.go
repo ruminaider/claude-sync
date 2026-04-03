@@ -98,6 +98,40 @@ func updateCheck(claudeDir, syncDir string) (*UpdateResult, error) {
 	return result, nil
 }
 
+// runFullPluginRefresh performs a full plugin refresh for all upstream and forked
+// plugins. skipKeys contains plugin keys already refreshed (e.g., by stale detection)
+// to avoid double-reinstalling.
+func runFullPluginRefresh(claudeDir, syncDir string, quiet bool, skipKeys map[string]bool) (updated, failed []string) {
+	result, err := updateCheck(claudeDir, syncDir)
+	if err != nil || !result.hasUpdates() {
+		return nil, nil
+	}
+
+	var upstreamKeys []string
+	for _, p := range result.UpstreamPlugins {
+		if !skipKeys[p.Key] {
+			upstreamKeys = append(upstreamKeys, p.Key)
+		}
+	}
+	if len(upstreamKeys) > 0 {
+		installed, fail := updateApply(claudeDir, syncDir, upstreamKeys, quiet)
+		updated = append(updated, installed...)
+		failed = append(failed, fail...)
+	}
+
+	if len(result.ForkedPlugins) > 0 {
+		var forkNames []string
+		for _, f := range result.ForkedPlugins {
+			forkNames = append(forkNames, f.Name)
+		}
+		installed, fail := updateForkedPlugins(claudeDir, syncDir, forkNames, quiet)
+		updated = append(updated, installed...)
+		failed = append(failed, fail...)
+	}
+
+	return updated, failed
+}
+
 // updateApply reinstalls the given upstream/pinned plugin keys.
 // It registers the local marketplace if forked plugins exist in the config.
 // Returns slices of successfully installed and failed plugin keys.
